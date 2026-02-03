@@ -1,14 +1,55 @@
 import requests
 import json
+import os
+from datetime import datetime
 
 BASE_URL = "http://yukon.acm.unc.edu:8010"
+# Get API key from environment variable or use default for testing
+API_KEY = os.getenv('MCP_API_KEY', 'default-key-change-in-production')
 
-def call_tool(tool_name: str, params: dict, verbose: bool = True) -> dict:
-    """Call an MCP tool via HTTP."""
+def call_tool(tool_name: str, params: dict, verbose: bool = True, api_key: str = None) -> dict:
+    """Call an MCP tool via HTTP with authentication."""
     url = f"{BASE_URL}/{tool_name}"
-    response = requests.post(url, json=params)
-    response.raise_for_status()
-    return response.json()
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key or API_KEY}"
+    }
+    
+    try:
+        response = requests.post(url, json=params, headers=headers, timeout=300)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 401:
+            return {
+                "status": "error",
+                "error_type": "AuthenticationError",
+                "error": "Unauthorized: Invalid API key. Set MCP_API_KEY environment variable."
+            }
+        elif e.response.status_code == 429:
+            return {
+                "status": "error",
+                "error_type": "RateLimitError",
+                "error": "Rate limit exceeded: too many requests. Please try again later."
+            }
+        else:
+            return {
+                "status": "error",
+                "error_type": "HTTPError",
+                "error": f"HTTP {e.response.status_code}: {e.response.text}"
+            }
+    except requests.exceptions.Timeout:
+        return {
+            "status": "error",
+            "error_type": "TimeoutError",
+            "error": "Request timed out. Analysis may have taken longer than 5 minutes."
+        }
+    except requests.exceptions.ConnectionError:
+        return {
+            "status": "error",
+            "error_type": "ConnectionError",
+            "error": f"Cannot connect to server at {BASE_URL}. Is the server running?"
+        }
 
 
 def print_console_output(result: dict, verbose: bool = True):
@@ -57,19 +98,22 @@ def run_cfc_wavelet_analysis(data_path: str = "data_example_BOLD.csv", window_si
         'gamma': 0.005,
         'max_iter': 100,
         'node_select': 10
-    })
+    }, verbose=verbose)
     
     print_console_output(result, verbose)
     print_progress(result, verbose)
     
     if result.get("status") == "success":
         if verbose:
-            print(f"[CFC] Analysis complete!")
+            elapsed = result.get('elapsed_seconds', 'unknown')
+            print(f"[CFC] ✓ Analysis complete in {elapsed}s")
             print(f"      Shape: {result.get('shape')}")
             print(f"      Windows processed: {result.get('num_windows')}")
             print(f"      CFC matrices: {result.get('cfcs_count')}")
     else:
-        print(f"[CFC] ERROR: {result.get('error')}")
+        error_type = result.get('error_type', 'Unknown')
+        error_msg = result.get('error', 'No error message')
+        print(f"[CFC] ✗ {error_type}: {error_msg}")
     
     return result
 
@@ -88,19 +132,22 @@ def run_hub_detection(data_path: str = "data_example_BOLD.csv", window_size: int
         'k': 2,
         'hub_num': 10,
         'use_group': False
-    })
+    }, verbose=verbose)
     
     print_console_output(result, verbose)
     print_progress(result, verbose)
     
     if result.get("status") == "success":
         if verbose:
-            print(f"[HUB] Hub detection complete!")
+            elapsed = result.get('elapsed_seconds', 'unknown')
+            print(f"[HUB] ✓ Hub detection complete in {elapsed}s")
             print(f"      Shape: {result.get('shape')}")
             print(f"      Windows processed: {result.get('num_windows')}")
             print(f"      Configuration: k={result.get('k')}, hub_num={result.get('hub_num')}, use_group={result.get('use_group')}")
     else:
-        print(f"[HUB] ERROR: {result.get('error')}")
+        error_type = result.get('error_type', 'Unknown')
+        error_msg = result.get('error', 'No error message')
+        print(f"[HUB] ✗ {error_type}: {error_msg}")
     
     return result
 
@@ -112,13 +159,16 @@ def get_growth_curve(phenotype: str = "Global mean of FC", verbose: bool = True)
     
     result = call_tool("get_growth_curve", {
         'phenotype': phenotype
-    })
+    }, verbose=verbose)
     
     if result.get("status") == "success":
         if verbose:
-            print(f"[GROWTH] Growth curve loaded successfully!")
+            elapsed = result.get('elapsed_seconds', 'unknown')
+            print(f"[GROWTH] ✓ Growth curve loaded in {elapsed}s")
     else:
-        print(f"[GROWTH] ERROR: {result.get('error')}")
+        error_type = result.get('error_type', 'Unknown')
+        error_msg = result.get('error', 'No error message')
+        print(f"[GROWTH] ✗ {error_type}: {error_msg}")
     
     return result
 
@@ -135,13 +185,16 @@ def run_normative_analysis(y_path: str, age_col: str, val_col: str, verbose: boo
         'y_path': y_path,
         'age_col': age_col,
         'val_col': val_col
-    })
+    }, verbose=verbose)
     
     if result.get("status") == "success":
         if verbose:
-            print(f"[NORMATIVE] Analysis complete!")
+            elapsed = result.get('elapsed_seconds', 'unknown')
+            print(f"[NORMATIVE] ✓ Analysis complete in {elapsed}s")
     else:
-        print(f"[NORMATIVE] ERROR: {result.get('error')}")
+        error_type = result.get('error_type', 'Unknown')
+        error_msg = result.get('error', 'No error message')
+        print(f"[NORMATIVE] ✗ {error_type}: {error_msg}")
     
     return result
 
@@ -150,13 +203,32 @@ def health_check(verbose: bool = True):
     """Check server health."""
     if verbose:
         print("[HEALTH] Checking server status...")
-    response = requests.get(f"{BASE_URL}/health")
-    if verbose:
-        print(f"[HEALTH] Server status: {response.text}")
-    return response.text
+    
+    try:
+        response = requests.get(f"{BASE_URL}/health", timeout=10)
+        response.raise_for_status()
+        status = response.json()
+        if verbose:
+            print(f"[HEALTH] ✓ Server is healthy")
+            print(f"[HEALTH]   Version: {status.get('version')}")
+            print(f"[HEALTH]   Timestamp: {status.get('timestamp')}")
+        return status
+    except requests.exceptions.ConnectionError:
+        error_msg = f"Cannot connect to server at {BASE_URL}"
+        print(f"[HEALTH] ✗ {error_msg}")
+        return {"status": "error", "error": error_msg}
+    except Exception as e:
+        print(f"[HEALTH] ✗ Error: {str(e)}")
+        return {"status": "error", "error": str(e)}
 
 
 if __name__ == '__main__':
+    # Check if using default API key
+    if API_KEY == 'default-key-change-in-production':
+        print("⚠️  WARNING: Using default API key. Set MCP_API_KEY environment variable for production.")
+        print("   export MCP_API_KEY='your-secure-key'")
+        print()
+    
     # Test health check
     health_check(verbose=True)
     
