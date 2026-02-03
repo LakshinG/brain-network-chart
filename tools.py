@@ -33,7 +33,7 @@ class AnalysisConfig():
     val_col: str = ''
     
 
-def process_cfc_wavelet( bolds,  config: AnalysisConfig,):
+def tool_cfc_wavelet( bolds: np.ndarray,  config: AnalysisConfig,):
 
         fcs = corrcoef(bolds)
         adjs = thresholding(fcs, ratio=config.ratio)
@@ -75,7 +75,7 @@ def process_cfc_wavelet( bolds,  config: AnalysisConfig,):
 
         return cfcs
 
-def process_hub_detection( bolds, config: AnalysisConfig):
+def tool_hub_detection( bolds: np.ndarray, config: AnalysisConfig):
     
         fcs = corrcoef(bolds)
         adjs = thresholding(fcs, ratio=config.ratio)
@@ -192,7 +192,7 @@ def overlay_data_from_file(path: str, age_col: str, val_col: str) -> dict:
     return overlay_data_from_bytes(contents, age_col=age_col, val_col=val_col)
 
 
-def process_normative_analysis(config: AnalysisConfig) -> dict:
+def tool_normative_analysis(config: AnalysisConfig) -> dict:
     x_phenotype = config.x_phenotype
     y_path = config.y_path
     age_col = config.age_col
@@ -214,7 +214,7 @@ def main():
     bolds = _build_dummy_bolds(args.windows, args.nodes, args.timepoints)
 
     if args.mode == "hub":
-        result = process_hub_detection(bolds, config)
+        result = tool_hub_detection(bolds, config)
         if isinstance(result, dict) and result.get("method") == "group":
             hub_nodes = result.get("hub_nodes", [])
             print(f"Hub detection (group): hubs={len(hub_nodes)}")
@@ -222,12 +222,12 @@ def main():
             count = len(result.get("results", [])) if isinstance(result, dict) else 0
             print(f"Hub detection (individual): results={count}")
     elif args.mode == "cfc":
-        cfcs = process_cfc_wavelet(bolds, config)
+        cfcs = tool_cfc_wavelet(bolds, config)
         count = len(cfcs) if isinstance(cfcs, list) else 0
         shape = (len(cfcs[0]), len(cfcs[0][0])) if count and cfcs[0] else None
         print(f"CFC wavelet: windows={count}, first_matrix_shape={shape}")
     else:
-        process_normative_analysis(config)
+        tool_normative_analysis(config)
 
 
 if __name__ == "__main__":
