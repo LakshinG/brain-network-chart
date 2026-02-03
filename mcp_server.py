@@ -1,16 +1,29 @@
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse
+from starlette.responses import JSONResponse, PlainTextResponse
 import numpy as np
 import json
+import sys
+import io
+from contextlib import contextmanager
 from tools import (
     tool_cfc_wavelet,
     tool_hub_detection,
     tool_normative_analysis,
     AnalysisConfig,
-    _build_dummy_bolds,
+    load_bolds_from_csv,
     load_curve_data,
 )
+
+@contextmanager
+def capture_output():
+    """Context manager to capture stdout."""
+    old_stdout = sys.stdout
+    sys.stdout = io.StringIO()
+    try:
+        yield sys.stdout
+    finally:
+        sys.stdout = old_stdout
 
 server = FastMCP('Brain Network Analysis Server',
                  host='yukon.acm.unc.edu', port=8010)
@@ -18,9 +31,10 @@ server = FastMCP('Brain Network Analysis Server',
 
 @server.tool(name="run_cfc_wavelet_analysis")
 def run_cfc_wavelet_analysis(
-    num_windows: int = 5,
-    num_nodes: int = 20,
-    num_timepoints: int = 60,
+    data_path: str = "data_example_BOLD.csv",
+    window_size: int = 50,
+    step_size: int = 3,
+    padding: bool = True,
     ratio: float = 0.8,
     wavelets_num: int = 10,
     beta: float = 1.0,
@@ -30,7 +44,7 @@ def run_cfc_wavelet_analysis(
 ) -> dict:
     """
     Run cross-frequency coupling (CFC) analysis using harmonic wavelets.
-    Returns CFC matrices for each window.
+    Returns CFC matrices for each window with progress tracking.
     """
     config = AnalysisConfig()
     config.ratio = ratio
@@ -40,23 +54,51 @@ def run_cfc_wavelet_analysis(
     config.max_iter = max_iter
     config.node_select = node_select
     
-    bolds = _build_dummy_bolds(num_windows, num_nodes, num_timepoints)
-    cfcs = tool_cfc_wavelet(bolds, config)
+    progress_log = []
+    captured_output = []
     
-    return {
-        "status": "success",
-        "num_windows": num_windows,
-        "num_nodes": num_nodes,
-        "num_timepoints": num_timepoints,
-        "cfcs": cfcs,
-    }
+    try:
+        progress_log.append({"step": "loading", "message": f"Loading BOLD data from {data_path}"})
+        with capture_output() as output:
+            bolds = load_bolds_from_csv(data_path, window_size=window_size, step_size=step_size, padding=padding)
+        captured_output.append(output.getvalue())
+        num_windows = bolds.shape[0]
+        progress_log.append({"step": "loaded", "message": f"Data loaded successfully: shape {list(bolds.shape)}"})
+        
+        progress_log.append({"step": "analyzing", "message": f"Starting CFC analysis on {num_windows} windows"})
+        with capture_output() as output:
+            cfcs = tool_cfc_wavelet(bolds, config)
+        captured_output.append(output.getvalue())
+        progress_log.append({"step": "analyzed", "message": f"CFC analysis complete: {len(cfcs)} windows processed"})
+        
+        return {
+            "status": "success",
+            "data_path": data_path,
+            "window_size": window_size,
+            "step_size": step_size,
+            "num_windows": num_windows,
+            "shape": list(bolds.shape),
+            "cfcs_count": len(cfcs),
+            "console_output": "\n".join(captured_output),
+            "progress": progress_log,
+        }
+    except Exception as e:
+        progress_log.append({"step": "error", "message": str(e)})
+        return {
+            "status": "error",
+            "data_path": data_path,
+            "error": str(e),
+            "console_output": "\n".join(captured_output),
+            "progress": progress_log,
+        }
 
 
 @server.tool(name="run_hub_detection")
 def run_hub_detection(
-    num_windows: int = 5,
-    num_nodes: int = 20,
-    num_timepoints: int = 60,
+    data_path: str = "data_example_BOLD.csv",
+    window_size: int = 50,
+    step_size: int = 3,
+    padding: bool = True,
     ratio: float = 0.8,
     k: int = 2,
     hub_num: int = 10,
@@ -64,7 +106,7 @@ def run_hub_detection(
 ) -> dict:
     """
     Detect hub nodes in brain networks using graph analysis.
-    Returns hub detection results for each window or grouped analysis.
+    Returns hub detection results for each window or grouped analysis with progress tracking.
     """
     config = AnalysisConfig()
     config.ratio = ratio
@@ -72,18 +114,46 @@ def run_hub_detection(
     config.hub_num = hub_num
     config.use_group = use_group
     
-    bolds = _build_dummy_bolds(num_windows, num_nodes, num_timepoints)
-    results = tool_hub_detection(bolds, config)
+    progress_log = []
+    captured_output = []
     
-    return {
-        "status": "success",
-        "num_windows": num_windows,
-        "num_nodes": num_nodes,
-        "k": k,
-        "hub_num": hub_num,
-        "use_group": use_group,
-        "results": results,
-    }
+    try:
+        progress_log.append({"step": "loading", "message": f"Loading BOLD data from {data_path}"})
+        with capture_output() as output:
+            bolds = load_bolds_from_csv(data_path, window_size=window_size, step_size=step_size, padding=padding)
+        captured_output.append(output.getvalue())
+        num_windows = bolds.shape[0]
+        progress_log.append({"step": "loaded", "message": f"Data loaded successfully: shape {list(bolds.shape)}"})
+        
+        progress_log.append({"step": "detecting", "message": f"Starting hub detection on {num_windows} windows (k={k}, hub_num={hub_num}, use_group={use_group})"})
+        with capture_output() as output:
+            results = tool_hub_detection(bolds, config)
+        captured_output.append(output.getvalue())
+        progress_log.append({"step": "detected", "message": f"Hub detection complete"})
+        
+        return {
+            "status": "success",
+            "data_path": data_path,
+            "window_size": window_size,
+            "step_size": step_size,
+            "num_windows": num_windows,
+            "shape": list(bolds.shape),
+            "k": k,
+            "hub_num": hub_num,
+            "use_group": use_group,
+            "results": results,
+            "console_output": "\n".join(captured_output),
+            "progress": progress_log,
+        }
+    except Exception as e:
+        progress_log.append({"step": "error", "message": str(e)})
+        return {
+            "status": "error",
+            "data_path": data_path,
+            "error": str(e),
+            "console_output": "\n".join(captured_output),
+            "progress": progress_log,
+        }
 
 
 @server.tool(name="get_growth_curve")
@@ -151,6 +221,59 @@ def run_normative_analysis(
 @server.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> PlainTextResponse:
     return PlainTextResponse("OK")
+
+
+@server.custom_route("/run_cfc_wavelet_analysis", methods=["POST"])
+async def http_run_cfc_wavelet_analysis(request: Request) -> JSONResponse:
+    data = await request.json()
+    result = run_cfc_wavelet_analysis(
+        data_path=data.get("data_path", "data_example_BOLD.csv"),
+        window_size=data.get("window_size", 50),
+        step_size=data.get("step_size", 3),
+        padding=data.get("padding", True),
+        ratio=data.get("ratio", 0.8),
+        wavelets_num=data.get("wavelets_num", 10),
+        beta=data.get("beta", 1.0),
+        gamma=data.get("gamma", 0.005),
+        max_iter=data.get("max_iter", 100),
+        node_select=data.get("node_select", 10),
+    )
+    return JSONResponse(result)
+
+
+@server.custom_route("/run_hub_detection", methods=["POST"])
+async def http_run_hub_detection(request: Request) -> JSONResponse:
+    data = await request.json()
+    result = run_hub_detection(
+        data_path=data.get("data_path", "data_example_BOLD.csv"),
+        window_size=data.get("window_size", 50),
+        step_size=data.get("step_size", 3),
+        padding=data.get("padding", True),
+        ratio=data.get("ratio", 0.8),
+        k=data.get("k", 2),
+        hub_num=data.get("hub_num", 10),
+        use_group=data.get("use_group", False),
+    )
+    return JSONResponse(result)
+
+
+@server.custom_route("/get_growth_curve", methods=["POST"])
+async def http_get_growth_curve(request: Request) -> JSONResponse:
+    data = await request.json()
+    result = get_growth_curve(phenotype=data.get("phenotype", "Global mean of FC"))
+    return JSONResponse(result)
+
+
+@server.custom_route("/run_normative_analysis", methods=["POST"])
+async def http_run_normative_analysis(request: Request) -> JSONResponse:
+    data = await request.json()
+    result = run_normative_analysis(
+        x_phenotype=data.get("x_phenotype", "Global mean of FC"),
+        y_path=data.get("y_path", ""),
+        age_col=data.get("age_col", ""),
+        val_col=data.get("val_col", ""),
+    )
+    return JSONResponse(result)
 
 
 if __name__ == "__main__":

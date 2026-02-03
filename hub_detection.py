@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.linalg import eigh, svd
+from datetime import datetime
 from typing import Tuple, List
 
 
@@ -17,6 +18,8 @@ def hub_detection(W: np.ndarray, k: int, hub: int) -> Tuple[np.ndarray, np.ndarr
         S: selection matrix (diagonal entries of 0 indicate hubs)
     """
     n_nodes = W.shape[0]
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBSINGLE] Starting hub detection (n_nodes={n_nodes}, k={k}, hub={hub})")
     
     # Compute the degree matrix.
     d = np.sum(W, axis=1)
@@ -114,8 +117,13 @@ def hub_detection(W: np.ndarray, k: int, hub: int) -> Tuple[np.ndarray, np.ndarr
         if (np.abs(old_cost - new_cost) / np.abs(new_cost) < 1e-6 or 
             iter_count > max_iter or 
             np.abs(old_cost - new_cost) < 1e-6):
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBSINGLE]   Iteration {iter_count}: cost={new_cost:.6f} (converged)")
             break
+        else:
+            if iter_count % 50 == 0:
+                print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBSINGLE]   Iteration {iter_count}/{max_iter}: cost={new_cost:.6f}")
     
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBSINGLE] Hub detection complete (iterations={iter_count})")
     return F, S
 
 
@@ -136,6 +144,8 @@ def hub_detection_grassmannifold(Wn: np.ndarray, k: int, hub: int) -> Tuple[np.n
     M = n_subjects
     alpha = 1.0 / M
     beta = 0.1 * alpha
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBGROUP] Starting group hub detection (n_subjects={n_subjects}, n_nodes={n_nodes}, k={k}, hub={hub})")
     
     # Compute degree matrices.
     Dn = np.zeros_like(Wn)
@@ -280,8 +290,13 @@ def hub_detection_grassmannifold(Wn: np.ndarray, k: int, hub: int) -> Tuple[np.n
         if (np.abs(old_cost - cost[iter_count - 1]) / np.abs(cost[iter_count - 1]) < 1e-3 or
             iter_count > max_iter or
             np.abs(old_cost - cost[iter_count - 1]) < 1e-3):
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBGROUP]   Iteration {iter_count}: cost={tempcost:.6f} (converged)")
             break
+        else:
+            if iter_count % 20 == 0:
+                print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBGROUP]   Iteration {iter_count}/{max_iter}: cost={tempcost:.6f}")
     
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBGROUP] Group hub detection complete (iterations={iter_count})")
     return Fn, S
 
 
@@ -299,33 +314,42 @@ def detect_hubs_from_graphs(graphs: List[np.ndarray], k: int = 2, hub: int = 1,
     Returns:
         Result dictionary containing hub nodes and embeddings
     """
+    num_graphs = len(graphs)
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBDETECT] Starting hub detection for {num_graphs} graph(s)...")
+    
     if use_group and len(graphs) > 1:
         # Group method for multiple networks.
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBDETECT] Using group (Grassmann manifold) method")
         Wn = np.stack(graphs, axis=2)
         Fn, S = hub_detection_grassmannifold(Wn, k, hub)
         
         # Find hub nodes.
         hub_nodes = np.where(np.diag(S) == 0)[0].tolist()
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBDETECT] Hub detection complete: {len(hub_nodes)} hubs identified")
         
         return {
             "method": "group",
             "hub_nodes": hub_nodes,
-            "embeddings": Fn,
-            "selection_matrix": S
+            "embeddings": Fn.tolist(),
+            "selection_matrix": S.tolist()
         }
     else:
         # Single-network method.
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBDETECT] Using individual (per-network) method")
         results = []
         for i, W in enumerate(graphs):
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBDETECT]   Processing graph {i+1}/{num_graphs}...")
             F, S = hub_detection(W, k, hub)
             hub_nodes = np.where(np.diag(S) == 0)[0].tolist()
             results.append({
                 "graph_index": i,
                 "hub_nodes": hub_nodes,
-                "embedding": F,
-                "selection_matrix": S
+                "embedding": F.tolist(),
+                "selection_matrix": S.tolist()
             })
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBDETECT]   Graph {i+1}/{num_graphs}: {len(hub_nodes)} hubs identified ✓")
         
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUBDETECT] Hub detection complete: {num_graphs} graph(s) processed")
         return {
             "method": "individual",
             "results": results

@@ -1,16 +1,8 @@
-from logging import exception
 import numpy as np
 from scipy.linalg import expm
-
-# from scipy.sparse.linalg import norm # not sparse matrix
-# import pandas as pd
 import math
-# import matplotlib
-# import matplotlib.pyplot as plt
-# from IPython.core.pylabtools import figsize
-# from timeit import timeit
+from datetime import datetime
 from utils import corrcoef
-# import warnings
 
 import os
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
@@ -77,6 +69,7 @@ def harmonic_wavelets(
     u_vec = np.zeros_like(graph)
     phi_k = np.expand_dims(temp_phi[..., :wavelets_num], -3)
 
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [WAVELET] Starting harmonic wavelets computation (wavelets_num={wavelets_num}, beta={beta}, gamma={gamma})")
     it = 0
     err = np.inf
     diag_idx = np.arange(node_num)
@@ -102,8 +95,9 @@ def harmonic_wavelets(
         phi_k = phi_k @ BC[..., :wavelets_num, :] + Q @ BC[..., wavelets_num:, :]
         err = np.max(np.linalg.norm(phi_increment, 'fro', (-2, -1)))
         it += 1
-        print(it, err)
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [WAVELET]   Iteration {it}/{max_iter}: error={err:.6f}")
 
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [WAVELET] Harmonic wavelets computation complete (iterations={it}, final_error={err:.6f})")
     return phi_k
 
 
@@ -153,12 +147,3 @@ def cfc(wavelets, bold, wavelets_num):
     )
     cfcs = corrcoef(powers.swapaxes(-2, -1))
     return cfcs, powers
-
-
-def get_cfc(bold, data_path):
-    fc = np.corrcoef(bold)
-    Graph = thresholding(fc, data_path)
-    wavelets = harmonic_wavelets(Graph)
-    # wavelets = harmonics(Graph)
-    cfc_matrix, power = cfc(wavelets, BOLD_window)
-    return cfc_matrix

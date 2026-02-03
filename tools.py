@@ -6,6 +6,7 @@ import argparse
 import io
 import h5py
 import pandas as pd
+from datetime import datetime
 from utils import corrcoef
 
 class AnalysisConfig():
@@ -39,7 +40,10 @@ def tool_cfc_wavelet( bolds: np.ndarray,  config: AnalysisConfig,):
         adjs = thresholding(fcs, ratio=config.ratio)
         # graphs = [nx.from_numpy_array(adj) for adj in adjs]
         wavelets_list = []
+        num_windows = len(adjs)
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [CFC] Computing wavelets for {num_windows} windows...")
         for i, adj in enumerate(adjs):
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [CFC]   Window {i+1}/{num_windows}: Computing harmonic wavelets...")
             wavelet = harmonic_wavelets(
                 adj,
                 wavelets_num=config.wavelets_num,
@@ -50,9 +54,12 @@ def tool_cfc_wavelet( bolds: np.ndarray,  config: AnalysisConfig,):
                 node_select=config.node_select,
             )
             wavelets_list.append(wavelet)
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [CFC]   Window {i+1}/{num_windows}: Wavelets computed ✓")
+        
         cfcs = []
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [CFC] Computing CFC matrices for {num_windows} windows...")
         for i, (wavelet, bold_window) in enumerate(zip(wavelets_list, bolds)):
-            
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [CFC]   Window {i+1}/{num_windows}: Computing CFC matrix...")
             cfc_result = cfc(wavelet, bold_window,config.wavelets_num)
             
             if isinstance(cfc_result, tuple):
@@ -70,9 +77,12 @@ def tool_cfc_wavelet( bolds: np.ndarray,  config: AnalysisConfig,):
                 
                 cfc_clean = np.nan_to_num(cfc_2d, nan=0.0, posinf=0.0, neginf=0.0)
                 cfcs.append(cfc_clean.tolist())
+                print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [CFC]   Window {i+1}/{num_windows}: CFC matrix computed ✓")
             else:
                 cfcs.append([[0.0]])
+                print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [CFC]   Window {i+1}/{num_windows}: CFC matrix empty, using default")
 
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [CFC] CFC analysis complete: {len(cfcs)} matrices computed")
         return cfcs
 
 def tool_hub_detection( bolds: np.ndarray, config: AnalysisConfig):
@@ -82,9 +92,10 @@ def tool_hub_detection( bolds: np.ndarray, config: AnalysisConfig):
         # graphs = [nx.from_numpy_array(adj) for adj in adjs]
         
         # Hub Detection
+        num_windows = len(adjs)
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUB] Starting hub detection on {num_windows} windows...")
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUB] Configuration: k={config.k}, hub_num={config.hub_num}, use_group={config.use_group}")
 
-        print(f"Running hub detection with k={config.k}, hub_num={config.hub_num}, use_group={config.use_group}")
-        
         hub_results = detect_hubs_from_graphs(
             adjs,
             k=config.k,
@@ -92,12 +103,77 @@ def tool_hub_detection( bolds: np.ndarray, config: AnalysisConfig):
             use_group=config.use_group
         )
         
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [HUB] Hub detection complete")
         return hub_results
 
 
-def _build_dummy_bolds(num_windows: int, num_nodes: int, num_timepoints: int) -> np.ndarray:
-    rng = np.random.default_rng(42)
-    return rng.standard_normal((num_windows, num_nodes, num_timepoints)).astype(np.float32)
+def load_bolds_from_csv(path: str, window_size: int = 5, step_size: int = 3, padding: bool = True) -> np.ndarray:
+    """Load BOLD data from CSV file with sliding windows.
+    
+    Expected CSV format: rows are timepoints, columns are nodes.
+    Automatically skips unnamed/index columns and non-numeric data.
+    
+    Args:
+        path: Path to the CSV file
+        window_size: Size of each sliding window (in timepoints)
+        step_size: Number of timepoints to advance between windows
+        padding: If True, pads the data to ensure complete windows
+    
+    Returns:
+        np.ndarray of shape (num_windows, num_nodes, window_size)
+    """
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Reading CSV file: {path}")
+    df = pd.read_csv(path)
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] File loaded: shape {df.shape}")
+    
+    # Remove unnamed columns (typically index columns from saved CSVs)
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Cleaning columns (removing unnamed columns)...")
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed', na=False)]
+    
+    # Skip any columns that are non-numeric
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Filtering for numeric columns...")
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    df = df[numeric_cols]
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Numeric columns selected: {len(df.columns)} nodes")
+    
+    if df.empty:
+        raise ValueError(f"No numeric columns found in {path}")
+    
+    # Convert to numpy: shape is (num_timepoints, num_nodes)
+    data = df.values.astype(np.float32)
+    num_timepoints, num_nodes = data.shape
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Data shape: {num_timepoints} timepoints × {num_nodes} nodes")
+    
+    # Apply padding if needed to ensure we can extract complete windows
+    if padding:
+        pad_amount = (num_timepoints - window_size) % step_size
+        if pad_amount != 0:
+            pad_amount = step_size - pad_amount
+            print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Applying padding: {pad_amount} timepoints added")
+            data = np.pad(data, ((0, pad_amount), (0, 0)), mode='edge')
+            num_timepoints = data.shape[0]
+    
+    # Extract sliding windows
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Extracting sliding windows (size={window_size}, step={step_size})...")
+    windows = []
+    for start_idx in range(0, num_timepoints - window_size + 1, step_size):
+        window = data[start_idx:start_idx + window_size, :]  # shape: (window_size, num_nodes)
+        windows.append(window)
+    
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Windows extracted: {len(windows)} windows")
+    
+    if not windows:
+        raise ValueError(f"No windows could be extracted. Data shape: {data.shape}, "
+                        f"window_size: {window_size}, step_size: {step_size}")
+    
+    # Stack windows: shape (num_windows, window_size, num_nodes)
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Stacking windows...")
+    stacked = np.stack(windows, axis=0)
+    
+    # Transpose to (num_windows, num_nodes, window_size)
+    result = np.transpose(stacked, (0, 2, 1))
+    
+    return result
 
 
 
