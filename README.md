@@ -90,6 +90,157 @@ This runs example analyses and displays results with:
 - Progress logs with step information
 - Analysis results (hub nodes, wavelets, etc.)
 
+### Using the Intelligent Agent Client
+
+For automated tool selection and intelligent analysis, use the **agent client** which leverages an LLM (Ollama) to decide which analysis to run based on natural language goals.
+
+#### Setup
+
+```bash
+# Install agent dependencies
+pip install ollama requests pydantic
+
+# Set environment variables
+export MCP_API_KEY='your-api-key'
+export OLLAMA_HOST='http://yukon.acm.unc.edu:11434'
+```
+
+#### Basic Usage
+
+```python
+from agent_client import BrainNetworkAgent, OllamaLLM
+
+# Initialize agent
+llm = OllamaLLM(host='http://yukon.acm.unc.edu:11434', model='MedAIBase/MedGemma1.5:4b')
+agent = BrainNetworkAgent(llm=llm)
+
+# Give the agent a goal in natural language
+response = agent.execute("Analyze the cross-frequency coupling in my BOLD data")
+
+# Access results
+print(response.summary)  # Human-readable interpretation
+print(response.state.results)  # Raw analysis data
+```
+
+#### Interactive Mode
+
+```bash
+python agent_client.py
+```
+
+The agent enters interactive mode where you can ask questions like:
+- "I want to analyze cross-frequency coupling in my brain connectivity data"
+- "Find the hub nodes in my brain network"
+- "Show me the typical developmental trajectory for brain connectivity"
+- "Upload my data and run a hub detection analysis"
+
+#### How the Agent Works
+
+The agent follows a 3-step execution pipeline:
+
+1. **Tool Selection (LLM Reasoning)**: 
+   - Analyzes your natural language goal
+   - Decides which MCP tool to use (CFC, Hub Detection, Growth Curve, Normative Analysis)
+   - Extracts parameters from context
+
+2. **Tool Execution**:
+   - Invokes the chosen MCP server tool via HTTP
+   - Monitors execution status and collects results
+   - Returns raw analysis output
+
+3. **Result Interpretation**:
+   - Uses LLM to explain findings in human-readable language
+   - Provides insights about what the results mean
+   - Generates actionable recommendations
+
+#### Agent Architecture
+
+**OllamaLLM Class**: Wraps Ollama LLM for reasoning
+- `decide_tool(goal)`: Determines which analysis to run
+- `interpret_results(tool_name, results)`: Explains analysis findings
+- `generate_text(prompt, system, max_tokens)`: Raw LLM queries
+
+**MCPClient Class**: HTTP client for MCP server
+- `run_cfc_wavelet_analysis()`: CFC analysis
+- `run_hub_detection()`: Hub detection
+- `get_growth_curve()`: Growth curve data
+- `run_normative_analysis()`: Normative analysis
+
+**BrainNetworkAgent Class**: Main orchestrator
+- `execute(user_goal)`: Full 3-step pipeline
+- Returns `AgentResponse` with results and interpretations
+
+#### Example: Building a Custom Agent
+
+```python
+from agent_client import BrainNetworkAgent, OllamaLLM, MCPClient
+
+# Initialize components
+llm = OllamaLLM(
+    host='http://yukon.acm.unc.edu:11434',
+    model='MedAIBase/MedGemma1.5:4b'
+)
+mcp_client = MCPClient(base_url='http://yukon.acm.unc.edu:8010')
+
+# Create agent
+agent = BrainNetworkAgent(llm=llm, mcp_client=mcp_client)
+
+# Execute analysis goals
+goals = [
+    "Analyze CFC patterns with window size 120",
+    "Find hubs with k=3 parameters",
+    "Compare developmental trajectories",
+]
+
+for goal in goals:
+    response = agent.execute(goal)
+    if response.success:
+        print(f"✓ {goal}")
+        print(f"  Result: {response.summary}")
+    else:
+        print(f"✗ {goal}")
+        print(f"  Error: {response.state.error_messages}")
+```
+
+#### File Upload Integration
+
+The agent can upload files before analysis:
+
+```python
+# Upload file using agent's MCP client
+agent.mcp_client.upload_file(file_path='/path/to/data.csv')
+
+# Then run analysis with uploaded file
+response = agent.execute("Analyze the data I just uploaded")
+```
+
+See [FILE_UPLOAD_GUIDE.md](FILE_UPLOAD_GUIDE.md) for detailed file upload instructions.
+
+#### Pydantic Models
+
+The agent uses Pydantic for type-safe data handling:
+
+- **AnalysisType**: Enum of available tools (CFC_WAVELET, HUB_DETECTION, GROWTH_CURVE, NORMATIVE)
+- **ToolCall**: LLM decision with tool name, reasoning, and parameters
+- **AgentState**: Execution state including goals, reasoning, results, and errors
+- **AgentResponse**: Final response with summary, recommendations, and success status
+
+#### Error Handling
+
+The agent handles common errors gracefully:
+
+```python
+response = agent.execute("Analyze missing_file.csv")
+
+if not response.success:
+    print(f"Execution failed: {response.state.error_messages}")
+    # Errors logged but execution continues
+    
+# All responses include state for inspection
+print(f"LLM reasoning: {response.state.llm_reasoning}")
+print(f"Tool attempted: {response.state.tool_calls[0].tool_name}")
+```
+
 ### Available Tools
 
 #### 1. CFC Wavelet Analysis
