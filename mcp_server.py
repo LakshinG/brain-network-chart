@@ -1,9 +1,7 @@
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import JSONResponse#, PlainTextResponse
+from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException
-# import numpy as np
-# import json
 import sys
 import io
 import logging
@@ -13,7 +11,7 @@ from functools import wraps
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, Any, Callable
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ValidationInfo
 from tools import (
     tool_cfc_wavelet,
     tool_hub_detection,
@@ -38,9 +36,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# API Key configuration (set via environment variable)
-API_KEY = os.getenv('MCP_API_KEY', 'default-key-change-in-production')
-
 # Rate limiting configuration
 RATE_LIMIT_REQUESTS = 10
 RATE_LIMIT_WINDOW = 60  # seconds
@@ -59,9 +54,10 @@ class CFCWaveletRequest(BaseModel):
     max_iter: int = Field(default=100, ge=1, le=1000, description="Max iterations")
     node_select: int = Field(default=10, ge=1, description="Node selection parameter")
     
-    @validator('step_size')
-    def validate_step_size(cls, v, values):
-        if 'window_size' in values and v > values['window_size']:
+    @field_validator('step_size')
+    @classmethod
+    def validate_step_size(cls, v, info: ValidationInfo):
+        if info.data.get('window_size') and v > info.data['window_size']:
             raise ValueError('step_size must be <= window_size')
         return v
 
@@ -98,24 +94,6 @@ def capture_output():
         yield sys.stdout
     finally:
         sys.stdout = old_stdout
-
-
-def validate_api_key(f: Callable) -> Callable:
-    """Decorator to validate API key in request headers."""
-    @wraps(f)
-    async def decorated_function(request: Request, *args, **kwargs):
-        auth_header = request.headers.get('Authorization', '')
-        if auth_header.startswith('Bearer '):
-            token = auth_header[7:]
-        else:
-            token = request.headers.get('X-API-Key', '')
-        
-        if token != API_KEY:
-            logger.warning(f"Unauthorized access attempt from {request.client.host}")
-            raise HTTPException(status_code=401, detail="Invalid API key")
-        
-        return await f(request, *args, **kwargs)
-    return decorated_function
 
 
 def rate_limit(f: Callable) -> Callable:
@@ -182,7 +160,7 @@ server = FastMCP('Brain Network Analysis Server',
 @server.tool(name="run_cfc_wavelet_analysis")
 @validate_parameters(
     window_size={'min': 10, 'max': 1000, 'type': int},
-    step_size={'min': 1, 'max': 500, 'type': int},
+    step_size={'min': 30, 'max': 500, 'type': int},
     ratio={'min': 0.0, 'max': 1.0, 'type': float},
     wavelets_num={'min': 1, 'max': 100, 'type': int},
     max_iter={'min': 1, 'max': 1000, 'type': int},
@@ -205,7 +183,7 @@ def run_cfc_wavelet_analysis(
     Parameters:
     - data_path: Path to BOLD CSV file
     - window_size: Sliding window size (10-1000)
-    - step_size: Window step size (1-500)
+    - step_size: Window step size (30-500)
     - padding: Pad edges
     - ratio: Edge weight threshold ratio (0.0-1.0)
     - wavelets_num: Number of wavelets (1-100)
@@ -619,11 +597,6 @@ async def api_schema(request: Request) -> JSONResponse:
                 }
             },
         },
-        "authentication": {
-            "type": "Bearer token or X-API-Key header",
-            "required": "true",
-            "example": "Authorization: Bearer <api-key> or X-API-Key: <api-key>"
-        },
         "rate_limiting": {
             "requests_per_window": RATE_LIMIT_REQUESTS,
             "window_seconds": RATE_LIMIT_WINDOW,
@@ -633,7 +606,6 @@ async def api_schema(request: Request) -> JSONResponse:
 
 
 @server.custom_route("/run_cfc_wavelet_analysis", methods=["POST"])
-@validate_api_key
 @rate_limit
 async def http_run_cfc_wavelet_analysis(request: Request) -> JSONResponse:
     """HTTP endpoint for CFC wavelet analysis."""
@@ -664,7 +636,6 @@ async def http_run_cfc_wavelet_analysis(request: Request) -> JSONResponse:
 
 
 @server.custom_route("/run_hub_detection", methods=["POST"])
-@validate_api_key
 @rate_limit
 async def http_run_hub_detection(request: Request) -> JSONResponse:
     """HTTP endpoint for hub detection."""
@@ -693,7 +664,6 @@ async def http_run_hub_detection(request: Request) -> JSONResponse:
 
 
 @server.custom_route("/get_growth_curve", methods=["POST"])
-@validate_api_key
 @rate_limit
 async def http_get_growth_curve(request: Request) -> JSONResponse:
     """HTTP endpoint for growth curve data."""
@@ -712,7 +682,6 @@ async def http_get_growth_curve(request: Request) -> JSONResponse:
 
 
 @server.custom_route("/run_normative_analysis", methods=["POST"])
-@validate_api_key
 @rate_limit
 async def http_run_normative_analysis(request: Request) -> JSONResponse:
     """HTTP endpoint for normative analysis."""
@@ -737,7 +706,6 @@ async def http_run_normative_analysis(request: Request) -> JSONResponse:
 
 
 @server.custom_route("/upload", methods=["POST"])
-@validate_api_key
 @rate_limit
 async def upload_file(request: Request) -> JSONResponse:
     """Upload a file to the server for analysis.
@@ -779,7 +747,6 @@ async def upload_file(request: Request) -> JSONResponse:
 
 
 @server.custom_route("/list_files", methods=["GET"])
-@validate_api_key
 async def list_files(request: Request) -> JSONResponse:
     """List all uploaded files."""
     try:
@@ -798,7 +765,6 @@ async def list_files(request: Request) -> JSONResponse:
 
 
 @server.custom_route("/delete_file", methods=["DELETE", "POST"])
-@validate_api_key
 @rate_limit
 async def delete_file(request: Request) -> JSONResponse:
     """Delete an uploaded file.
@@ -833,7 +799,6 @@ async def delete_file(request: Request) -> JSONResponse:
 if __name__ == "__main__":
     logger.info("="*60)
     logger.info("Brain Network Analysis MCP Server starting...")
-    logger.info(f"API Key authentication: {'enabled' if API_KEY != 'default-key-change-in-production' else 'DISABLED (using default)'}")
     logger.info(f"Rate limiting: {RATE_LIMIT_REQUESTS} requests per {RATE_LIMIT_WINDOW}s")
     logger.info(f"Listening on: http://yukon.acm.unc.edu:8010")
     logger.info("="*60)
@@ -847,8 +812,6 @@ if __name__ == "__main__":
     logger.info("  POST /upload                     - Upload file for analysis")
     logger.info("  GET  /list_files                 - List uploaded files")
     logger.info("  DELETE /delete_file              - Delete uploaded file")
-    logger.info("="*60)
-    logger.info("Set MCP_API_KEY environment variable for authentication")
     logger.info("="*60)
     
     try:
