@@ -63,8 +63,6 @@ brain-network-chart/
 ├── wavelets.py                # CFC wavelet computation
 ├── hub_detection.py           # Hub detection algorithms
 ├── utils.py                   # Utility functions (correlation, thresholding)
-├── data_example_BOLD.csv      # Example brain activity data
-├── data_example_BrainChart.csv# Example normative curve data
 ├── pyproject.toml             # Project configuration
 └── README.md                  # This file
 ```
@@ -78,6 +76,134 @@ python mcp_server.py
 ```
 
 The server will start on `http://yukon.acm.unc.edu:8010` and be ready to accept tool invocations.
+
+## HTTP API Quick Start (Agent Designers)
+
+This MCP server exposes a plain HTTP JSON API. The base URL is `http://yukon.acm.unc.edu:8010`.
+
+Authentication: the server code does not enforce auth today. Clients may still send an `Authorization: Bearer <token>` header, but it is currently ignored.
+
+Rate limiting: 10 requests per 60 seconds per client IP.
+
+Use `GET /api/schema` to fetch the live JSON schema for all endpoints.
+
+### Typical Call Flow
+
+1. Upload your CSV file with `POST /upload` (multipart form field named `file`).
+2. Call an analysis endpoint with `data_path` set to the uploaded filename returned from step 1.
+
+File resolution: `data_path` and `y_path` are resolved by checking the upload directory first, then the server working directory, then absolute paths if provided.
+
+### Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Health check |
+| GET | `/api/schema` | API schema for agents |
+| POST | `/run_cfc_wavelet_analysis` | Cross-frequency coupling wavelet analysis |
+| POST | `/run_hub_detection` | Hub detection in brain networks |
+| POST | `/get_growth_curve` | Load growth curve data |
+| POST | `/run_normative_analysis` | Normative analysis with overlay data |
+| POST | `/upload` | Upload CSV file (multipart) |
+| GET | `/list_files` | List uploaded files |
+| DELETE or POST | `/delete_file` | Delete uploaded file |
+
+### Request Payloads
+
+#### `POST /run_cfc_wavelet_analysis`
+
+```json
+{
+  "data_path": "data_example_BOLD.csv",
+  "window_size": 100,
+  "step_size": 90,
+  "padding": true,
+  "ratio": 0.8,
+  "wavelets_num": 10,
+  "beta": 1.0,
+  "gamma": 0.005,
+  "max_iter": 100,
+  "node_select": 10
+}
+```
+
+#### `POST /run_hub_detection`
+
+```json
+{
+  "data_path": "data_example_BOLD.csv",
+  "window_size": 100,
+  "step_size": 90,
+  "padding": true,
+  "ratio": 0.8,
+  "k": 2,
+  "hub_num": 10,
+  "use_group": false
+}
+```
+
+#### `POST /get_growth_curve`
+
+```json
+{
+  "phenotype": "Global mean of FC"
+}
+```
+
+Valid phenotypes:
+`Global mean of FC`, `Global system segregation`, `Visual system segregation (VIS)`, `Somatomotor system segregation (SM)`, `Dorsal attention system segregation (DA)`, `Ventral attention system segregation (VA)`, `Limbic system segregation (LIM)`, `Frontoparietal system segregation (FP)`, `Default mode system segregation (DM)`.
+
+#### `POST /run_normative_analysis`
+
+```json
+{
+  "x_phenotype": "Global mean of FC",
+  "y_path": "my_overlay.csv",
+  "age_col": "age",
+  "val_col": "value"
+}
+```
+
+#### `POST /upload` (multipart form)
+
+Field name must be `file`. Example:
+
+```bash
+curl -X POST http://yukon.acm.unc.edu:8010/upload \
+  -F "file=@/path/to/data.csv"
+```
+
+#### `GET /list_files`
+
+Returns uploaded filenames with sizes and timestamps.
+
+#### `DELETE /delete_file`
+
+```json
+{
+  "filename": "data.csv"
+}
+```
+
+### Example: Upload Then Analyze
+
+```bash
+curl -X POST http://yukon.acm.unc.edu:8010/upload \
+  -F "file=@/path/to/data_example_BOLD.csv"
+
+curl -X POST http://yukon.acm.unc.edu:8010/run_hub_detection \
+  -H "Content-Type: application/json" \
+  -d '{
+    "data_path": "data_example_BOLD.csv",
+    "window_size": 100,
+    "step_size": 90,
+    "padding": true,
+    "ratio": 0.8,
+    "k": 2,
+    "hub_num": 10,
+    "use_group": false
+  }'
+```
 
 ### Using the Client
 
@@ -204,15 +330,7 @@ for goal in goals:
 
 #### File Upload Integration
 
-The agent can upload files before analysis:
-
-```python
-# Upload file using agent's MCP client
-agent.mcp_client.upload_file(file_path='/path/to/data.csv')
-
-# Then run analysis with uploaded file
-response = agent.execute("Analyze the data I just uploaded")
-```
+The server supports file upload via `POST /upload` with a multipart `file` field. The agent client does not include a built-in helper for this, so use `requests` or curl and then pass the uploaded filename in `data_path` or `y_path`.
 
 See [FILE_UPLOAD_GUIDE.md](FILE_UPLOAD_GUIDE.md) for detailed file upload instructions.
 
@@ -246,22 +364,17 @@ print(f"Tool attempted: {response.state.tool_calls[0].tool_name}")
 #### 1. CFC Wavelet Analysis
 Computes cross-frequency coupling using harmonic wavelets on sliding windows of brain connectivity data.
 
-**Parameters:**
-- `data_path`: Path to CSV file with BOLD time series
-- `window_size`: Size of sliding window (default: 100)
-- `step_size`: Step size for sliding window (default: 90)
-- `padding`: Whether to pad edges (default: true)
-- `ratio`: Edge weight threshold ratio (default: 0.8)
-- `wavelets_num`: Number of wavelet basis functions (default: 10)
-- `beta`: Regularization parameter (default: 1.0)
-- `gamma`: Convergence threshold (default: 0.005)
-- `max_iter`: Maximum iterations (default: 100)
+**Parameters:** `data_path`, `window_size`, `step_size`, `padding`, `ratio`, `wavelets_num`, `beta`, `gamma`, `max_iter`, `node_select`.
 
 **Output:**
 ```json
 {
-  "wavelets": [[...], [...], ...],
+  "status": "success",
+  "timestamp": "2026-02-04T12:00:00.000000",
+  "data_path": "data_example_BOLD.csv",
   "num_windows": 42,
+  "shape": [42, 200, 100],
+  "cfcs_count": 42,
   "console_output": "[14:32:51.247] [CFC] Computing wavelets...",
   "progress": [...]
 }
@@ -270,24 +383,20 @@ Computes cross-frequency coupling using harmonic wavelets on sliding windows of 
 #### 2. Hub Detection
 Identifies hub nodes in single or multiple brain networks.
 
-**Parameters:**
-- `graphs`: List of adjacency matrices (JSON format)
-- `k`: Embedding dimension (default: 2)
-- `hub`: Number of hubs to identify (default: 10)
-- `use_group`: Use group method for multiple networks (default: false)
+**Parameters:** `data_path`, `window_size`, `step_size`, `padding`, `ratio`, `k`, `hub_num`, `use_group`.
 
 **Output:**
 ```json
 {
-  "method": "individual",
-  "results": [
-    {
-      "graph_index": 0,
-      "hub_nodes": [5, 12, 23],
-      "embedding": [[...], [...], ...],
-      "selection_matrix": [[...], [...], ...]
-    }
-  ],
+  "status": "success",
+  "timestamp": "2026-02-04T12:00:00.000000",
+  "data_path": "data_example_BOLD.csv",
+  "num_windows": 42,
+  "shape": [42, 200, 100],
+  "k": 2,
+  "hub_num": 10,
+  "use_group": false,
+  "results": { "method": "individual", "results": [...] },
   "console_output": "[14:32:52.156] [HUBDET] Starting hub detection...",
   "progress": [...]
 }
@@ -296,20 +405,21 @@ Identifies hub nodes in single or multiple brain networks.
 #### 3. Normative Analysis
 Analyzes developmental trajectories and generates normative curves.
 
-**Parameters:**
-- `age_path`: Path to growth curve data CSV
-- `metric_path`: Path to metric data CSV
-- `age_col`: Column name for age values
-- `val_col`: Column name for metric values
-- `y_label`: Label for y-axis
+**Parameters:** `x_phenotype`, `y_path`, `age_col`, `val_col`.
 
 **Output:**
 ```json
 {
-  "ages": [1, 2, 3, ...],
-  "mean": [value, ...],
-  "std": [value, ...],
-  "plot_path": "path/to/generated/plot.png"
+  "status": "success",
+  "timestamp": "2026-02-04T12:00:00.000000",
+  "phenotype": "Global mean of FC",
+  "y_path": "my_overlay.csv",
+  "data": {
+    "X": [...],
+    "centiles": [...],
+    "age": [...],
+    "values": [...]
+  }
 }
 ```
 
@@ -327,6 +437,7 @@ Region_1,Region_2,Region_3,...,Region_N
 - **Rows**: Time points (BOLD volumes)
 - **Columns**: Brain regions or nodes
 - Columns named "Unnamed" or non-numeric values are automatically filtered
+- If you use the default `data_path` (`data_example_BOLD.csv`), place the file in the server working directory or upload it first.
 
 ### Growth Curve Data (CSV)
 
@@ -338,18 +449,12 @@ age,metric_value
 ...
 ```
 
-- Used for normative developmental trajectory analysis
+Used as overlay data for normative analysis. The server expects `age_col` and `val_col` columns in the overlay CSV and converts ages from months to years by dividing by 12.
+If you use the agent client's default `y_path` (`data_example_BrainChart.csv`), place the file in the server working directory or upload it first.
 
 ## API Endpoints
 
-All endpoints are HTTP POST requests to the server with JSON payloads.
-
-```
-POST /run_cfc_wavelet_analysis
-POST /run_hub_detection
-POST /run_normative_analysis
-POST /run_hub_detection_group
-```
+See "HTTP API Quick Start (Agent Designers)" above for the full, current endpoint list and payloads. `GET /api/schema` returns a live JSON schema.
 
 ## Example: Direct API Call
 
@@ -357,9 +462,13 @@ POST /run_hub_detection_group
 curl -X POST http://yukon.acm.unc.edu:8010/run_hub_detection \
   -H "Content-Type: application/json" \
   -d '{
-    "graphs": [[graph_matrix_1], [graph_matrix_2]],
+    "data_path": "data_example_BOLD.csv",
+    "window_size": 100,
+    "step_size": 90,
+    "padding": true,
+    "ratio": 0.8,
     "k": 2,
-    "hub": 5,
+    "hub_num": 5,
     "use_group": false
   }'
 ```
@@ -458,7 +567,6 @@ Multi-network optimization via differential geometry:
 ## Output Files
 
 Results are returned as JSON via HTTP responses. Optional file outputs:
-- Normative plots saved to `uploaded_files/` directory
 - Console logs streamed to client in real-time
 
 ## License
