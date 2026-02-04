@@ -580,12 +580,12 @@ async def api_schema(request: Request) -> JSONResponse:
             "run_cfc_wavelet_analysis": {
                 "method": "POST",
                 "description": "Cross-frequency coupling wavelet analysis",
-                "parameters": CFCWaveletRequest.schema(),
+                "parameters": CFCWaveletRequest.model_json_schema(),
             },
             "run_hub_detection": {
                 "method": "POST",
                 "description": "Hub detection in brain networks",
-                "parameters": HubDetectionRequest.schema(),
+                "parameters": HubDetectionRequest.model_json_schema(),
             },
             "get_growth_curve": {
                 "method": "POST",
@@ -597,7 +597,26 @@ async def api_schema(request: Request) -> JSONResponse:
             "run_normative_analysis": {
                 "method": "POST",
                 "description": "Normative developmental trajectory analysis",
-                "parameters": NormativeAnalysisRequest.schema(),
+                "parameters": NormativeAnalysisRequest.model_json_schema(),
+            },
+            "upload": {
+                "method": "POST",
+                "description": "Upload a file for analysis (multipart/form-data)",
+                "parameters": {
+                    "file": {"type": "file", "description": "Multipart file field named 'file'"}
+                }
+            },
+            "list_files": {
+                "method": "GET",
+                "description": "List uploaded files",
+                "parameters": {}
+            },
+            "delete_file": {
+                "method": "DELETE or POST",
+                "description": "Delete an uploaded file (JSON body: {\"filename\": \"...\"})",
+                "parameters": {
+                    "filename": {"type": "string", "description": "Name of the uploaded file to delete"}
+                }
             },
         },
         "authentication": {
