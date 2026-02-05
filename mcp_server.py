@@ -154,7 +154,7 @@ def validate_parameters(**param_rules) -> Callable:
 
 
 server = FastMCP('Brain Network Analysis Server',
-                 host='yukon.acm.unc.edu', port=8010)
+                 host='0.0.0.0', port=8010)
 
 
 @server.tool(name="run_cfc_wavelet_analysis")
