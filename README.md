@@ -39,7 +39,13 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
 uv sync
-```
+
+# Run the server (recommended, avoids activation issues)
+uv run python mcp_server.py
+
+# If port 8010 is already in use, choose a different port:
+MCP_PORT=8011 uv run python mcp_server.py
+
 
 ### Dependencies
 

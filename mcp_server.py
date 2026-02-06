@@ -7,6 +7,11 @@ import io
 import logging
 import time
 import os
+import re
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from typing import Optional, List, Dict, Any
 from functools import wraps
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -76,6 +81,12 @@ class NormativeAnalysisRequest(BaseModel):
     y_path: str = Field(description="Path to Y data CSV")
     age_col: str = Field(description="Age column name")
     val_col: str = Field(description="Value column name")
+
+class PubMedSearchRequest(BaseModel):
+    query: str = Field(description="PubMed query string (supports PubMed syntax)")
+    max_results: int = Field(20, ge=1, le=200, description="Maximum number of papers to return (1-200)")
+    year_from: Optional[int] = Field(None, ge=1900, le=datetime.now().year, description="Filter Start year (inclusive)")
+    year_to: Optional[int] = Field(None, ge=1900, le=datetime.now().year, description="Filter End year (inclusive)")
 
 class ResponseSchema(BaseModel):
     status: str
@@ -152,9 +163,177 @@ def validate_parameters(**param_rules) -> Callable:
         return wrapper
     return decorator
 
+PUBMED_EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
-server = FastMCP('Brain Network Analysis Server',
-                 host='0.0.0.0', port=8010)
+_PUBMED_SESSION: Optional[requests.Session] = None
+
+
+def _pubmed_session() -> requests.Session:
+    """Create (once) a requests Session with retry/backoff for transient PubMed failures."""
+    global _PUBMED_SESSION
+    if _PUBMED_SESSION is not None:
+        return _PUBMED_SESSION
+
+    session = requests.Session()
+
+    retry = Retry(
+        total=5,
+        connect=5,
+        read=5,
+        status=5,
+        backoff_factor=0.6,
+        status_forcelist=(500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+    # NCBI prefers a descriptive User-Agent.
+    session.headers.update(
+        {
+            "User-Agent": "brain-network-chart/0.1 (contact: set PUBMED_EMAIL env var)",
+        }
+    )
+
+    _PUBMED_SESSION = session
+    return session
+
+
+def _pubmed_base_params() -> Dict[str, str]:
+    """Optional NCBI E-utilities parameters (api_key/email/tool) via env vars."""
+    params: Dict[str, str] = {}
+
+    api_key = (os.getenv("PUBMED_API_KEY") or "").strip()
+    if api_key:
+        params["api_key"] = api_key
+
+    tool = (os.getenv("PUBMED_TOOL") or "brain-network-chart").strip()
+    if tool:
+        params["tool"] = tool
+
+    email = (os.getenv("PUBMED_EMAIL") or "").strip()
+    if email:
+        params["email"] = email
+
+    return params
+
+def _extract_year(text: str) -> Optional[int]:
+    if not text:
+        return None
+    m = re.search(r"(18|19|20)\d{2}", text)
+    return int(m.group(0)) if m else None
+
+def _pubmed_esearch(query: str, max_results: int) -> List[str]:
+    url = f"{PUBMED_EUTILS_BASE}/esearch.fcgi"
+    params = {
+        "db": "pubmed",
+        "term": query,
+        "retmode": "json",
+        "retmax": str(max_results),
+        "sort": "relevance",
+        **_pubmed_base_params(),
+    }
+    r = _pubmed_session().get(url, params=params, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    return data.get("esearchresult", {}).get("idlist", []) or []
+
+def _merge_pubmed_esummary_json(parts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {"result": {"uids": []}}
+    merged_result = merged["result"]
+
+    for part in parts:
+        result_obj = (part or {}).get("result", {}) or {}
+        uids = result_obj.get("uids", []) or []
+        for uid in uids:
+            if uid not in merged_result["uids"]:
+                merged_result["uids"].append(uid)
+            if uid in result_obj:
+                merged_result[uid] = result_obj[uid]
+
+    # Keep stable ordering
+    try:
+        merged_result["uids"] = [str(x) for x in merged_result["uids"]]
+    except Exception:
+        pass
+
+    return merged
+
+
+def _pubmed_esummary_call(pmids: List[str]) -> Dict[str, Any]:
+    """Raw esummary call for a list of PMIDs (comma-separated)."""
+    url = f"{PUBMED_EUTILS_BASE}/esummary.fcgi"
+    params = {
+        "db": "pubmed",
+        "id": ",".join(pmids),
+        "retmode": "json",
+        **_pubmed_base_params(),
+    }
+    r = _pubmed_session().get(url, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def _pubmed_esummary(pmids: List[str]) -> Dict[str, Any]:
+    """Fetch PubMed summaries with batching + fallback splitting for transient 5xx."""
+    if not pmids:
+        return {"result": {"uids": []}}
+
+    # Keep requests reasonably sized; NCBI is sometimes flaky for larger batches.
+    batch_size_raw = (os.getenv("PUBMED_ESUMMARY_BATCH_SIZE") or "25").strip()
+    try:
+        batch_size = max(1, min(200, int(batch_size_raw)))
+    except ValueError:
+        batch_size = 25
+
+    def fetch_resilient(ids: List[str]) -> Dict[str, Any]:
+        try:
+            return _pubmed_esummary_call(ids)
+        except requests.RequestException:
+            # If NCBI returns 5xx for a batch, split into smaller requests.
+            if len(ids) <= 1:
+                raise
+            mid = len(ids) // 2
+            left = fetch_resilient(ids[:mid])
+            right = fetch_resilient(ids[mid:])
+            return _merge_pubmed_esummary_json([left, right])
+
+    parts: List[Dict[str, Any]] = []
+    for i in range(0, len(pmids), batch_size):
+        chunk = pmids[i : i + batch_size]
+        parts.append(fetch_resilient(chunk))
+        # Be polite to NCBI and reduce burstiness.
+        time.sleep(0.12)
+
+    if len(parts) == 1:
+        return parts[0]
+    return _merge_pubmed_esummary_json(parts)
+
+
+def _get_server_host_port() -> tuple[str, int]:
+    host = os.getenv("MCP_HOST", "0.0.0.0").strip() or "0.0.0.0"
+
+    port_raw = os.getenv("MCP_PORT", os.getenv("PORT", "8010")).strip() or "8010"
+    try:
+        port = int(port_raw)
+    except ValueError:
+        raise ValueError(f"Invalid port: {port_raw!r} (set MCP_PORT or PORT)")
+
+    if not (1 <= port <= 65535):
+        raise ValueError(f"Invalid port: {port} (must be 1-65535)")
+
+    return host, port
+
+
+_SERVER_HOST, _SERVER_PORT = _get_server_host_port()
+
+server = FastMCP(
+    'Brain Network Analysis Server',
+    host=_SERVER_HOST,
+    port=_SERVER_PORT,
+)
 
 
 @server.tool(name="run_cfc_wavelet_analysis")
@@ -534,6 +713,151 @@ def run_normative_analysis(
             "phenotype": x_phenotype,
             "error": str(e),
         }
+    
+@server.tool(name="search_pubmed")
+@validate_parameters(
+    max_results={"min": 1, "max": 200, "type": int},
+)
+def search_pubmed(
+    query: str,
+    max_results: int = 20,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+) -> dict:
+    """
+    Search PubMed via NCBI E-utilities (esearch + esummary) and return table-ready results.
+
+    Returns:
+      {
+        "status": "success",
+        "timestamp": "...",
+        "elapsed_seconds": ...,
+        "query_used": "...",
+        "count_returned": N,
+        "results": [ {pmid,title,journal,year,authors,url}, ... ],
+        "suggested_keywords": [...],
+        "progress": [...]
+      }
+    """
+    progress_log = []
+    captured_output = []
+    start_time = time.time()
+
+    try:
+        q = query.strip()
+        if not q:
+            raise ValueError("query must be a non-empty string")
+
+        # Optional year filter (simple)
+        if year_from is not None and year_to is not None and year_from > year_to:
+            raise ValueError(f"year_from ({year_from}) must be <= year_to ({year_to})")
+
+        progress_log.append({"step": "search", "message": f"Searching PubMed for: {q!r}"})
+        pmids = _pubmed_esearch(q, max_results=max_results)
+
+        if not pmids:
+            elapsed = time.time() - start_time
+            return {
+                "status": "success",
+                "timestamp": datetime.now().isoformat(),
+                "elapsed_seconds": elapsed,
+                "query_used": q,
+                "count_returned": 0,
+                "results": [],
+                "suggested_keywords": [],
+                "console_output": "",
+                "progress": progress_log + [{"step": "done", "message": "No results found"}],
+            }
+
+        progress_log.append({"step": "summarize", "message": f"Fetching summaries for {len(pmids)} PMIDs"})
+        summary = _pubmed_esummary(pmids)
+
+        result_obj = summary.get("result", {})
+        uids = result_obj.get("uids", []) or []
+
+        rows: List[Dict[str, Any]] = []
+        for uid in uids:
+            item = result_obj.get(uid, {}) or {}
+            title = (item.get("title") or "").strip()
+            journal = (item.get("fulljournalname") or item.get("source") or "").strip()
+
+            # pubdate can be like "2022 Jan 3" — we extract first YYYY
+            year = _extract_year(item.get("pubdate", ""))
+
+            # authors often a list of dicts with "name"
+            authors_list = item.get("authors", []) or []
+            authors = ", ".join([a.get("name", "").strip() for a in authors_list if a.get("name")])[:300]
+
+            row = {
+                "pmid": str(uid),
+                "title": title,
+                "journal": journal,
+                "year": year,
+                "authors": authors,
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/{uid}/",
+            }
+
+            # Year filtering (post-filter)
+            if year is not None:
+                if year_from is not None and year < year_from:
+                    continue
+                if year_to is not None and year > year_to:
+                    continue
+
+            rows.append(row)
+
+        # simple keyword suggestion: pull a few strong terms from query
+        tokens = [t.lower() for t in re.findall(r"[a-zA-Z][a-zA-Z\-]{2,}", q)]
+        suggested_keywords = sorted(set(tokens))[:12]
+
+        progress_log.append({"step": "done", "message": f"Returning {len(rows)} results"})
+
+        elapsed = time.time() - start_time
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "query_used": q,
+            "count_returned": len(rows),
+            "results": rows,
+            "suggested_keywords": suggested_keywords,
+            "console_output": "\n".join(captured_output),
+            "progress": progress_log,
+        }
+
+    except ValueError as e:
+        logger.error(f"Validation error in PubMed search: {str(e)}")
+        progress_log.append({"step": "error", "message": f"Validation error: {str(e)}"})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error_type": "ValueError",
+            "error": str(e),
+            "console_output": "\n".join(captured_output),
+            "progress": progress_log,
+        }
+    except requests.RequestException as e:
+        logger.error(f"PubMed request failed: {str(e)}")
+        progress_log.append({"step": "error", "message": f"PubMed request failed: {str(e)}"})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error_type": "RequestException",
+            "error": str(e),
+            "console_output": "\n".join(captured_output),
+            "progress": progress_log,
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in PubMed search: {str(e)}", exc_info=True)
+        progress_log.append({"step": "error", "message": f"Unexpected error: {str(e)}"})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "console_output": "\n".join(captured_output),
+            "progress": progress_log,
+        }
 
 
 @server.custom_route("/health", methods=["GET"])
@@ -576,6 +900,11 @@ async def api_schema(request: Request) -> JSONResponse:
                 "method": "POST",
                 "description": "Normative developmental trajectory analysis",
                 "parameters": NormativeAnalysisRequest.model_json_schema(),
+            },
+            "search_pubmed": {
+                "method": "POST",
+                "description": "Search PubMed via NCBI E-utilities (esearch + esummary)",
+                "parameters": PubMedSearchRequest.model_json_schema(),
             },
             "upload": {
                 "method": "POST",
@@ -703,6 +1032,29 @@ async def http_run_normative_analysis(request: Request) -> JSONResponse:
     except Exception as e:
         logger.error(f"Request error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    
+@server.custom_route("/search_pubmed", methods=["POST"])
+@rate_limit
+async def http_search_pubmed(request: Request) -> JSONResponse:
+    """HTTP endpoint for PubMed search."""
+    try:
+        data = await request.json()
+        validated = PubMedSearchRequest(**data)
+
+        result = search_pubmed(
+            query=validated.query,
+            max_results=validated.max_results,
+            year_from=validated.year_from,
+            year_to=validated.year_to,
+        )
+        return JSONResponse(result)
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        logger.error(f"Request error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 
 
 @server.custom_route("/upload", methods=["POST"])
@@ -800,7 +1152,7 @@ if __name__ == "__main__":
     logger.info("="*60)
     logger.info("Brain Network Analysis MCP Server starting...")
     logger.info(f"Rate limiting: {RATE_LIMIT_REQUESTS} requests per {RATE_LIMIT_WINDOW}s")
-    logger.info(f"Listening on: http://yukon.acm.unc.edu:8010")
+    logger.info(f"Listening on: http://{_SERVER_HOST}:{_SERVER_PORT}")
     logger.info("="*60)
     logger.info("Available endpoints:")
     logger.info("  GET  /health                     - Health check")
@@ -809,6 +1161,7 @@ if __name__ == "__main__":
     logger.info("  POST /run_hub_detection          - Hub detection")
     logger.info("  POST /get_growth_curve           - Growth curve data")
     logger.info("  POST /run_normative_analysis     - Normative analysis")
+    logger.info("  POST /search_pubmed             - PubMed literature search")
     logger.info("  POST /upload                     - Upload file for analysis")
     logger.info("  GET  /list_files                 - List uploaded files")
     logger.info("  DELETE /delete_file              - Delete uploaded file")
