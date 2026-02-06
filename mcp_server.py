@@ -27,6 +27,8 @@ from tools import (
     get_file_path,
 )
 
+from stats_tools import StatsToolkit
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -840,3 +842,43 @@ if __name__ == "__main__":
         logger.error(f"Server error: {str(e)}", exc_info=True)
     finally:
         logger.info("Server stopped")
+
+# --- LAKSHIN'S UPDATED STATISTICAL TOOLS ---
+
+@mcp.tool()
+def run_correlation(data_source: str, var1: str, var2: str) -> str:
+    """
+    Calculates Pearson correlation between two variables (Linear Relationship).
+    Returns correlation coefficient, p-value, and significance.
+    """
+    result = StatsToolkit.correlation_analysis(data_source, var1, var2)
+    return json.dumps(result)
+
+@mcp.tool()
+def run_group_comparison(data_source: str, group_col: str, metric_col: str, group_a: str, group_b: str, method: str = "ttest") -> str:
+    """
+    Compares two groups. Returns p-value AND Cohen's d Effect Size.
+    Args:
+        method: 'ttest' (standard) or 'mannwhitney' (use if data is non-normal/skewed).
+    """
+    # This calls the NEW 'compare_groups' function we just wrote
+    result = StatsToolkit.compare_groups(data_source, group_col, metric_col, group_a, group_b, method)
+    return json.dumps(result)
+
+@mcp.tool()
+def apply_fdr_correction(p_values: list[float]) -> str:
+    """
+    Applies False Discovery Rate (Benjamini-Hochberg) correction.
+    MANDATORY when testing multiple brain regions to prevent false positives.
+    """
+    result = StatsToolkit.correct_p_values(p_values)
+    return json.dumps(result)
+
+@mcp.tool()
+def detect_outliers(data_source: str, column: str) -> str:
+    """
+    Scans a column for statistical outliers (Z-score > 3).
+    Use this to clean data before running T-tests.
+    """
+    result = StatsToolkit.detect_outliers_zscore(data_source, column)
+    return json.dumps(result)
