@@ -108,6 +108,7 @@ File resolution: `data_path` and `y_path` are resolved by checking the upload di
 | POST | `/run_hub_detection` | Hub detection in brain networks |
 | POST | `/get_growth_curve` | Load growth curve data |
 | POST | `/run_normative_analysis` | Normative analysis with overlay data |
+| POST | `/search_pubmed` | PubMed literature search |
 | POST | `/upload` | Upload CSV file (multipart) |
 | GET | `/list_files` | List uploaded files |
 | DELETE or POST | `/delete_file` | Delete uploaded file |
@@ -165,6 +166,17 @@ Valid phenotypes:
   "y_path": "my_overlay.csv",
   "age_col": "age",
   "val_col": "value"
+}
+```
+
+#### `POST /search_pubmed`
+
+```json
+{
+  "query": "functional connectivity autism",
+  "max_results": 10,
+  "year_from": 2020,
+  "year_to": 2026
 }
 ```
 
