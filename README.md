@@ -576,7 +576,7 @@ is available.
 }
 ```
 
-## Internet Search (Combined Scholarly Search)
+### Internet Search (Combined Scholarly Search)
 
 **Endpoint:**`POST /internet_search`
 
