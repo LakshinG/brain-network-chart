@@ -109,6 +109,9 @@ File resolution: `data_path` and `y_path` are resolved by checking the upload di
 | POST | `/get_growth_curve` | Load growth curve data |
 | POST | `/run_normative_analysis` | Normative analysis with overlay data |
 | POST | `/search_pubmed` | PubMed literature search |
+| POST | `/openalex_search` | Performs broad scholarly discovery using OpenAlex |
+| POST | `/crossref_enrich` | Enriches and normalizes bibliographic metadata using Crossref |
+| POST | `/internet_search` | Combined internet search pipeline using openalex and crossref |
 | POST | `/upload` | Upload CSV file (multipart) |
 | GET | `/list_files` | List uploaded files |
 | DELETE or POST | `/delete_file` | Delete uploaded file |
@@ -177,6 +180,40 @@ Valid phenotypes:
   "max_results": 10,
   "year_from": 2020,
   "year_to": 2026
+}
+```
+
+#### `POST /openalex_search`
+
+```json
+{
+  "query": "autism functional connectivity",
+  "max_results": 5,
+  "from_year": 2021,
+  "to_year": 2026
+}
+```
+
+#### `POST /crossref_enrich`
+
+```json
+{
+  "dois": [
+    "10.1038/nrn3241",
+    "10.1016/j.neuroimage.2010.07.051"
+  ],
+  "max_items": 50
+}
+```
+
+#### `POST /internet_search`
+
+```json
+{
+  "query": "default mode network autism",
+  "max_results": 5,
+  "from_year": 2020,
+  "to_year": 2026
 }
 ```
 
@@ -436,6 +473,132 @@ Analyzes developmental trajectories and generates normative curves.
     "age": [...],
     "values": [...]
   }
+}
+```
+## Database Query Tools
+
+The MCP server includes **database-backed query tools** that allow agents to retrieve
+**external scientific evidence** in a structured, reproducible, and server-safe manner.
+These tools support literature discovery, evidence validation, and query refinement
+within multi-agent workflows.
+
+Unlike general-purpose web scraping, all database query tools rely on **official APIs**
+that are stable on shared compute infrastructure and suitable for automated access.
+
+---
+
+### Overview
+
+| Tool | Purpose | Backend |
+|---|---|---|
+| `/search_pubmed` | Biomedical literature search | NCBI PubMed |
+| `/openalex_search` | Broad scholarly discovery | OpenAlex |
+| `/crossref_enrich` | DOI validation & metadata normalization | Crossref |
+| `/internet_search` | Combined discovery + validation pipeline | OpenAlex + Crossref |
+
+---
+
+### PubMed Literature Search
+
+**Endpoint:** `POST /search_pubmed`
+
+**Description**  
+Queries the PubMed database for biomedical and neuroscience literature. This tool is
+optimized for authoritative, peer-reviewed evidence and supports publication year
+filtering.
+
+**Typical use cases**
+- Retrieve biomedical background literature
+- Validate claims related to brain connectivity, fMRI, or clinical cohorts
+- Seed follow-up searches in other databases
+
+**Example request**
+```json
+{
+  "query": "functional connectivity autism",
+  "max_results": 10,
+  "year_from": 2020,
+  "year_to": 2026
+}
+```
+
+### OpenAlex Search
+
+**Endpoint:** `POST /openalex_search`
+
+**Description**  
+Performs broad scholarly discovery across disciplines. OpenAlex indexes journal
+articles, conference papers, and preprints, and provides concept-level metadata
+useful for query expansion and ranking.
+
+**Typical use cases**
+- Discover relevant literature beyond biomedical databases
+- Explore methods, datasets, and modeling approaches
+- Generate candidate DOIs for downstream validation
+
+**Example request**
+```json
+{
+  "query": "functional connectivity autism",
+  "max_results": 10,
+  "from_year": 2021,
+  "to_year": 2026
+}
+```
+
+### Crossref Metadata Enrichment
+
+**Endpoint:**`POST /crossref_enrich`
+
+**Description**
+Crossref is used in this system as the **authoritative bibliographic validation layer**.
+While discovery tools (e.g., OpenAlex) are optimized for broad retrieval, Crossref
+provides **canonical, citation-grade metadata** anchored by DOIs.
+
+**Typical use cases**
+The Crossref tool is designed to:
+- Validate DOI identifiers
+- Normalize bibliographic metadata
+- Deduplicate results across multiple discovery sources
+- Provide citation-ready fields for downstream reporting and validation
+
+Crossref is treated as the **source of truth** for publication metadata when a DOI
+is available.
+
+**Example request**
+```json
+{
+  "dois": [
+    "10.1038/nrn3241",
+    "10.1016/j.neuroimage.2010.07.051"
+  ],
+  "max_items": 50
+}
+```
+
+## Internet Search (Combined Scholarly Search)
+
+**Endpoint:**`POST /internet_search`
+
+**Description**
+The internet_search tool provides a **high-level, agent-facing internet search
+interface** that combines **broad scholarly discovery** with **authoritative
+metadata validation.
+
+**Typical use cases**
+The internet_search endpoint is designed to:
+- Discover relevant scholarly works across disciplines
+- Validate and normalize metadata using DOI-based enrichment
+- Return deduplicated, citation-ready results for agent reasoning
+- Serve as the primary external knowledge source for research agents
+
+**Example request**
+```json
+{
+  "query": "default mode network autism",
+  "max_results": 5,
+  "from_year": 2020,
+  "to_year": 2026
 }
 ```
 

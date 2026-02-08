@@ -88,6 +88,25 @@ class PubMedSearchRequest(BaseModel):
     year_from: Optional[int] = Field(None, ge=1900, le=datetime.now().year, description="Filter Start year (inclusive)")
     year_to: Optional[int] = Field(None, ge=1900, le=datetime.now().year, description="Filter End year (inclusive)")
 
+class OpenAlexSearchRequest(BaseModel):
+    query: str = Field(..., description="Search query for OpenAlex works")
+    max_results: int = Field(10, ge=1, le=50, description="Max results (1-50)")
+    from_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter from publication year (inclusive)")
+    to_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter to publication year (inclusive)")
+
+
+class CrossrefEnrichRequest(BaseModel):
+    dois: List[str] = Field(..., description="List of DOIs to enrich via Crossref (e.g., 10.1038/...)")
+    max_items: int = Field(50, ge=1, le=200, description="Max DOIs to process (safety cap)")
+
+
+class InternetSearchRequest(BaseModel):
+    query: str = Field(..., description="Internet search query (OpenAlex + Crossref)")
+    max_results: int = Field(10, ge=1, le=50, description="Max results (1-50)")
+    from_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter from publication year (inclusive)")
+    to_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter to publication year (inclusive)")
+
+
 class ResponseSchema(BaseModel):
     status: str
     timestamp: str
@@ -310,6 +329,46 @@ def _pubmed_esummary(pmids: List[str]) -> Dict[str, Any]:
     if len(parts) == 1:
         return parts[0]
     return _merge_pubmed_esummary_json(parts)
+
+from urllib.parse import quote_plus
+
+OPENALEX_WORKS = "https://api.openalex.org/works"
+CROSSREF_WORKS = "https://api.crossref.org/works"
+
+CONTACT_EMAIL = os.getenv("CONTACT_EMAIL", "")
+TOOL_NAME = os.getenv("TOOL_NAME", "brain-network-chart")
+
+def _clean_doi(doi: str) -> str:
+    doi = (doi or "").strip()
+    if doi.startswith("https://doi.org/"):
+        doi = doi[len("https://doi.org/"):]
+    if doi.startswith("http://doi.org/"):
+        doi = doi[len("http://doi.org/"):]
+    return doi.lower()
+
+def _openalex_get(params: dict) -> dict:
+    # OpenAlex recommends including mailto for good citizenship
+    p = dict(params)
+    if CONTACT_EMAIL:
+        p["mailto"] = CONTACT_EMAIL
+    r = requests.get(OPENALEX_WORKS, params=p, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+def _crossref_get_by_doi(doi: str) -> Optional[dict]:
+    doi = _clean_doi(doi)
+    if not doi:
+        return None
+    url = f"{CROSSREF_WORKS}/{quote_plus(doi)}"
+    headers = {
+        # Crossref asks for a descriptive UA with contact info when possible
+        "User-Agent": f"{TOOL_NAME} (mailto:{CONTACT_EMAIL})" if CONTACT_EMAIL else TOOL_NAME
+    }
+    r = requests.get(url, headers=headers, timeout=20)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.json().get("message")
 
 
 def _get_server_host_port() -> tuple[str, int]:
@@ -859,6 +918,245 @@ def search_pubmed(
             "progress": progress_log,
         }
 
+@server.tool(name="openalex_search")
+@validate_parameters(max_results={"min": 1, "max": 50, "type": int})
+def openalex_search(
+    query: str,
+    max_results: int = 10,
+    from_year: Optional[int] = None,
+    to_year: Optional[int] = None,
+) -> dict:
+    progress_log = []
+    start_time = time.time()
+
+    try:
+        q = query.strip()
+        if not q:
+            raise ValueError("query must be a non-empty string")
+        if from_year is not None and to_year is not None and from_year > to_year:
+            raise ValueError("from_year must be <= to_year")
+
+        progress_log.append({"step": "search", "message": f"OpenAlex searching for: {q!r}"})
+
+        params = {
+            "search": q,
+            "per-page": max_results,
+        }
+
+        # OpenAlex filter syntax
+        filters = []
+        if from_year is not None:
+            filters.append(f"from_publication_year:{from_year}")
+        if to_year is not None:
+            filters.append(f"to_publication_year:{to_year}")
+        if filters:
+            params["filter"] = ",".join(filters)
+
+        data = _openalex_get(params)
+
+        results = []
+        for item in (data.get("results") or [])[:max_results]:
+            doi = item.get("doi") or ""
+            doi = _clean_doi(doi)
+
+            host_venue = item.get("host_venue") or {}
+            venue_name = host_venue.get("display_name") or ""
+
+            authorships = item.get("authorships") or []
+            authors = ", ".join(
+                [(a.get("author") or {}).get("display_name", "") for a in authorships if (a.get("author") or {}).get("display_name")]
+            )[:300]
+
+            results.append({
+                "title": (item.get("title") or "").strip(),
+                "year": item.get("publication_year"),
+                "doi": doi or None,
+                "url": (item.get("doi") or item.get("id") or "").strip(),
+                "venue": venue_name,
+                "authors": authors,
+                "cited_by_count": item.get("cited_by_count"),
+                "source": "openalex",
+            })
+
+        elapsed = time.time() - start_time
+        progress_log.append({"step": "done", "message": f"Returning {len(results)} results"})
+
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "query_used": q,
+            "count_returned": len(results),
+            "results": results,
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+    except Exception as e:
+        logger.error(f"OpenAlex search error: {str(e)}", exc_info=True)
+        progress_log.append({"step": "error", "message": f"Error: {str(e)}"})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+@server.tool(name="crossref_enrich")
+def crossref_enrich(dois: List[str], max_items: int = 50) -> dict:
+    progress_log = []
+    start_time = time.time()
+    try:
+        if not dois:
+            raise ValueError("dois must be a non-empty list")
+        dois = [_clean_doi(d) for d in dois][:max_items]
+        dois = [d for d in dois if d]
+
+        progress_log.append({"step": "enrich", "message": f"Crossref enriching {len(dois)} DOIs"})
+
+        results = []
+        for i, doi in enumerate(dois, start=1):
+            msg = _crossref_get_by_doi(doi)
+            if not msg:
+                continue
+
+            title_list = msg.get("title") or []
+            title = title_list[0].strip() if title_list else ""
+
+            container = msg.get("container-title") or []
+            journal = container[0].strip() if container else ""
+
+            issued = (msg.get("issued") or {}).get("date-parts") or []
+            year = None
+            if issued and issued[0] and isinstance(issued[0][0], int):
+                year = issued[0][0]
+
+            author_list = msg.get("author") or []
+            authors = ", ".join(
+                [(" ".join([a.get("given","").strip(), a.get("family","").strip()]).strip()) for a in author_list if (a.get("given") or a.get("family"))]
+            )[:300]
+
+            results.append({
+                "doi": doi,
+                "title": title,
+                "journal": journal,
+                "year": year,
+                "publisher": msg.get("publisher"),
+                "url": (msg.get("URL") or f"https://doi.org/{doi}"),
+                "authors": authors,
+                "type": msg.get("type"),
+                "source": "crossref",
+            })
+
+        elapsed = time.time() - start_time
+        progress_log.append({"step": "done", "message": f"Enriched {len(results)} items"})
+
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "count_returned": len(results),
+            "results": results,
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+    except Exception as e:
+        logger.error(f"Crossref enrich error: {str(e)}", exc_info=True)
+        progress_log.append({"step": "error", "message": f"Error: {str(e)}"})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+@server.tool(name="internet_search")
+@validate_parameters(max_results={"min": 1, "max": 50, "type": int})
+def internet_search(
+    query: str,
+    max_results: int = 10,
+    from_year: Optional[int] = None,
+    to_year: Optional[int] = None,
+) -> dict:
+    progress_log = []
+    start_time = time.time()
+
+    try:
+        progress_log.append({"step": "phase", "message": "Phase 1: OpenAlex discovery"})
+        oa = openalex_search(query=query, max_results=max_results, from_year=from_year, to_year=to_year)
+        if oa.get("status") != "success":
+            return oa  # propagate error
+
+        oa_results = oa.get("results") or []
+        dois = [r.get("doi") for r in oa_results if r.get("doi")]
+        dois = [_clean_doi(d) for d in dois if d]
+
+        progress_log.append({"step": "phase", "message": f"Phase 2: Crossref enrich ({len(dois)} DOIs)"})
+        cr_map = {}
+        if dois:
+            cr = crossref_enrich(dois=dois, max_items=50)
+            if cr.get("status") == "success":
+                for item in cr.get("results") or []:
+                    if item.get("doi"):
+                        cr_map[item["doi"]] = item
+
+        progress_log.append({"step": "phase", "message": "Phase 3: Merge results"})
+        merged = []
+        for r in oa_results:
+            doi = _clean_doi(r.get("doi") or "")
+            if doi and doi in cr_map:
+                c = cr_map[doi]
+                merged.append({
+                    "title": c.get("title") or r.get("title"),
+                    "year": c.get("year") or r.get("year"),
+                    "doi": doi,
+                    "url": c.get("url") or r.get("url"),
+                    "venue": c.get("journal") or r.get("venue"),
+                    "authors": c.get("authors") or r.get("authors"),
+                    "source": "openalex+crossref",
+                })
+            else:
+                merged.append({
+                    "title": r.get("title"),
+                    "year": r.get("year"),
+                    "doi": doi or None,
+                    "url": r.get("url"),
+                    "venue": r.get("venue"),
+                    "authors": r.get("authors"),
+                    "source": "openalex",
+                })
+
+        elapsed = time.time() - start_time
+        progress_log.append({"step": "done", "message": f"Returning {len(merged)} merged results"})
+
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "query_used": query,
+            "count_returned": len(merged),
+            "results": merged,
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+    except Exception as e:
+        logger.error(f"Internet search error: {str(e)}", exc_info=True)
+        progress_log.append({"step": "error", "message": f"Error: {str(e)}"})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "console_output": "",
+            "progress": progress_log,
+        }
+
 
 @server.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
@@ -906,6 +1204,22 @@ async def api_schema(request: Request) -> JSONResponse:
                 "description": "Search PubMed via NCBI E-utilities (esearch + esummary)",
                 "parameters": PubMedSearchRequest.model_json_schema(),
             },
+            "openalex_search": {
+                "method": "POST",
+                "description": "Scholarly discovery search via OpenAlex works",
+                "parameters": OpenAlexSearchRequest.model_json_schema(),
+            },
+            "crossref_enrich": {
+                "method": "POST",
+                "description": "Enrich/normalize bibliographic metadata by DOI via Crossref",
+                "parameters": CrossrefEnrichRequest.model_json_schema(),
+            },
+            "internet_search": {
+                "method": "POST",
+                "description": "Combined internet search (OpenAlex discovery + Crossref DOI enrichment)",
+                "parameters": InternetSearchRequest.model_json_schema(),
+            },
+
             "upload": {
                 "method": "POST",
                 "description": "Upload a file for analysis (multipart/form-data)",
@@ -1055,7 +1369,28 @@ async def http_search_pubmed(request: Request) -> JSONResponse:
         logger.error(f"Request error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@server.custom_route("/openalex_search", methods=["POST"])
+@rate_limit
+async def http_openalex_search(request: Request) -> JSONResponse:
+    data = await request.json()
+    v = OpenAlexSearchRequest(**data)
+    return JSONResponse(openalex_search(v.query, v.max_results, v.from_year, v.to_year))
 
+
+@server.custom_route("/crossref_enrich", methods=["POST"])
+@rate_limit
+async def http_crossref_enrich(request: Request) -> JSONResponse:
+    data = await request.json()
+    v = CrossrefEnrichRequest(**data)
+    return JSONResponse(crossref_enrich(v.dois, v.max_items))
+
+
+@server.custom_route("/internet_search", methods=["POST"])
+@rate_limit
+async def http_internet_search(request: Request) -> JSONResponse:
+    data = await request.json()
+    v = InternetSearchRequest(**data)
+    return JSONResponse(internet_search(v.query, v.max_results, v.from_year, v.to_year))
 
 @server.custom_route("/upload", methods=["POST"])
 @rate_limit
