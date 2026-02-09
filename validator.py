@@ -5,16 +5,14 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from agent_client import OllamaLLM
 
-# Dynamic Tool Import
+# combined internet_search and search_pubmed
 try:
-    from mcp_server import search_pubmed
-    HAS_PUBSEARCH = True
-    print("PubSearch Tool Loaded: Validator can now check facts against literature.")
+    from mcp_server import search_pubmed, internet_search
+    HAS_SEARCH_TOOLS = True
+    print("Search Tools Loaded: OpenAlex (Broad) and PubMed (Medical) active.")
 except ImportError:
-    HAS_PUBSEARCH = False
-    print("PubSearch Tool NOT found in mcp_server.py. Validator running in 'Logic-Only' mode.")
-
-# Define Data Models (Pydantic) 
+    HAS_SEARCH_TOOLS = False
+    print(" Search Tools NOT found in mcp_server.py. Validator running in 'Logic-Only' mode.")
 
 class ValidationRequest(BaseModel):
     """Input payload from other agents"""
@@ -28,30 +26,31 @@ class ValidationResult(BaseModel):
     feedback: str = Field(..., description="Specific instructions on what is missing or wrong.")
     score: int = Field(..., description="Confidence score 1-10.")
 
-# The Validation Agent Logic 
-
 class ValidationAgent:
     def __init__(self, llm_client):
         self.llm = llm_client
 
-    def validate(self, original_query: str, analysis_result: str, tool_name: str) -> ValidationResult:
+    def validate(self, original_query: str, analysis_result: str, tool_used: str) -> ValidationResult:
         
-        # Gather context 
+        #  Gather context
         context_messages = []
         
-        if HAS_PUBSEARCH:
-            print(f"Cross-referencing claim with PubMed for query: '{original_query}'.")
+        if HAS_SEARCH_TOOLS:
+            print(f"Cross-referencing claim with OpenAlex & PubMed: '{original_query}'...")
             try:
-                pub_data = search_pubmed(query=original_query, max_results=3)
+                # 1. Broad Search using OpenAlex + Crossref
+                broad_data = internet_search(query=original_query)
+                if isinstance(broad_data, dict) and broad_data.get("count_returned", 0) > 0:
+                    context_messages.append(f"OpenAlex/Crossref Findings \n{json.dumps(broad_data.get('results', []), indent=2)}")
                 
-                if isinstance(pub_data, dict) and pub_data.get("count_returned", 0) > 0:
-                    context_messages.append(f"--- RELEVANT PUBMED ABSTRACTS ---\n{json.dumps(pub_data.get('results', []), indent=2)}")
-                else:
-                    context_messages.append("--- PUBMED SEARCH ---: No relevant papers found.")
-                    
+                # 2. Specific Medical Search using PubMed - for deep medical checks
+                med_data = search_pubmed(query=original_query, max_results=2)
+                if isinstance(med_data, dict) and med_data.get("count_returned", 0) > 0:
+                    context_messages.append(f"Pubmed Abstracts\n{json.dumps(med_data.get('results', []), indent=2)}")
+
             except Exception as e:
-                print(f"PubMed Search Failed: {e}")
-                context_messages.append(f"SYSTEM NOTE: External literature search failed (Error: {str(e)}). Validate based on logic only.")
+                print(f"Literature Search Failed: {e}")
+                context_messages.append(f"NOTE: External context retrieval failed ({str(e)}). Validate based on logic only.")
 
         literature_context = "\n\n".join(context_messages) if context_messages else "No external literature context available."
  
@@ -66,7 +65,7 @@ class ValidationAgent:
         Review the following analysis result against the user's original query and the provided literature context.
 
         **User Query:** "{original_query}"
-        **Tool Used:** "{tool_name}"
+        **Tool Used:** "{tool_used}"
         **Analysis Result:** {analysis_result}
 
         ### EXTERNAL CONTEXT (For Fact/Novelty Checking)
@@ -113,7 +112,7 @@ class ValidationAgent:
 # Mock Client 
 class MockOllamaLLM:
     def __init__(self, host, model):
-        print(f"OFFLINE MODE: Simulating {model}...")
+        print(f"Offline Mode: Simulating {model}...")
 
     def generate_text(self, prompt, system=None):
         return '{"is_valid": true, "feedback": "PASSED (Simulation Mode)", "score": 9}'

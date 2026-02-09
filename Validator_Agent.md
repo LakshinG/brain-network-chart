@@ -3,7 +3,7 @@
 ## Overview
 The **Validator Agent** acts as a Research Supervisor in the multi-agent system. Its primary role is to verify the outputs of the Researcher Agent before they are finalized. It performs a hybrid validation check:
 1.  **Statistical Logic:** Ensures p-values, degrees of freedom, and sample sizes are consistent and methodology is appropriate.
-2.  **Scientific Fact-Checking:** Cross-references claims against live PubMed literature to detect hallucinations or contradictions with established science.
+2.  **Scientific Fact-Checking:** Cross-references claims against specific live PubMed and broader OpenAlex literature to detect hallucinations or contradictions with established science.
 
 ## Technical Architecture & SDKs
 * **Model:** TxGemma-27B (via Ollama)
