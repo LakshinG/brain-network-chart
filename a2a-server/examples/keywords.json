@@ -1,0 +1,8 @@
+{
+  "task_id": "kw-001",
+  "sender": "planner",
+  "intent": "KEYWORDS",
+  "payload": {
+    "text": "Investigate hippocampal connectivity and memory performance metrics in aging."
+  }
+}

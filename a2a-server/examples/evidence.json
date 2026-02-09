@@ -1,0 +1,11 @@
+{
+  "task_id": "ev-001",
+  "sender": "executor",
+  "intent": "EVIDENCE",
+  "payload": {
+    "trait_names": ["memory", "attention"],
+    "metric_names": ["functional connectivity", "graph centrality"],
+    "brain_regions": ["hippocampus", "prefrontal cortex"],
+    "top_k": 8
+  }
+}

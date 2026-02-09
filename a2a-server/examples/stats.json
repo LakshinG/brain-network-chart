@@ -1,0 +1,14 @@
+{
+  "task_id": "st-001",
+  "sender": "executor",
+  "intent": "STATS",
+  "payload": {
+    "outcome_column": "outcome",
+    "table": [
+      {"subject": "S1", "connectivity": 0.42, "age": 62, "outcome": 1},
+      {"subject": "S2", "connectivity": 0.35, "age": 59, "outcome": 0},
+      {"subject": "S3", "connectivity": 0.51, "age": 65, "outcome": 1},
+      {"subject": "S4", "connectivity": 0.28, "age": 57, "outcome": 0}
+    ]
+  }
+}
