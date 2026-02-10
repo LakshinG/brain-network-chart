@@ -18,11 +18,10 @@ planner_agent = RemoteA2aAgent(
     agent_card=(
         f"http://localhost:8031/a2a/planner_agent{AGENT_CARD_WELL_KNOWN_PATH}"
     ),
-    output_key="ExecutionPlan",
 )
 executor_agent = RemoteA2aAgent(
     name="executor_agent",
-    instruction="Agent that executes tools according to tasks from {ExecutionPlan}.",
+    # instruction="Agent that executes tools according to tasks from {ExecutionPlan}.",
     agent_card=(
         f"http://localhost:8031/a2a/executor_agent{AGENT_CARD_WELL_KNOWN_PATH}"
     ),

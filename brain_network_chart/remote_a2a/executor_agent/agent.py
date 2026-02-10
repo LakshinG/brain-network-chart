@@ -29,8 +29,7 @@ os.environ.setdefault("OLLAMA_API_BASE", OLLAMA_API_BASE)
 root_agent = LlmAgent(
     model=LiteLlm(model=HOST_MODEL),
     name="executor_agent",
-    instruction="""Execute tools given planned tasks.
-    """,
+    instruction="Agent that executes tools according to tasks from [ExecutionPlan].",
     tools=[
         McpToolset(
         connection_params=StreamableHTTPServerParams(

@@ -149,6 +149,6 @@ root_agent = LlmAgent(
     model=LiteLlm(model=MODEL_NAME),
     instruction=PLANNER_INSTRUCTIONS,
     output_schema=ExecutionPlan,
-    output_key="execution_plan",
+    output_key="ExecutionPlan",
     # sub_agents=[executor_agent, researcher_agent, validator_agent],
 )
