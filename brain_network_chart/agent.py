@@ -15,14 +15,14 @@ os.environ.setdefault("OLLAMA_API_BASE", OLLAMA_API_BASE)
 
 planner_agent = RemoteA2aAgent(
     name="planner_agent",
-    description="Agent that plans tasks for queries.",
     agent_card=(
         f"http://localhost:8031/a2a/planner_agent{AGENT_CARD_WELL_KNOWN_PATH}"
     ),
+    output_key="ExecutionPlan",
 )
 executor_agent = RemoteA2aAgent(
     name="executor_agent",
-    description="Agent that executes tools for queries.",
+    instruction="Agent that executes tools according to tasks from {ExecutionPlan}.",
     agent_card=(
         f"http://localhost:8031/a2a/executor_agent{AGENT_CARD_WELL_KNOWN_PATH}"
     ),
