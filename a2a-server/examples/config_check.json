@@ -1,9 +1,0 @@
-{
-  "task_id": "cfg-001",
-  "sender": "validator",
-  "intent": "CONFIG_CHECK",
-  "payload": {
-    "current_config": {"alpha": 0.05, "fdr": "none"},
-    "recommended_config": {"alpha": 0.05, "fdr": "bh"}
-  }
-}
