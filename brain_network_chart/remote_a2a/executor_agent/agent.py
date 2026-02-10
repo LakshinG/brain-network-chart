@@ -1,42 +1,41 @@
-# ./adk_agent_samples/mcp_agent/agent.py
 import os # Required for path operations
-from google.adk.agents import LlmAgent
-from google.adk.tools.mcp_tool import McpToolset
-from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
-from mcp import StdioServerParameters
 
-# It's good practice to define paths dynamically if possible,
-# or ensure the user understands the need for an ABSOLUTE path.
-# For this example, we'll construct a path relative to this file,
-# assuming '/path/to/your/folder' is in the same directory as agent.py.
-# REPLACE THIS with an actual absolute path if needed for your setup.
-TARGET_FOLDER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "/path/to/your/folder")
-# Ensure TARGET_FOLDER_PATH is an absolute path for the MCP server.
-# If you created ./adk_agent_samples/mcp_agent/your_folder,
+from google.adk.models.lite_llm import LiteLlm
+
+import asyncio
+import json
+from typing import Any
+
+from dotenv import load_dotenv
+from google.adk.agents.llm_agent import LlmAgent
+# from google.adk.artifacts.in_memory_artifact_service import (
+#     InMemoryArtifactService,  # Optional
+# )
+# from google.adk.runners import Runner
+# from google.adk.sessions import InMemorySessionService
+from google.adk.tools.mcp_tool.mcp_toolset import (
+    McpToolset,
+)
+from google.adk.tools.mcp_tool.mcp_session_manager import StreamableHTTPServerParams
+# from google.genai import types
+from rich import print
+load_dotenv()
+
+OLLAMA_API_BASE = os.environ.get("OLLAMA_API_BASE", "http://yukon.acm.unc.edu:11434")
+HOST_MODEL = os.environ.get("HOST_MODEL", "ollama_chat/qwen3:latest")
+os.environ.setdefault("OLLAMA_API_BASE", OLLAMA_API_BASE)
+
 
 root_agent = LlmAgent(
-    model='gemini-2.0-flash',
-    name='filesystem_assistant_agent',
-    instruction='Help the user manage their files. You can list files, read files, etc.',
+    model=LiteLlm(model=HOST_MODEL),
+    name="executor_agent",
+    instruction="""Execute tools given planned tasks.
+    """,
     tools=[
         McpToolset(
-            connection_params=StdioConnectionParams(
-                server_params = StdioServerParameters(
-                    command='npx',
-                    args=[
-                        "-y",  # Argument for npx to auto-confirm install
-                        "@modelcontextprotocol/server-filesystem",
-                        # IMPORTANT: This MUST be an ABSOLUTE path to a folder the
-                        # npx process can access.
-                        # Replace with a valid absolute path on your system.
-                        # For example: "/Users/youruser/accessible_mcp_files"
-                        # or use a dynamically constructed absolute path:
-                        os.path.abspath(TARGET_FOLDER_PATH),
-                    ],
-                ),
-            ),
-            # Optional: Filter which tools from the MCP server are exposed
-            # tool_filter=['list_directory', 'read_file']
+        connection_params=StreamableHTTPServerParams(
+            url="http://localhost:8010/mcp",
         )
+    )
     ],
 )

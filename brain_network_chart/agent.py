@@ -24,7 +24,7 @@ executor_agent = RemoteA2aAgent(
     name="executor_agent",
     description="Agent that executes tools for queries.",
     agent_card=(
-        f"http://localhost:8041/agent-card"
+        f"http://localhost:8031/a2a/executor_agent{AGENT_CARD_WELL_KNOWN_PATH}"
     ),
 )
 TEST_CASES = [
