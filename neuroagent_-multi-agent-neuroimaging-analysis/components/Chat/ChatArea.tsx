@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import { ChatMessage, AgentType } from '../../types';
 import MessageBubble from './MessageBubble';
@@ -10,22 +11,33 @@ interface ChatAreaProps {
   onLoadDemo: () => void;
   isProcessing: boolean;
   hasData: boolean;
+  highlightedMessageId: string | null;
+  onRestartStep: (messageId: string, newParams: any) => void;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({ 
-  messages, onSendMessage, onFileUpload, onLoadDemo, isProcessing, hasData 
+  messages, onSendMessage, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep 
 }) => {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (!highlightedMessageId) {
+        scrollToBottom();
+    }
+  }, [messages, highlightedMessageId]);
+
+  useEffect(() => {
+    if (highlightedMessageId && messageRefs.current[highlightedMessageId]) {
+        messageRefs.current[highlightedMessageId]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightedMessageId]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +65,13 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
       <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <div key={msg.id} ref={(el) => { messageRefs.current[msg.id] = el; }}>
+            <MessageBubble 
+                message={msg} 
+                isHighlighted={msg.id === highlightedMessageId}
+                onRestart={onRestartStep}
+            />
+          </div>
         ))}
         {isProcessing && (
            <div className="flex justify-start animate-pulse ml-2">

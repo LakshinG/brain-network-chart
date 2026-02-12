@@ -2,16 +2,20 @@
 import React from 'react';
 import { ToolVisualization, VisualizationType } from '../../types';
 import { ScatterPlot, StatsBarChart } from './Charts';
-import { FileText, Database, BookOpen } from 'lucide-react';
+import { FileText, Database, BookOpen, Link } from 'lucide-react';
 
 interface VisualizerAreaProps {
   visualizations: ToolVisualization[];
   datasetName?: string;
+  onVizClick?: (messageId?: string) => void;
 }
 
-const VisualizationCard: React.FC<{ visualization: ToolVisualization }> = ({ visualization }) => {
+const VisualizationCard: React.FC<{ visualization: ToolVisualization, onClick?: () => void }> = ({ visualization, onClick }) => {
   return (
-    <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-xl flex-shrink-0">
+    <div 
+        onClick={onClick}
+        className={`bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-xl flex-shrink-0 transition-all ${visualization.messageId ? 'cursor-pointer hover:ring-2 hover:ring-indigo-500/50 hover:border-indigo-500' : ''}`}
+    >
       <div className="bg-slate-900 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
         <div className="flex items-center space-x-2">
           {visualization.type === VisualizationType.SCATTER_PLOT && <Database className="w-4 h-4 text-sky-400" />}
@@ -20,12 +24,16 @@ const VisualizationCard: React.FC<{ visualization: ToolVisualization }> = ({ vis
           {visualization.type === VisualizationType.DATA_TABLE && <FileText className="w-4 h-4 text-emerald-400" />}
           <span className="font-semibold text-slate-200">{visualization.title}</span>
         </div>
-        <span className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-600">
-          {visualization.type}
-        </span>
+        <div className="flex items-center gap-2">
+            {visualization.messageId && <Link className="w-3 h-3 text-slate-500" />}
+            <span className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-600">
+            {visualization.type}
+            </span>
+        </div>
       </div>
 
-      <div className="p-4 bg-slate-800/50">
+      <div className="p-4 bg-slate-800/50 pointer-events-none"> 
+         {/* pointer-events-none ensures clicking charts doesn't interfere with card click unless handled specifically */}
         {visualization.type === VisualizationType.SCATTER_PLOT && (
           <ScatterPlot data={visualization.data} config={visualization.config} />
         )}
@@ -35,7 +43,7 @@ const VisualizationCard: React.FC<{ visualization: ToolVisualization }> = ({ vis
         )}
 
         {visualization.type === VisualizationType.DATA_TABLE && (
-          <div className="overflow-x-auto max-h-80 custom-scrollbar">
+          <div className="overflow-x-auto max-h-80 custom-scrollbar pointer-events-auto">
             <table className="w-full text-left text-sm text-slate-300">
               <thead className="bg-slate-700/50 uppercase text-xs font-semibold text-slate-400 sticky top-0">
                 <tr>
@@ -59,9 +67,9 @@ const VisualizationCard: React.FC<{ visualization: ToolVisualization }> = ({ vis
         )}
 
         {visualization.type === VisualizationType.LITERATURE_LIST && (
-           <div className="space-y-4">
+           <div className="space-y-4 pointer-events-auto">
              {visualization.data.map((paper: any, idx: number) => (
-               <div key={idx} className="p-4 bg-slate-900 rounded-lg border border-slate-700 hover:border-amber-700/50 transition-colors">
+               <div key={idx} className="p-4 bg-slate-900 rounded-lg border border-slate-700 transition-colors">
                  <h4 className="text-md font-bold text-amber-100 mb-1">{paper.title}</h4>
                  <p className="text-xs text-amber-300/80 mb-2">{paper.authors} • {paper.year} • {paper.journal}</p>
                  <p className="text-sm text-slate-400 leading-relaxed">{paper.summary}</p>
@@ -74,7 +82,7 @@ const VisualizationCard: React.FC<{ visualization: ToolVisualization }> = ({ vis
   );
 };
 
-const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, datasetName }) => {
+const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, datasetName, onVizClick }) => {
   if (!visualizations || visualizations.length === 0) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-slate-500 bg-slate-900/30 rounded-xl border-2 border-dashed border-slate-700 p-8">
@@ -90,7 +98,11 @@ const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, dataset
     <div className="h-full flex flex-col bg-slate-950/30 rounded-xl border border-slate-800 overflow-hidden">
       <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
         {visualizations.map((viz, index) => (
-           <VisualizationCard key={index} visualization={viz} />
+           <VisualizationCard 
+             key={index} 
+             visualization={viz} 
+             onClick={() => onVizClick && onVizClick(viz.messageId)}
+           />
         ))}
       </div>
     </div>

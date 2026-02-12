@@ -38,6 +38,17 @@ export const INTERNAL_TOOLS: McpTool[] = [
         dotSize: { type: 'number', description: 'Size of dots in scatter plot (default 100)' }
       }
     }
+  },
+  {
+    name: 'TRANSFORM_DATA',
+    description: 'Convert a categorical column to numeric values. This creates a new column with "_numeric" suffix (e.g. DX -> DX_numeric). Use this before correlation analysis involving categorical data.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        column: { type: 'string', description: 'The categorical column to convert (e.g., DX, Sex)' }
+      },
+      required: ['column']
+    }
   }
 ];
 
@@ -60,8 +71,13 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
   }
 
   if (toolName === 'MODIFY_VISUALIZATION') {
-    // For modification, we just return the args to be applied to the state
     return args;
+  }
+
+  if (toolName === 'TRANSFORM_DATA') {
+    // This tool modifies state, which is handled in App.tsx. 
+    // We just return success here to indicate valid tool call structure.
+    return { success: true, column: args.column };
   }
   
   throw new Error(`Tool ${toolName} not found internally.`);

@@ -1,7 +1,11 @@
 
 export enum AgentType {
   USER = 'User',
-  PLANNER = 'Planner',
+  ORCHESTRATOR = 'Orchestrator',
+  PLANNER = 'Planner', // Keep for backward compatibility if needed, though we will use specific ones
+  GENERAL_PLANNER = 'General Planner',
+  NEURO_PLANNER = 'Neuro Planner',
+  PREPROCESSOR = 'Preprocessor',
   EXECUTOR = 'Executor',
   RESEARCHER = 'Researcher',
   SYSTEM = 'System'
@@ -13,6 +17,7 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   isThinking?: boolean;
+  metadata?: any; // Stores tool params, plan info, etc.
 }
 
 export interface DatasetRow {
@@ -39,6 +44,7 @@ export interface ToolVisualization {
   title: string;
   data: any;
   config?: any;
+  messageId?: string; // Links back to the chat message that generated this
 }
 
 export interface AgentState {

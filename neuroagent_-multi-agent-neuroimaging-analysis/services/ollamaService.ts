@@ -3,9 +3,11 @@ import { Ollama } from 'ollama';
 import { McpTool } from "../types";
 
 // Connect directly to the local Ollama instance.
-// Ensure your Ollama server is running with OLLAMA_ORIGINS="*" to allow browser requests.
 const OLLAMA_HOST = 'http://127.0.0.1:11434';
-let currentModel = 'MedAIBase/MedGemma1.5:4b'; 
+
+// Distinct models for different tasks
+let generalModel = 'qwen3:latest'; 
+let neuroModel = 'MedAIBase/MedGemma1.5:4b';
 
 // Create a new instance of the Ollama client
 const ollama = new Ollama({ host: OLLAMA_HOST });
@@ -32,23 +34,109 @@ export const getAvailableModels = async (): Promise<string[]> => {
   }
 };
 
-export const setModel = (model: string) => {
-  currentModel = model;
+export const setGeneralModel = (model: string) => {
+  generalModel = model;
 };
 
-export const getModel = () => currentModel;
+export const setNeuroModel = (model: string) => {
+  neuroModel = model;
+};
 
-export const generatePlan = async (query: string, dataContext: string, availableTools: McpTool[]) => {
+export const getGeneralModel = () => generalModel;
+export const getNeuroModel = () => neuroModel;
+
+// --- ORCHESTRATOR AGENT ---
+export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERAL'> => {
+  const prompt = `
+    You are an Orchestrator Agent for a neuroimaging analysis system.
+    
+    Classify the User Query into one of two categories:
+    1. "RESEARCH": The user wants to analyze data, inspect columns, perform statistics, find correlations, compare groups, or search for literature.
+    2. "GENERAL": The user wants to modify the visualization (e.g., change color, title, size), ask a general question unconnected to the dataset, or perform simple UI tasks.
+
+    User Query: "${query}"
+
+    Return strictly a JSON object: { "category": "RESEARCH" } or { "category": "GENERAL" }
+  `;
+
+  try {
+    const response = await ollama.generate({
+      model: generalModel, // Orchestrator uses general model (assumed faster/sufficient)
+      prompt: prompt,
+      format: 'json',
+      stream: false
+    });
+    const json = JSON.parse(response.response);
+    return (json.category === 'RESEARCH' || json.category === 'GENERAL') ? json.category : 'RESEARCH';
+  } catch (e) {
+    console.error("Orchestrator Error:", e);
+    return 'RESEARCH'; // Default to research if classification fails
+  }
+};
+
+// --- GENERAL PLANNER AGENT ---
+export const generateGeneralPlan = async (query: string, availableTools: McpTool[]) => {
+  // Only expose tools relevant to general tasks (or all, but instructions guide usage)
+  const toolDescriptions = availableTools.map(t => 
+    `- ${t.name}: ${t.description || 'No description'} (Args: ${Object.keys(t.inputSchema.properties || {}).join(', ')})`
+  ).join('\n    ');
+
+  const prompt = `
+    You are a General Task Planner.
+    User Query: "${query}"
+    
+    Available Tools:
+    ${toolDescriptions}
+    
+    Task: Create a plan to satisfy the user request using the available tools.
+    If the user wants to change visualization style (color, title, dot size), use the MODIFY_VISUALIZATION tool.
+
+    You must return a valid JSON object with the following structure:
+    {
+      "analysis_steps": [
+        {
+          "step_id": 1,
+          "tool": "TOOL_NAME", 
+          "description": "Description of the step",
+          "parameters": {
+            "key": "value"
+          }
+        }
+      ],
+      "rationale": "Reasoning for the plan"
+    }
+  `;
+
+  try {
+    const response = await ollama.generate({
+      model: generalModel,
+      prompt: prompt,
+      format: 'json',
+      stream: false
+    });
+    return JSON.parse(response.response);
+  } catch (e) {
+    console.error("General Planner Error:", e);
+    return {
+      analysis_steps: [],
+      rationale: "Failed to generate general plan."
+    };
+  }
+};
+
+// --- NEURO PLANNER AGENT ---
+export const generateNeuroPlan = async (query: string, dataContext: string, availableTools: McpTool[]) => {
   // Construct tool descriptions
   const toolDescriptions = availableTools.map(t => 
     `- ${t.name}: ${t.description || 'No description'} (Args: ${Object.keys(t.inputSchema.properties || {}).join(', ')})`
-  ).join('\n');
+  ).join('\n    ');
 
   // Add default internal tools if not present
   const allToolDescs = `
     1. DATA_INSPECT: Inspect data distribution.
     2. LITERATURE_SEARCH: Search for papers.
-    ${toolDescriptions ? '3. Tools:\n' + toolDescriptions : ''}
+    3. TRANSFORM_DATA: Convert categorical to numeric (creates {col}_numeric). Use this before Correlation if input is categorical.
+    ${toolDescriptions ? '4. Other Analysis Tools:\n    ' + toolDescriptions : ''}
   `;
 
   const prompt = `
@@ -58,6 +146,8 @@ export const generatePlan = async (query: string, dataContext: string, available
     
     Task: Break down the query into logical analysis steps using the available tools.
     
+    IMPORTANT: If the user asks for correlation involving a categorical column (like DX, Sex), you MUST first use TRANSFORM_DATA to convert it to numbers, then use the new column (e.g. DX_numeric) for correlation.
+
     Available Tools:
     ${allToolDescs}
 
@@ -70,7 +160,8 @@ export const generatePlan = async (query: string, dataContext: string, available
           "description": "Description of the step",
           "parameters": {
             "target_column": "...",
-            "group_column": "..."
+            "x_column": "...",
+            "y_column": "..."
           }
         }
       ],
@@ -80,20 +171,52 @@ export const generatePlan = async (query: string, dataContext: string, available
 
   try {
     const response = await ollama.generate({
-      model: currentModel,
+      model: neuroModel,
       prompt: prompt,
       format: 'json',
       stream: false
     });
     return JSON.parse(response.response);
   } catch (e) {
-    console.error("Planner Error:", e);
+    console.error("Neuro Planner Error:", e);
     return {
       analysis_steps: [
         { step_id: 1, tool: "DATA_INSPECT", description: "Inspect relevant columns (Fallback)." }
       ],
       rationale: "Fallback plan due to AI service error."
     };
+  }
+};
+
+// --- PREPROCESSOR AGENT ---
+export const generatePreprocessingMapping = async (column: string, values: string[]) => {
+  const prompt = `
+    You are a Data Preprocessor Agent in a neuroimaging study.
+    Column Name: "${column}"
+    Unique Values: ${JSON.stringify(values)}
+    
+    Task: Create a logical numeric mapping for these categorical values and provide a short rationale.
+    - If it looks like disease stages (e.g. CN, MCI, AD), map them ordinally (e.g. CN=0, MCI=1, AD=2).
+    - If it is binary (e.g. Sex F/M), map to 0/1.
+    - Otherwise, assign arbitrary integers.
+    
+    Return ONLY a valid JSON object: { "mapping": { "Val1": 0, "Val2": 1, ... }, "rationale": "Short explanation of the mapping strategy." }
+  `;
+
+  try {
+    const response = await ollama.generate({
+      model: neuroModel,
+      prompt: prompt,
+      format: 'json',
+      stream: false
+    });
+    return JSON.parse(response.response);
+  } catch (e) {
+    console.error("Preprocessor Error:", e);
+    // Fallback mapping
+    const fallback: Record<string, number> = {};
+    values.forEach((v, i) => fallback[v] = i);
+    return { mapping: fallback, rationale: "Fallback: Assigned sequential integers due to service error." };
   }
 };
 
@@ -112,7 +235,7 @@ export const generateResearchInsights = async (results: string) => {
 
   try {
     const response = await ollama.generate({
-      model: currentModel,
+      model: neuroModel, // Researcher uses neuro model
       prompt: prompt,
       stream: false
     });
@@ -134,7 +257,7 @@ export const generateLiterature = async (topic: string) => {
 
   try {
     const response = await ollama.generate({
-      model: currentModel,
+      model: neuroModel,
       prompt: prompt,
       format: 'json',
       stream: false

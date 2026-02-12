@@ -1,8 +1,13 @@
+
 import { AgentType } from './types';
 
 export const AGENT_COLORS = {
   [AgentType.USER]: 'bg-slate-700 border-slate-600',
+  [AgentType.ORCHESTRATOR]: 'bg-fuchsia-900/50 border-fuchsia-700 text-fuchsia-200',
   [AgentType.PLANNER]: 'bg-indigo-900/50 border-indigo-700 text-indigo-200',
+  [AgentType.GENERAL_PLANNER]: 'bg-blue-900/50 border-blue-700 text-blue-200',
+  [AgentType.NEURO_PLANNER]: 'bg-indigo-900/50 border-indigo-700 text-indigo-200',
+  [AgentType.PREPROCESSOR]: 'bg-teal-900/50 border-teal-700 text-teal-200',
   [AgentType.EXECUTOR]: 'bg-emerald-900/50 border-emerald-700 text-emerald-200',
   [AgentType.RESEARCHER]: 'bg-purple-900/50 border-purple-700 text-purple-200',
   [AgentType.SYSTEM]: 'bg-gray-800 border-gray-700 text-gray-400',
