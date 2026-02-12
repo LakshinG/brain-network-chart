@@ -28,7 +28,7 @@ from google.adk.agents import LlmAgent
 # from google.adk.sessions import InMemorySessionService
 from google.adk.models.lite_llm import LiteLlm
 # from google.genai import types
-
+# from brain_network_chart.schema import *
 load_dotenv()
 
 # -----------------------------------------------------------------------------
@@ -37,6 +37,7 @@ load_dotenv()
 # Default: Ollama via LiteLLM. Override with PLANNER_MODEL.
 OLLAMA_API_BASE = os.environ.get("OLLAMA_API_BASE", "http://yukon.acm.unc.edu:11434")
 MODEL_NAME = os.environ.get("PLANNER_MODEL", "ollama_chat/MedAIBase/MedGemma1.5:4b")
+# MODEL_NAME = os.environ.get("PLANNER_MODEL", "ollama_chat/qwen3:latest")
 os.environ.setdefault("OLLAMA_API_BASE", OLLAMA_API_BASE)
 
 
@@ -62,11 +63,11 @@ class TaskAssignment(BaseModel):
 class ExecutionPlan(BaseModel):
     """Plan produced by the Planner: understood query and tasks per agent."""
 
-    query_summary: str = Field(
-        description="Short summary showing understanding of the user's query"
-    )
-    tasks: list[TaskAssignment] = Field(
-        description="Ordered list of tasks to assign to executor, researcher, or validator"
+    # tasks: list[TaskAssignment] = Field(
+    #     description="Ordered list of tasks to assign to executor, researcher, or validator"
+    # )
+    tasks: list[str] = Field(
+        description="List of tools to be executed by the executor agent, with tool name and input parameter schema. The planner_agent should use the resource information to fill in this field with appropriate tools and params for the user's query."
     )
 
 
@@ -78,20 +79,39 @@ class ExecutionPlan(BaseModel):
 # Features: progress streaming, timestamped logging, async-ready (Starlette).
 # Executor tasks use input_payload with "tool" and tool-specific params.
 
+import requests
 MCP_SERVER_BASE_URL = "http://yukon.acm.unc.edu:8010"
+def list_mcp_tools_http(base_url: str = MCP_SERVER_BASE_URL) -> list[dict]:
+    """List tools from the MCP server."""
+    url = f"{base_url}/mcp"
+    headers = {
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/event-stream",
+}
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {},  # optional pagination cursor could go here
+    }
+    r = requests.post(url, headers=headers, json=payload)
+    r.raise_for_status()
+    # If server responded with SSE, requests will contain raw text/event-stream.
+    # Many servers respond with JSON directly; handle both.
+    content_type = r.headers.get("Content-Type", "")
+    if "text/event-stream" in content_type:
+        return r.text.split('\n')[1].split('"result":')[1]
+    return r.json()
+MCP_TOOL_NAMES = list_mcp_tools_http()
+# PLANNER_INSTRUCTIONS = f"""
+# You are the Planner agent in a brain network traits analysis multi-agent system.
+# Available tools: {MCP_TOOL_NAMES}
 
-MCP_TOOL_NAMES = (
-    "run_cfc_wavelet_analysis",  # CFC wavelet analysis
-    "run_hub_detection",         # Hub detection (single or multi-network)
-    "get_growth_curve",          # Growth curve / developmental trajectory
-    "run_normative_analysis",    # Normative analysis with overlay data
-)
-
-# ----------------------------------------------------------------------------
-# Model and Planner agent
-# ----------------------------------------------------------------------------
-
-
+# You plan a outline of provided tools given the input:.
+# - Produce a clear, user-facing outline of task to execute a tool.
+# - If the query needs clarification, ask precise questions.
+# - Tool name and parameters should be included in the outline, but not the actual execution result. Parameters follows the inputSchema.
+# """
 PLANNER_INSTRUCTIONS = """
 You are the Planner agent in a brain network / fMRI analysis multi-agent system.
 The Executor calls a Brain Network Analysis MCP server (HTTP REST API at yukon.acm.unc.edu:8010)
@@ -141,7 +161,9 @@ Output format:
 - Do NOT include any extra commentary or text before or after the JSON object.
 
 Keep tasks ordered by dependency: run executor (and researcher if needed) before validator. When the user mentions CFC, hub detection, growth curve, normative analysis, sliding window, or CSV brain data, assign an executor task with the corresponding tool and sensible defaults for missing params.
-"""
+
+Here is available MCP tools
+"""+MCP_TOOL_NAMES
 
 
 root_agent = LlmAgent(

@@ -1,0 +1,68 @@
+
+import { McpTool, DatasetRow } from '../types';
+import { calculateCorrelation, getGroupStats } from '../utils/stats';
+
+export const INTERNAL_TOOLS: McpTool[] = [
+  {
+    name: 'CORRELATION_ANALYSIS',
+    description: 'Calculate Pearson correlation between two numeric columns. Use this to find linear relationships between continuous variables.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x_column: { type: 'string', description: 'The first numeric column (e.g., Age, Amyloid values)' },
+        y_column: { type: 'string', description: 'The second numeric column' }
+      },
+      required: ['x_column', 'y_column']
+    }
+  },
+  {
+    name: 'GROUP_COMPARISON',
+    description: 'Compare a numeric value across different groups in a categorical column (e.g. Diagnosis, Sex). Performs statistical comparison.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        group_column: { type: 'string', description: 'The categorical column to group by (e.g., DX, Sex)' },
+        target_column: { type: 'string', description: 'The numeric column to analyze (e.g., Amyloid, Tau)' }
+      },
+      required: ['group_column', 'target_column']
+    }
+  },
+  {
+    name: 'MODIFY_VISUALIZATION',
+    description: 'Update the style of the currently visible visualization. Use this to change colors, titles, or sizes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        color: { type: 'string', description: 'Color name or hex code (e.g. "red", "#ff0000")' },
+        title: { type: 'string', description: 'New title for the chart' },
+        dotSize: { type: 'number', description: 'Size of dots in scatter plot (default 100)' }
+      }
+    }
+  }
+];
+
+export const executeInternalTool = (toolName: string, args: any, data: DatasetRow[]) => {
+  if (toolName === 'CORRELATION_ANALYSIS') {
+    // Robust parameter extraction handling potential AI variations
+    const x = args.x_column || args.target_column || args.column1 || args.x;
+    const y = args.y_column || args.comparison_column || args.column2 || args.y;
+    
+    if (!x || !y) throw new Error(`Missing columns for correlation. Received parameters: ${JSON.stringify(args)}`);
+    return calculateCorrelation(data, x, y);
+  }
+
+  if (toolName === 'GROUP_COMPARISON') {
+    const g = args.group_column || args.group || args.groupCol;
+    const t = args.target_column || args.target || args.valueCol;
+    
+    if (!g || !t) throw new Error(`Missing columns for group comparison. Received parameters: ${JSON.stringify(args)}`);
+    return getGroupStats(data, g, t);
+  }
+
+  if (toolName === 'MODIFY_VISUALIZATION') {
+    // For modification, we just return the args to be applied to the state
+    return args;
+  }
+  
+  throw new Error(`Tool ${toolName} not found internally.`);
+};
