@@ -39,6 +39,7 @@ export const getGeneralModel = () => generalModel;
 export const getNeuroModel = () => neuroModel;
 
 export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERAL'> => {
+  console.log('[Orchestrator Agent] Input:', PROMPTS.ORCHESTRATOR_CLASSIFY(query));
   try {
     const response = await ollama.generate({
       model: generalModel,
@@ -59,6 +60,7 @@ export const generateGeneralPlan = async (query: string, availableTools: McpTool
     `- ${t.name}: ${t.description || 'No description'} (Args: ${Object.keys(t.inputSchema.properties || {}).join(', ')})`
   ).join('\n    ');
 
+  console.log('[General Planner Agent] Input:', PROMPTS.GENERAL_PLANNER(query, toolDescriptions, feedback || ""));
   try {
     const response = await ollama.generate({
       model: generalModel,
@@ -82,12 +84,15 @@ export const generateNeuroPlan = async (query: string, dataContext: string, avai
   ).join('\n    ');
 
   const allToolDescs = `
-    1. DATA_INSPECT: Inspect data distribution.
-    2. LITERATURE_SEARCH: Search for papers.
-    3. TRANSFORM_DATA: Convert categorical to numeric (creates {col}_numeric). Use this before Correlation if input is categorical.
-    ${toolDescriptions ? '4. Other Analysis Tools:\n    ' + toolDescriptions : ''}
+    [Core Data Tools]
+    - DATA_INSPECT: Inspect data distribution and get a glimpse of rows.
+    - TRANSFORM_DATA: Convert categorical columns (e.g. DX, Sex) to numeric (creates {col}_numeric). Use this before Correlation if input is categorical.
+    
+    [Advanced/MCP Tools]
+    ${toolDescriptions ? toolDescriptions : 'No external tools available.'}
   `;
 
+  console.log('[Neuro Planner Agent] Input:', PROMPTS.NEURO_PLANNER(query, dataContext, allToolDescs, feedback || ""));
   try {
     const response = await ollama.generate({
       model: neuroModel,
@@ -114,6 +119,7 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
     parameters: t.inputSchema.properties || {},
     required: t.inputSchema.required || []
   }));
+  console.log('[Plan Validator Agent] Input:', PROMPTS.PLAN_VALIDATOR(existingColumns, JSON.stringify(toolManifest), JSON.stringify(plan, null, 2)));
 
   try {
     // 1. Ask LLM to validate tool usage and schema, and request column check if needed
@@ -144,6 +150,7 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
 };
 
 export const generatePreprocessingMapping = async (column: string, values: string[]) => {
+  console.log('[Preprocessor Agent] Input:', PROMPTS.PREPROCESSOR_MAPPING(column, values));
   try {
     const response = await ollama.generate({
       model: neuroModel,
@@ -160,36 +167,23 @@ export const generatePreprocessingMapping = async (column: string, values: strin
   }
 };
 
-export const generateResearchInsights = async (results: string) => {
+export const generateResearchInsights = async (results: string, availableTools: McpTool[]) => {
+  const toolsStr = availableTools.map(t => `- ${t.name}: ${t.description}`).join('\n');
+  console.log('[Researcher Agent] Input:', PROMPTS.RESEARCHER_INSIGHTS(results, toolsStr));
   try {
     const response = await ollama.generate({
       model: neuroModel,
-      prompt: PROMPTS.RESEARCHER_INSIGHTS(results),
-      stream: false
-    });
-    return response.response;
-  } catch (e) {
-    console.error("Researcher Error:", e);
-    return "Could not generate insights. Ensure Ollama is running.";
-  }
-};
-
-export const generateLiterature = async (topic: string) => {
-  try {
-    const response = await ollama.generate({
-      model: neuroModel,
-      prompt: PROMPTS.LITERATURE_SEARCH(topic),
+      prompt: PROMPTS.RESEARCHER_INSIGHTS(results, toolsStr),
       format: 'json',
       stream: false
     });
-    
-    const json = JSON.parse(response.response);
-    if (Array.isArray(json)) return json;
-    if (json.citations && Array.isArray(json.citations)) return json.citations;
-    if (json.papers && Array.isArray(json.papers)) return json.papers;
-    return [];
+    return JSON.parse(response.response);
   } catch (e) {
-    console.error("Literature Error:", e);
-    return [];
+    console.error("Researcher Error:", e);
+    // Fallback if JSON parsing fails or model errors
+    return { 
+      decision: "REPORT", 
+      report: "Analysis complete. (Error generating autonomous research insights)." 
+    };
   }
 };

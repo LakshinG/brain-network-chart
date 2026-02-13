@@ -78,38 +78,43 @@ export const PROMPTS = {
   `,
 
   NEURO_PLANNER: (query: string, dataContext: string, allToolDescs: string, feedback: string) => `
-    You are a Planner Agent in a neuroimaging multi-agent system.
+    You are an expert Neuroimaging Research Planner. Your goal is to design a scientifically rigorous and innovative analysis workflow.
+
     User Query: "${query}"
-    Data Context: The user has uploaded a dataset with these columns: ${dataContext}.
-    
-    Task: Break down the query into logical analysis steps using the available tools.
-    
-    IMPORTANT: If the user asks for correlation involving a categorical column (like DX, Sex), you MUST first use TRANSFORM_DATA to convert it to numbers, then use the new column (e.g. DX_numeric) for correlation.
-    ${feedback ? `
-    IMPORTANT: A previous version of the plan was REJECTED by the Validator with these errors:
-    ${feedback}
-    
-    Please fix the plan by correcting tool names or parameter column names based on the feedback and dataset context.
-    ` : ""}
+    Dataset Context (Columns): [${dataContext}]
 
     Available Tools:
     ${allToolDescs}
 
-    You must return a valid JSON object with the following structure:
+    Planning Strategy:
+    1. Analyze the user's scientific intent. Are they looking for correlations, group differences, or external literature context?
+    2. Innovation & Delegation: 
+       - If you need background info or literature, use tools like 'literature_search', 'google_search', or 'pubmed_query'. These will be executed by the RESEARCHER agent.
+       - If you need to clean/map data (e.g. Sex F/M -> 0/1), use 'TRANSFORM_DATA'. This is executed by the PREPROCESSOR agent.
+       - If you need core stats (Correlation, Group Comparison), use the relevant tools. These are executed by the EXECUTOR agent.
+    3. Data Logic:
+       - Categorical columns (e.g., 'DX', 'Sex', 'Group') CANNOT be used directly in correlation/regression tools. 
+       - You MUST schedule a TRANSFORM_DATA step first to create a numeric version (e.g., 'DX' -> 'DX_numeric') if you need to correlate them.
+    4. Design a multi-step flow. 
+       Example: Inspect Data -> Literature Search (Background) -> Transform Data -> Correlation Analysis.
+
+    ${feedback ? `
+    Correction Required:
+    The previous plan was rejected by the validator: "${feedback}"
+    Please fix the tool names or parameter values (check column names!).
+    ` : ""}
+
+    Output Format (Strict JSON):
     {
       "analysis_steps": [
         {
           "step_id": 1,
-          "tool": "TOOL_NAME", 
-          "description": "Description of the step",
-          "parameters": {
-            "target_column": "...",
-            "x_column": "...",
-            "y_column": "..."
-          }
+          "tool": "EXACT_TOOL_NAME", 
+          "description": "Scientific rationale for this step",
+          "parameters": { "param_name": "value" }
         }
       ],
-      "rationale": "Reasoning for the plan"
+      "rationale": "Explanation of the research strategy."
     }
   `,
 
@@ -119,20 +124,20 @@ export const PROMPTS = {
 
     Tool Whitelist (Allowed Tools & Schemas): ${toolManifest}
 
+    Execution Plan:
+    ${planJson}
+
     Validation Rules:
     1. Tool Existence: The "tool" field in each step must exactly match one of the names in the Tool Whitelist (e.g., "DATA_INSPECT", "TRANSFORM_DATA", "CORRELATION_ANALYSIS").
     2. Parameter Validity:
-       a) Column References: Iterate through each step. Identify parameters that specify column names (e.g. "target_column": "Age"). 
-          Construct a list of strings containing these column names for each step, must excluding those column names that will be generated in the plan (e.g., *_numeric from TRANSFORM_DATA).
+       a) Column References: Iterate through each step. Identify parameters that specify column names that are not from TRANSFORM_DATA (e.g. "target_column": "Age", SKIP *_numeric). 
+          Construct a list of strings containing these column names for each step. 
           Your output "check_columns" must be a list of lists (one list per step).
           Example: [["Age", "Sex"], [], ["DX"]]
           The system will use 'validatePlanColumns' to check if these columns exist in the dataset (or were created by previous steps).
        b) Schema Adherence: For parameters NOT related to columns, ensure they strictly follow the types/definitions in the Tool Whitelist (e.g. "title" is string, "color" is string).
-       c) Completeness: Ensure all "required" parameters for a tool are present in the step.
     3. Logical Consistency: Ensure the flow of steps is logical.
 
-    Execution Plan:
-    ${planJson}
 
     Return strictly a JSON object:
     {
@@ -156,28 +161,27 @@ export const PROMPTS = {
     Return ONLY a valid JSON object: { "mapping": { "Val1": 0, "Val2": 1, ... }, "rationale": "Short explanation of the mapping strategy." }
   `,
 
-  RESEARCHER_INSIGHTS: (results: string) => `
-    You are a Researcher Agent in a neuroimaging study.
-    Review the following analysis results provided by the Executor:
+  RESEARCHER_INSIGHTS: (results: string, tools: string) => `
+    You are a Principal Investigator (Researcher Agent) in a neuroimaging study.
+    
+    Current Analysis Context & Results:
     ${results}
 
-    Provide a scientific interpretation. 
-    1. Are the p-values significant?
-    2. What does the correlation coefficient imply?
-    3. Suggest one follow-up analysis or a relevant neuroimaging keyword to search next.
-    
-    IMPORTANT: When you refer to a specific analysis step (e.g. Step 1, Step 2), use the syntax [[Step N]] (e.g. [[Step 1]]) so that the UI can create a link to that specific result card.
-    
-    Example: "As seen in [[Step 1]], the amyloid distribution is skewed..."
+    Available Research Tools:
+    ${tools}
 
-    Keep it concise (max 3 paragraphs).
-  `,
+    Task:
+    Evaluate the current findings.
+    - If you see a result (e.g. a correlation or group difference) but lack the biological context or external verification, you MUST DECIDE to use a tool (like 'literature_search', 'pubmed_query', or 'web_search') to find that info.
+    - If you have enough information to write a comprehensive scientific report/proposal, you MUST DECIDE to write the report.
 
-  LITERATURE_SEARCH: (topic: string) => `
-    You are a Literature Search Agent.
-    Topic: "${topic}"
-    
-    Generate a list of 3-4 plausible sounding neuroimaging citations (Author, Year, Title, Journal) related to this topic.
-    Return a valid JSON array of objects with keys: title, authors, year, journal, summary.
+    Return strictly a JSON object with your decision:
+    {
+      "thought": "Brief reasoning for your decision.",
+      "decision": "TOOL_CALL" | "REPORT",
+      "tool": "TOOL_NAME",       // Required if decision is TOOL_CALL
+      "parameters": { ... },     // Required if decision is TOOL_CALL
+      "report": "Markdown text..." // Required if decision is REPORT. Write a scientific hypothesis/proposal based on findings.
+    }
   `
 };

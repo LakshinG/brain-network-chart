@@ -87,7 +87,7 @@ export class McpService {
     }
     
     try {
-      // Assuming convention: POST /api/tools/{tool_name}
+      // Assuming convention: POST /{tool_name}
       const response = await fetch(`${MCP_API_URL}/${name}`, {
         method: 'POST',
         headers: {

@@ -1,5 +1,6 @@
 
 import React from 'react';
+import ReactMarkdown from 'react-markdown';
 import { ToolVisualization, VisualizationType } from '../../types';
 import { ScatterPlot, StatsBarChart } from './Charts';
 import { FileText, Database, BookOpen, Link, FileCheck2 } from 'lucide-react';
@@ -13,31 +14,53 @@ interface VisualizerAreaProps {
 const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => void }> = ({ data, onLinkClick }) => {
   const { report, stepIdToMessageId } = data;
 
-  // Function to parse the report text and inject clickable links for [[Step N]]
-  const renderFormattedReport = () => {
-    const parts = report.split(/(\[\[Step \d+\]\])/g);
-    return parts.map((part: string, idx: number) => {
-      const match = part.match(/\[\[Step (\d+)\]\]/);
-      if (match) {
-        const stepId = parseInt(match[1]);
-        return (
-          <button
-            key={idx}
-            onClick={() => onLinkClick(stepId)}
-            className="text-indigo-400 hover:text-indigo-300 font-bold underline decoration-indigo-500/30 underline-offset-4 bg-indigo-500/10 px-1 rounded transition-colors"
-          >
-            Step {stepId}
-          </button>
-        );
-      }
-      return <span key={idx}>{part}</span>;
-    });
-  };
+  // Pre-process the report to convert [[Step N]] into a unique markdown link scheme
+  // e.g. "See [[Step 1]]" -> "See [Step 1](urn:step:1)"
+  const markdownContent = report.replace(/\[\[Step (\d+)\]\]/g, '[Step $1](urn:step:$1)');
 
   return (
     <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-700/50">
-      <div className="prose prose-invert max-w-none text-slate-300 leading-relaxed whitespace-pre-wrap">
-        {renderFormattedReport()}
+      <div className="prose prose-invert max-w-none text-slate-300 leading-relaxed">
+        <ReactMarkdown
+          components={{
+            // Custom renderer for links to intercept step clicks
+            a: ({ node, href, children, ...props }) => {
+              if (href?.startsWith('urn:step:')) {
+                const stepId = parseInt(href.split(':')[2], 10);
+                return (
+                  <button
+                    onClick={() => onLinkClick(stepId)}
+                    className="text-indigo-400 hover:text-indigo-300 font-bold underline decoration-indigo-500/30 underline-offset-4 bg-indigo-500/10 px-1 rounded transition-colors inline-block"
+                    title={`Go to Step ${stepId}`}
+                  >
+                    {children}
+                  </button>
+                );
+              }
+              // Fallback for standard links
+              return (
+                <a 
+                  href={href} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="text-sky-400 hover:text-sky-300 hover:underline"
+                  {...props}
+                >
+                  {children}
+                </a>
+              );
+            },
+            // Enhance headings
+            h1: ({children}) => <h1 className="text-2xl font-bold text-slate-100 mb-4 pb-2 border-b border-slate-700">{children}</h1>,
+            h2: ({children}) => <h2 className="text-xl font-semibold text-indigo-200 mt-6 mb-3">{children}</h2>,
+            h3: ({children}) => <h3 className="text-lg font-medium text-slate-200 mt-4 mb-2">{children}</h3>,
+            ul: ({children}) => <ul className="list-disc pl-5 space-y-1 mb-4 text-slate-300">{children}</ul>,
+            li: ({children}) => <li className="pl-1">{children}</li>,
+            strong: ({children}) => <strong className="font-semibold text-slate-100">{children}</strong>,
+          }}
+        >
+          {markdownContent}
+        </ReactMarkdown>
       </div>
     </div>
   );

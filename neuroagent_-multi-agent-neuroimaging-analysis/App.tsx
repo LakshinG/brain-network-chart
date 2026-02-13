@@ -10,7 +10,6 @@ import {
   generateGeneralPlan,
   classifyQuery,
   generateResearchInsights, 
-  generateLiterature, 
   generatePreprocessingMapping,
   validatePlan,
   checkOllamaConnection, 
@@ -157,6 +156,130 @@ const App: React.FC = () => {
     return null;
   };
 
+  const getAgentForTool = (toolName: string): AgentType => {
+    const t = toolName.toLowerCase();
+    if (t === 'transform_data' || t.includes('preprocess')) return AgentType.PREPROCESSOR;
+    if (t.includes('search') || t.includes('query') || t.includes('literature') || t.includes('web') || t.includes('google')) return AgentType.RESEARCHER;
+    return AgentType.EXECUTOR;
+  };
+
+  /**
+   * Reusable logic to execute a single tool (Internal or MCP).
+   * It handles data updates, preprocessor prompts, and visualization creation.
+   * Returns a result string and an optional visualization object.
+   */
+  const executeToolLogic = async (
+      toolName: string, 
+      params: any, 
+      agentRole: AgentType, 
+      currentData: any[], 
+      currentColumns: string[]
+  ): Promise<{ resultText: string, viz: ToolVisualization | null, updatedData: any[], updatedColumns: string[] }> => {
+      
+      let stepResult = "";
+      let viz: ToolVisualization | null = null;
+      let newData = [...currentData];
+      let newCols = [...currentColumns];
+
+      const internalToolDef = INTERNAL_TOOLS.find(t => t.name === toolName);
+      const mcpToolDef = mcpTools.find(t => t.name === toolName);
+
+      if (internalToolDef) {
+          if (toolName === 'TRANSFORM_DATA') {
+              const col = params.column;
+              if (newCols.includes(col)) {
+                  // Preprocessor logic adds extra context
+                  const preMsg = addMessage(AgentType.PREPROCESSOR, `Analyzing column '${col}' to determine numeric mapping...`);
+                  
+                  const uniqueVals = Array.from(new Set(newData.map(row => row[col])));
+                  const mappingResult = await generatePreprocessingMapping(col, uniqueVals as string[]);
+                  const mapping = mappingResult.mapping;
+                  const rationale = mappingResult.rationale;
+
+                  setMessages(prev => prev.map(m => 
+                    m.id === preMsg.id 
+                      ? { ...m, content: `**Analysis of '${col}':** ${rationale || 'Mapping generated.'}` } 
+                      : m
+                  ));
+
+                  const result = executeInternalTool(toolName, { ...params, mapping }, newData);
+                  const transformResult = result as any;
+                  
+                  newData = transformResult.transformedData;
+                  const newColName = transformResult.newColumn;
+                  
+                  if (!newCols.includes(newColName)) newCols.push(newColName);
+                  
+                  // Update global dataset state as well
+                  setDataset(prev => prev ? ({ ...prev, data: newData, columns: newCols }) : null);
+
+                  stepResult = `Converted '${col}' to '${newColName}' using mapping: ${JSON.stringify(mapping)}.`;
+                  viz = {
+                       type: VisualizationType.DATA_TABLE,
+                       title: `Preprocessing: ${col} -> ${newColName}`,
+                       data: Object.entries(mapping).map(([k,v]) => ({ Original: k, Numeric: v }))
+                  };
+              } else {
+                  stepResult = `Error: Column '${col}' not found.`;
+              }
+          }
+          else if (toolName === 'MODIFY_VISUALIZATION') {
+              const result = executeInternalTool(toolName, params, newData);
+              setVisualizations(prev => {
+                  if (prev.length === 0) return prev;
+                  const targetIndex = prev.findIndex(v => v.messageId === highlightedMessageId);
+                  const indexToUpdate = targetIndex !== -1 ? targetIndex : 0;
+                  const updated = [...prev];
+                  const targetViz = { ...updated[indexToUpdate] };
+                  targetViz.config = { ...targetViz.config, ...result };
+                  if (result.title) targetViz.title = result.title;
+                  updated[indexToUpdate] = targetViz;
+                  return updated;
+              });
+              stepResult = `Updated visualization style: ${JSON.stringify(result)}`;
+          }
+          else if (toolName === 'DATA_INSPECT') {
+              const result = executeInternalTool(toolName, params, newData) as any;
+              viz = { type: VisualizationType.DATA_TABLE, title: 'Data Inspection', data: result.data };
+              stepResult = `Inspected data. Loaded ${result.data.length} rows.`;
+          }
+          else {
+              const result = executeInternalTool(toolName, params, newData);
+              
+              if (toolName === 'CORRELATION_ANALYSIS') {
+                  const corrResult = result as any;
+                  const vizData = {
+                    ...corrResult,
+                    xCol: params.x_column || params.x || 'X',
+                    yCol: params.y_column || params.y || 'Y'
+                  };
+                  viz = { type: VisualizationType.SCATTER_PLOT, title: `Correlation: ${corrResult.r.toFixed(2)}`, data: vizData };
+                  stepResult = `Correlation Analysis complete. R=${corrResult.r.toFixed(3)}, p-value=${corrResult.p.toExponential(3)}.`;
+              } else if (toolName === 'GROUP_COMPARISON') {
+                   const groupResult = result as any;
+                   viz = { type: VisualizationType.BOX_PLOT, title: `Group Comparison`, data: groupResult };
+                   stepResult = `Group Comparison complete. ANOVA p-value=${groupResult.pVal.toExponential(3)}.`;
+              }
+          }
+      }
+      else if (mcpToolDef) {
+         const args = { ...params };
+         if (mcpToolDef.inputSchema.properties && 'data' in mcpToolDef.inputSchema.properties) {
+            args.data = newData;
+         }
+         const result = await mcpClient.callTool(toolName, args);
+         const textContent = result.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+         stepResult = textContent || "Tool executed successfully.";
+         viz = parseMcpResultToVisualization(toolName, textContent);
+         if (result.isError) stepResult = `Error executing tool: ${stepResult}`;
+      } 
+      else {
+         stepResult = `Unknown tool: ${toolName}. Skipping.`;
+      }
+      
+      return { resultText: stepResult, viz, updatedData: newData, updatedColumns: newCols };
+  };
+
   const executePlanSteps = async (
     plan: any, 
     startStepIndex: number = 0, 
@@ -169,13 +292,17 @@ const App: React.FC = () => {
     const stepIdToMessageId: Record<number, string> = {};
     const stepsToRun = plan.analysis_steps.slice(startStepIndex);
 
+    let activeData = [...currentData];
+    let activeCols = [...currentColumns];
+
+    // 1. Execute the Planner's Static Steps
     for (let i = 0; i < stepsToRun.length; i++) {
       const step = stepsToRun[i];
       const params = (i === 0 && initialParamsOverride) ? initialParamsOverride : step.parameters;
-      const actualStepIndex = startStepIndex + i + 1;
+      const agentRole = getAgentForTool(step.tool);
 
       const executorMsg = addMessage(
-        AgentType.EXECUTOR, 
+        agentRole, 
         `Executing Step ${step.step_id}: ${step.tool}...`,
         { 
           plan, 
@@ -186,144 +313,108 @@ const App: React.FC = () => {
       );
       
       stepIdToMessageId[step.step_id] = executorMsg.id;
-      let stepResult = "";
-      let viz: ToolVisualization | null = null;
-      const internalToolDef = INTERNAL_TOOLS.find(t => t.name === step.tool);
-      const mcpToolDef = mcpTools.find(t => t.name === step.tool);
 
       try {
-        if (internalToolDef) {
-            if (step.tool === 'TRANSFORM_DATA') {
-                const col = params.column;
-                if (currentColumns.includes(col)) {
-                    const preMsg = addMessage(AgentType.PREPROCESSOR, `Analyzing column '${col}' to determine numeric mapping...`);
-                    
-                    const uniqueVals = Array.from(new Set(currentData.map(row => row[col])));
-                    const mappingResult = await generatePreprocessingMapping(col, uniqueVals as string[]);
-                    const mapping = mappingResult.mapping;
-                    const rationale = mappingResult.rationale;
+          const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
+              step.tool, params, agentRole, activeData, activeCols
+          );
+          
+          activeData = updatedData;
+          activeCols = updatedColumns;
 
-                    setMessages(prev => prev.map(m => 
-                      m.id === preMsg.id 
-                        ? { ...m, content: `**Analysis of '${col}':** ${rationale || 'Mapping generated.'}` } 
-                        : m
-                    ));
+          setMessages(prev => prev.map(m => 
+            m.id === executorMsg.id ? { ...m, content: `${m.content}\n\n✅ ${resultText}` } : m
+          ));
 
-                    // Execute tool with pre-calculated mapping
-                    const result = executeInternalTool(step.tool, { ...params, mapping }, currentData);
-                    const transformResult = result as any;
-                    
-                    currentData = transformResult.transformedData;
-                    const newColName = transformResult.newColumn;
-                    
-                    if (!currentColumns.includes(newColName)) currentColumns.push(newColName);
-                    
-                    setDataset(prev => prev ? ({ ...prev, data: currentData, columns: currentColumns }) : null);
+          if (viz) {
+            viz.messageId = executorMsg.id;
+            addVisualization(viz);
+          }
+          
+          resultsSummary.push(`Step ${step.step_id} (${step.tool} - ${agentRole}): ${resultText}`);
 
-                    stepResult = `Converted '${col}' to '${newColName}' using mapping: ${JSON.stringify(mapping)}.`;
-                    viz = {
-                         type: VisualizationType.DATA_TABLE,
-                         title: `Preprocessing: ${col} -> ${newColName}`,
-                         data: Object.entries(mapping).map(([k,v]) => ({ Original: k, Numeric: v }))
-                    };
-                } else {
-                    stepResult = `Error: Column '${col}' not found.`;
-                }
-            }
-            else if (step.tool === 'MODIFY_VISUALIZATION') {
-                const result = executeInternalTool(step.tool, params, currentData);
-                setVisualizations(prev => {
-                    if (prev.length === 0) return prev;
-                    const targetIndex = prev.findIndex(v => v.messageId === highlightedMessageId);
-                    const indexToUpdate = targetIndex !== -1 ? targetIndex : 0;
-                    const updated = [...prev];
-                    const targetViz = { ...updated[indexToUpdate] };
-                    targetViz.config = { ...targetViz.config, ...result };
-                    if (result.title) targetViz.title = result.title;
-                    updated[indexToUpdate] = targetViz;
-                    return updated;
-                });
-                stepResult = `Updated visualization style: ${JSON.stringify(result)}`;
-            }
-            else if (step.tool === 'DATA_INSPECT') {
-                const result = executeInternalTool(step.tool, params, currentData) as any;
-                viz = { type: VisualizationType.DATA_TABLE, title: 'Data Inspection', data: result.data };
-                stepResult = `Inspected data. Loaded ${result.data.length} rows.`;
-            }
-            else {
-                const result = executeInternalTool(step.tool, params, currentData);
-                
-                if (step.tool === 'CORRELATION_ANALYSIS') {
-                    const corrResult = result as any;
-                    const vizData = {
-                      ...corrResult,
-                      xCol: params.x_column || params.x || 'X',
-                      yCol: params.y_column || params.y || 'Y'
-                    };
-                    viz = { type: VisualizationType.SCATTER_PLOT, title: `Correlation: ${corrResult.r.toFixed(2)}`, data: vizData };
-                    stepResult = `Correlation Analysis complete. R=${corrResult.r.toFixed(3)}, p-value=${corrResult.p.toExponential(3)}.`;
-                } else if (step.tool === 'GROUP_COMPARISON') {
-                     const groupResult = result as any;
-                     viz = { type: VisualizationType.BOX_PLOT, title: `Group Comparison`, data: groupResult };
-                     stepResult = `Group Comparison complete. ANOVA p-value=${groupResult.pVal.toExponential(3)}.`;
-                }
-            }
-        }
-        else if (mcpToolDef) {
-           const args = { ...params };
-           if (mcpToolDef.inputSchema.properties && 'data' in mcpToolDef.inputSchema.properties) {
-              args.data = currentData;
-           }
-           const result = await mcpClient.callTool(step.tool, args);
-           const textContent = result.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
-           stepResult = textContent || "Tool executed successfully.";
-           viz = parseMcpResultToVisualization(step.tool, textContent);
-           if (result.isError) stepResult = `Error executing tool: ${stepResult}`;
-        } 
-        else if (step.tool === 'LITERATURE_SEARCH') {
-           const topic = step.description.replace('Search literature for', '').trim();
-           const papers = await generateLiterature(topic);
-           viz = { type: VisualizationType.LITERATURE_LIST, title: `Literature: ${topic}`, data: papers };
-           stepResult = `Found ${papers.length} relevant papers.`;
-        }
-        else {
-           stepResult = `Unknown tool: ${step.tool}. Skipping.`;
-        }
       } catch (e: any) {
-        stepResult = `Error: ${e.message}`;
+         setMessages(prev => prev.map(m => 
+            m.id === executorMsg.id ? { ...m, content: `${m.content}\n\n❌ Error: ${e.message}` } : m
+          ));
+         resultsSummary.push(`Step ${step.step_id} FAILED: ${e.message}`);
       }
 
-      setMessages(prev => prev.map(m => 
-        m.id === executorMsg.id ? { ...m, content: `${m.content}\n\n✅ ${stepResult}` } : m
-      ));
-
-      if (viz) {
-        viz.messageId = executorMsg.id;
-        addVisualization(viz);
-      }
-      
-      resultsSummary.push(`Step ${step.step_id} (${step.tool}): ${stepResult}`);
       await new Promise(r => setTimeout(r, 1000));
     }
 
+    // 2. Dynamic Researcher Loop
+    // The researcher agent reviews findings and can decide to execute more tools (e.g. search)
+    // or write the final report.
     if (intent === 'RESEARCH') {
-      const researchMsg = addMessage(AgentType.RESEARCHER, "Reviewing findings and generating report...");
-      const finalInsights = await generateResearchInsights(resultsSummary.join('\n'));
-      
-      setMessages(prev => prev.map(m => 
-        m.id === researchMsg.id ? { ...m, content: finalInsights } : m
-      ));
+      let researcherActive = true;
+      let loopCount = 0;
+      const MAX_LOOPS = 3;
 
-      // Create a persistent report visualization
-      addVisualization({
-        type: VisualizationType.RESEARCH_REPORT,
-        title: "Scientific Research Report",
-        data: {
-          report: finalInsights,
-          stepIdToMessageId
-        },
-        messageId: researchMsg.id
-      });
+      addMessage(AgentType.RESEARCHER, "Reviewing findings...");
+
+      while (researcherActive && loopCount < MAX_LOOPS) {
+          const context = resultsSummary.join('\n');
+          const decision = await generateResearchInsights(context, mcpTools);
+          
+          if (decision.decision === 'TOOL_CALL' && decision.tool) {
+             loopCount++;
+             const toolName = decision.tool;
+             const params = decision.parameters || {};
+             
+             addMessage(AgentType.RESEARCHER, `I need more information. Deciding to run tool: ${toolName}...`, {
+                 thought: decision.thought
+             });
+             
+             try {
+                const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
+                    toolName, params, AgentType.RESEARCHER, activeData, activeCols
+                );
+                
+                // Update active data just in case, though researcher tools usually don't modify data
+                activeData = updatedData;
+                activeCols = updatedColumns;
+
+                if (viz) {
+                    addVisualization({ ...viz, title: `Researcher: ${viz.title}` });
+                }
+
+                addMessage(AgentType.RESEARCHER, `Tool Result (${toolName}):\n${resultText}`);
+                resultsSummary.push(`[Dynamic Researcher Step] Tool: ${toolName}\nResult: ${resultText}`);
+                
+             } catch (e: any) {
+                 addMessage(AgentType.RESEARCHER, `Failed to execute tool ${toolName}: ${e.message}`);
+                 // Break loop on failure to prevent spiraling
+                 researcherActive = false; 
+             }
+
+          } else {
+             // Decision is REPORT (or fallback)
+             const finalReport = decision.report || "Analysis complete.";
+             const researchMsg = addMessage(AgentType.RESEARCHER, "Final Analysis Report generated.");
+             
+             // Update the final message with the content
+             setMessages(prev => prev.map(m => 
+                m.id === researchMsg.id ? { ...m, content: finalReport } : m
+             ));
+
+             addVisualization({
+                type: VisualizationType.RESEARCH_REPORT,
+                title: "Scientific Research Report",
+                data: {
+                  report: finalReport,
+                  stepIdToMessageId
+                },
+                messageId: researchMsg.id
+              });
+              
+              researcherActive = false;
+          }
+      }
+      
+      if (loopCount >= MAX_LOOPS) {
+          addMessage(AgentType.SYSTEM, "Researcher loop limit reached. Stopping autonomous execution.");
+      }
 
     } else {
       addMessage(AgentType.SYSTEM, "Task complete.");
@@ -336,8 +427,8 @@ const App: React.FC = () => {
     if (msgIndex === -1) return;
     const msg = messages[msgIndex];
 
-    if (msg.role === AgentType.EXECUTOR) {
-        if (!msg.metadata || msg.metadata.stepIndex === undefined) return;
+    // Check if the message is an execution step (Metadata contains stepIndex)
+    if (msg.metadata?.stepIndex !== undefined) {
         const { plan, stepIndex } = msg.metadata;
         const newMessages = messages.slice(0, msgIndex);
         setMessages(newMessages);
