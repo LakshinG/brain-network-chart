@@ -1,4 +1,5 @@
-from mcp.server.fastmcp import FastMCP
+# from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException
@@ -33,7 +34,34 @@ from tools import (
     get_file_path,
 )
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+
 from stats_tools import StatsToolkit
+
+def _get_server_host_port() -> tuple[str, int]:
+    host = os.getenv("MCP_HOST", "0.0.0.0").strip() or "0.0.0.0"
+
+    port_raw = os.getenv("MCP_PORT", os.getenv("PORT", "8010")).strip() or "8010"
+    try:
+        port = int(port_raw)
+    except ValueError:
+        raise ValueError(f"Invalid port: {port_raw!r} (set MCP_PORT or PORT)")
+
+    if not (1 <= port <= 65535):
+        raise ValueError(f"Invalid port: {port} (must be 1-65535)")
+
+    return host, port
+
+
+_SERVER_HOST, _SERVER_PORT = _get_server_host_port()
+
+server = FastMCP(
+    'Brain Network Analysis Server',
+    # host=_SERVER_HOST,
+    # port=_SERVER_PORT,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -925,28 +953,6 @@ def _openneuro_try_queries(
 
     raise ValueError(f"OpenNeuro GraphQL query failed across templates. Last error: {last_err}")
 
-def _get_server_host_port() -> tuple[str, int]:
-    host = os.getenv("MCP_HOST", "0.0.0.0").strip() or "0.0.0.0"
-
-    port_raw = os.getenv("MCP_PORT", os.getenv("PORT", "8010")).strip() or "8010"
-    try:
-        port = int(port_raw)
-    except ValueError:
-        raise ValueError(f"Invalid port: {port_raw!r} (set MCP_PORT or PORT)")
-
-    if not (1 <= port <= 65535):
-        raise ValueError(f"Invalid port: {port} (must be 1-65535)")
-
-    return host, port
-
-
-_SERVER_HOST, _SERVER_PORT = _get_server_host_port()
-
-server = FastMCP(
-    'Brain Network Analysis Server',
-    host=_SERVER_HOST,
-    port=_SERVER_PORT,
-)
 
 
 @server.tool(name="run_cfc_wavelet_analysis")
@@ -1890,25 +1896,25 @@ async def api_schema(request: Request) -> JSONResponse:
                 "description": "Search OpenNeuro datasets via GraphQL",
                 "parameters": OpenNeuroSearchRequest.model_json_schema(),
             },
-            "upload": {
-                "method": "POST",
-                "description": "Upload a file for analysis (multipart/form-data)",
-                "parameters": {
-                    "file": {"type": "file", "description": "Multipart file field named 'file'"}
-                }
-            },
-            "list_files": {
-                "method": "GET",
-                "description": "List uploaded files",
-                "parameters": {}
-            },
-            "delete_file": {
-                "method": "DELETE or POST",
-                "description": "Delete an uploaded file (JSON body: {\"filename\": \"...\"})",
-                "parameters": {
-                    "filename": {"type": "string", "description": "Name of the uploaded file to delete"}
-                }
-            },
+            # "upload": {
+            #     "method": "POST",
+            #     "description": "Upload a file for analysis (multipart/form-data)",
+            #     "parameters": {
+            #         "file": {"type": "file", "description": "Multipart file field named 'file'"}
+            #     }
+            # },
+            # "list_files": {
+            #     "method": "GET",
+            #     "description": "List uploaded files",
+            #     "parameters": {}
+            # },
+            # "delete_file": {
+            #     "method": "DELETE or POST",
+            #     "description": "Delete an uploaded file (JSON body: {\"filename\": \"...\"})",
+            #     "parameters": {
+            #         "filename": {"type": "string", "description": "Name of the uploaded file to delete"}
+            #     }
+            # },
         },
         "rate_limiting": {
             "requests_per_window": RATE_LIMIT_REQUESTS,
@@ -2076,95 +2082,95 @@ async def http_openneuro_search(request: Request) -> JSONResponse:
         logger.error(f"Request error in /openneuro_search: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@server.custom_route("/upload", methods=["POST"])
-@rate_limit
-async def upload_file(request: Request) -> JSONResponse:
-    """Upload a file to the server for analysis.
+# @server.custom_route("/upload", methods=["POST"])
+# @rate_limit
+# async def upload_file(request: Request) -> JSONResponse:
+#     """Upload a file to the server for analysis.
     
-    Expects multipart form data with 'file' field.
-    """
-    try:
-        form = await request.form()
+#     Expects multipart form data with 'file' field.
+#     """
+#     try:
+#         form = await request.form()
         
-        if 'file' not in form:
-            raise HTTPException(status_code=400, detail="No file provided in request")
+#         if 'file' not in form:
+#             raise HTTPException(status_code=400, detail="No file provided in request")
         
-        uploaded_file = form['file']
+#         uploaded_file = form['file']
         
-        if not uploaded_file.filename:
-            raise HTTPException(status_code=400, detail="File has no name")
+#         if not uploaded_file.filename:
+#             raise HTTPException(status_code=400, detail="File has no name")
         
-        # Read file content
-        file_content = await uploaded_file.read()
+#         # Read file content
+#         file_content = await uploaded_file.read()
         
-        if not file_content:
-            raise HTTPException(status_code=400, detail="File is empty")
+#         if not file_content:
+#             raise HTTPException(status_code=400, detail="File is empty")
         
-        # Save file
-        file_path, file_info = save_uploaded_file(file_content, uploaded_file.filename)
+#         # Save file
+#         file_path, file_info = save_uploaded_file(file_content, uploaded_file.filename)
         
-        logger.info(f"File uploaded: {file_info['saved_filename']}")
+#         logger.info(f"File uploaded: {file_info['saved_filename']}")
         
-        return JSONResponse({
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "file_info": file_info,
-        })
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Upload error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+#         return JSONResponse({
+#             "status": "success",
+#             "timestamp": datetime.now().isoformat(),
+#             "file_info": file_info,
+#         })
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Upload error: {str(e)}")
+#         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
-@server.custom_route("/list_files", methods=["GET"])
-async def list_files(request: Request) -> JSONResponse:
-    """List all uploaded files."""
-    try:
-        files = list_uploaded_files()
-        logger.info(f"Listed {len(files)} uploaded files")
+# @server.custom_route("/list_files", methods=["GET"])
+# async def list_files(request: Request) -> JSONResponse:
+#     """List all uploaded files."""
+#     try:
+#         files = list_uploaded_files()
+#         logger.info(f"Listed {len(files)} uploaded files")
         
-        return JSONResponse({
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "count": len(files),
-            "files": files,
-        })
-    except Exception as e:
-        logger.error(f"List files error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+#         return JSONResponse({
+#             "status": "success",
+#             "timestamp": datetime.now().isoformat(),
+#             "count": len(files),
+#             "files": files,
+#         })
+#     except Exception as e:
+#         logger.error(f"List files error: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@server.custom_route("/delete_file", methods=["DELETE", "POST"])
-@rate_limit
-async def delete_file(request: Request) -> JSONResponse:
-    """Delete an uploaded file.
+# @server.custom_route("/delete_file", methods=["DELETE", "POST"])
+# @rate_limit
+# async def delete_file(request: Request) -> JSONResponse:
+#     """Delete an uploaded file.
     
-    Expects JSON with 'filename' field.
-    """
-    try:
-        if request.method == "DELETE":
-            data = await request.json()
-        else:
-            data = await request.json()
+#     Expects JSON with 'filename' field.
+#     """
+#     try:
+#         if request.method == "DELETE":
+#             data = await request.json()
+#         else:
+#             data = await request.json()
         
-        filename = data.get("filename", "")
-        if not filename:
-            raise HTTPException(status_code=400, detail="Filename required")
+#         filename = data.get("filename", "")
+#         if not filename:
+#             raise HTTPException(status_code=400, detail="Filename required")
         
-        result = delete_uploaded_file(filename)
-        logger.info(f"File deleted: {filename}")
+#         result = delete_uploaded_file(filename)
+#         logger.info(f"File deleted: {filename}")
         
-        return JSONResponse({
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "result": result,
-        })
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Delete file error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+#         return JSONResponse({
+#             "status": "success",
+#             "timestamp": datetime.now().isoformat(),
+#             "result": result,
+#         })
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Delete file error: {str(e)}")
+#         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
 #stats tools
 
@@ -2215,6 +2221,51 @@ def check_data_normality(data_source: str, column: str) -> str:
     result = StatsToolkit.check_normality(data_source, column)
     return json.dumps(result)
 
+# app = FastAPI()
+
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# import uvicorn
+
+# app.mount("/", server)
+# from fastmcp.utilities.lifespan import combine_lifespans
+# from contextlib import asynccontextmanager
+
+# # Your existing lifespan
+# @asynccontextmanager
+# async def app_lifespan(app: FastAPI):
+#     print("Starting up the app...")
+#     yield
+#     print("Shutting down the app...")
+
+# # Create MCP server
+# mcp_app = server.http_app(path="/")
+
+# # Combine both lifespans
+# app = FastAPI(lifespan=combine_lifespans(app_lifespan, mcp_app.lifespan))
+# app.mount("/mcp", mcp_app)  # MCP endpoint at /mcp
+### 
+# uvicorn mcp_server:http_app --port 8010
+###
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+
+# Define middleware
+middleware = [
+    Middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+]
+http_app = server.http_app(middleware=middleware)
 if __name__ == "__main__":
     logger.info("="*60)
     logger.info("Brain Network Analysis MCP Server starting...")
@@ -2235,7 +2286,14 @@ if __name__ == "__main__":
     logger.info("="*60)
     
     try:
-        server.run(transport="streamable-http", mount_path='/ram/USERS/ziquanw/brain-network-chart/uploaded_files')
+        # server.run(transport="http", host="0.0.0.0", port=8010)
+        # server.run(transport="streamable-http", mount_path='/ram/USERS/ziquanw/brain-network-chart/uploaded_files')
+        server.run(transport="http", host="0.0.0.0", port=8010)
+        # uvicorn.run(
+        #     app,
+        #     host="127.0.0.1",
+        #     port=8010,
+        # )
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
     except Exception as e:

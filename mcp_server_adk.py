@@ -13,6 +13,8 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 from starlette.types import Receive, Scope, Send
 
+from starlette.middleware.cors import CORSMiddleware
+
 # Import existing analysis functions and helpers from the original MCP server
 from mcp_server import (
     run_cfc_wavelet_analysis,
@@ -35,6 +37,13 @@ from mcp_server import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _log_console_output(result: Any) -> None:
+    if isinstance(result, dict):
+        output = result.get("console_output")
+        if output:
+            logger.info("console_output:\n%s", output)
 
 
 def create_mcp_server():
@@ -206,6 +215,7 @@ def create_mcp_server():
                 # Validate parameters according to rules
                 _validate_cfc_params(params)
                 result = await anyio.to_thread.run_sync(lambda: run_cfc_wavelet_analysis(**params))
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "run_hub_detection":
@@ -225,11 +235,13 @@ def create_mcp_server():
                 }
                 _validate_hub_params(params)
                 result = await anyio.to_thread.run_sync(lambda: run_hub_detection(**params))
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "get_growth_curve":
                 phenotype = arguments.get("phenotype", "Global mean of FC")
                 result = await anyio.to_thread.run_sync(lambda: get_growth_curve(phenotype))
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "run_normative_analysis":
@@ -240,6 +252,7 @@ def create_mcp_server():
                 }
                 _validate_normative_params(params)
                 result = await anyio.to_thread.run_sync(lambda: run_normative_analysis(**params))
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "search_pubmed":
@@ -250,6 +263,7 @@ def create_mcp_server():
                 }
                 _validate_pubmed_params(params)
                 result = await anyio.to_thread.run_sync(lambda: search_pubmed(**params))
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "openalex_search":
@@ -260,6 +274,7 @@ def create_mcp_server():
                 }
                 _validate_openalex_params(params)
                 result = await anyio.to_thread.run_sync(lambda: openalex_search(**params))
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "crossref_enrich":
@@ -270,6 +285,7 @@ def create_mcp_server():
                 }
                 _validate_crossref_params(params)
                 result = await anyio.to_thread.run_sync(lambda: crossref_enrich(**params))
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "internet_search":
@@ -280,6 +296,7 @@ def create_mcp_server():
                 }
                 _validate_internet_params(params)
                 result = await anyio.to_thread.run_sync(lambda: internet_search(**params))
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "openneuro_search":
@@ -290,18 +307,8 @@ def create_mcp_server():
                 }
                 _validate_openneuro_params(params)
                 result = await anyio.to_thread.run_sync(lambda: openneuro_search(**params))
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
-
-            if name == "upload_file":
-                # Expect `filename` and base64-encoded `content` in arguments
-                filename = arguments.get("filename")
-                content_b64 = arguments.get("content")
-                if not filename or not content_b64:
-                    raise ValueError("upload_file requires 'filename' and base64 'content'")
-                file_bytes = base64.b64decode(content_b64)
-                # save_uploaded_file returns (file_path, file_info)
-                result = await anyio.to_thread.run_sync(lambda: save_uploaded_file(file_bytes, filename))
-                return [types.TextContent(type="text", text=json.dumps({"file_info": result[1]}))]
 
             if name == "list_files":
                 result = await anyio.to_thread.run_sync(lambda: list_uploaded_files())
@@ -324,6 +331,7 @@ def create_mcp_server():
                 result = await anyio.to_thread.run_sync(lambda: run_correlation(**params))
                 if isinstance(result, str):
                     result = json.loads(result)
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "run_group_comparison":
@@ -336,6 +344,7 @@ def create_mcp_server():
                 result = await anyio.to_thread.run_sync(lambda: run_group_comparison(**params))
                 if isinstance(result, str):
                     result = json.loads(result)
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "apply_fdr_correction":
@@ -348,6 +357,7 @@ def create_mcp_server():
                 result = await anyio.to_thread.run_sync(lambda: apply_fdr_correction(**params))
                 if isinstance(result, str):
                     result = json.loads(result)
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "detect_outliers":
@@ -360,6 +370,7 @@ def create_mcp_server():
                 result = await anyio.to_thread.run_sync(lambda: detect_outliers(**params))
                 if isinstance(result, str):
                     result = json.loads(result)
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "check_data_normality":
@@ -372,6 +383,7 @@ def create_mcp_server():
                 result = await anyio.to_thread.run_sync(lambda: check_data_normality(**params))
                 if isinstance(result, str):
                     result = json.loads(result)
+                _log_console_output(result)
                 return [types.TextContent(type="text", text=json.dumps(result))]
 
             if name == "health":
@@ -525,18 +537,6 @@ def create_mcp_server():
                 },
             ),
             types.Tool(
-                name="upload_file",
-                description="Upload a file (base64 content + filename)",
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "filename": {"type": "string"},
-                        "content": {"type": "string", "description": "Base64-encoded file contents"},
-                    },
-                    "required": ["filename", "content"],
-                },
-            ),
-            types.Tool(
                 name="list_files",
                 description="List uploaded files",
                 inputSchema={"type": "object"},
@@ -661,6 +661,13 @@ def main(port: int = 8080, json_response: bool = False):
             Mount("/mcp", app=handle_streamable_http),
         ],
         lifespan=lifespan,
+    )
+    
+    starlette_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],      # disables CORS checks
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     import uvicorn

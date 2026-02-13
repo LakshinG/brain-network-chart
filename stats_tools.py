@@ -2,11 +2,12 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import statsmodels.stats.multitest as smm
-import json
+import json, os
 from io import StringIO
 import logging
 
 
+UPLOAD_DIR = '/ram/USERS/ziquanw/brain-network-chart/uploaded_files'
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
 
 class StatsToolkit:
@@ -19,7 +20,15 @@ class StatsToolkit:
                 return pd.read_json(StringIO(data_input))
             except ValueError:
                 if data_input.endswith('.csv'):
-                    return pd.read_csv(data_input)
+                    
+                    # Sanitize filename to prevent path traversal
+                    safe_filename = os.path.basename(data_input)
+                    if not safe_filename:
+                        raise ValueError(f"Invalid filename: {data_input}")
+                    
+                    # Create unique path to avoid overwrites
+                    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+                    return pd.read_csv(file_path)
         return pd.DataFrame(data_input)
 
     #1 - Pearson correlation
