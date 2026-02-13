@@ -4,6 +4,16 @@ import { calculateCorrelation, getGroupStats } from '../utils/stats';
 
 export const INTERNAL_TOOLS: McpTool[] = [
   {
+    name: 'DATA_INSPECT',
+    description: 'Inspect the distribution and summary of columns in the dataset. Useful for initial data exploration.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        columns: { type: 'array', items: { type: 'string' }, description: 'Specific columns to inspect' }
+      }
+    }
+  },
+  {
     name: 'CORRELATION_ANALYSIS',
     description: 'Calculate Pearson correlation between two numeric columns. Use this to find linear relationships between continuous variables.',
     inputSchema: {
@@ -53,8 +63,11 @@ export const INTERNAL_TOOLS: McpTool[] = [
 ];
 
 export const executeInternalTool = (toolName: string, args: any, data: DatasetRow[]) => {
+  if (toolName === 'DATA_INSPECT') {
+    return { data };
+  }
+
   if (toolName === 'CORRELATION_ANALYSIS') {
-    // Robust parameter extraction handling potential AI variations
     const x = args.x_column || args.target_column || args.column1 || args.x;
     const y = args.y_column || args.comparison_column || args.column2 || args.y;
     
@@ -75,9 +88,23 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
   }
 
   if (toolName === 'TRANSFORM_DATA') {
-    // This tool modifies state, which is handled in App.tsx. 
-    // We just return success here to indicate valid tool call structure.
-    return { success: true, column: args.column };
+    const col = args.column;
+    const mapping = args.mapping;
+    if (!col) throw new Error("Missing column for transformation");
+    if (!mapping) throw new Error("Missing numeric mapping for transformation");
+    
+    const newColName = `${col}_numeric`;
+    const transformedData = data.map(row => ({
+      ...row,
+      [newColName]: mapping[row[col]] !== undefined ? mapping[row[col]] : row[col]
+    }));
+
+    return { 
+        success: true, 
+        transformedData, 
+        newColumn: newColName,
+        mapping 
+    };
   }
   
   throw new Error(`Tool ${toolName} not found internally.`);

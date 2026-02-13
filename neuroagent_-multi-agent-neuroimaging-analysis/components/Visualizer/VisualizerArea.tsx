@@ -2,7 +2,7 @@
 import React from 'react';
 import { ToolVisualization, VisualizationType } from '../../types';
 import { ScatterPlot, StatsBarChart } from './Charts';
-import { FileText, Database, BookOpen, Link } from 'lucide-react';
+import { FileText, Database, BookOpen, Link, FileCheck2 } from 'lucide-react';
 
 interface VisualizerAreaProps {
   visualizations: ToolVisualization[];
@@ -10,7 +10,40 @@ interface VisualizerAreaProps {
   onVizClick?: (messageId?: string) => void;
 }
 
-const VisualizationCard: React.FC<{ visualization: ToolVisualization, onClick?: () => void }> = ({ visualization, onClick }) => {
+const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => void }> = ({ data, onLinkClick }) => {
+  const { report, stepIdToMessageId } = data;
+
+  // Function to parse the report text and inject clickable links for [[Step N]]
+  const renderFormattedReport = () => {
+    const parts = report.split(/(\[\[Step \d+\]\])/g);
+    return parts.map((part: string, idx: number) => {
+      const match = part.match(/\[\[Step (\d+)\]\]/);
+      if (match) {
+        const stepId = parseInt(match[1]);
+        return (
+          <button
+            key={idx}
+            onClick={() => onLinkClick(stepId)}
+            className="text-indigo-400 hover:text-indigo-300 font-bold underline decoration-indigo-500/30 underline-offset-4 bg-indigo-500/10 px-1 rounded transition-colors"
+          >
+            Step {stepId}
+          </button>
+        );
+      }
+      return <span key={idx}>{part}</span>;
+    });
+  };
+
+  return (
+    <div className="bg-slate-900/50 rounded-lg p-6 border border-slate-700/50">
+      <div className="prose prose-invert max-w-none text-slate-300 leading-relaxed whitespace-pre-wrap">
+        {renderFormattedReport()}
+      </div>
+    </div>
+  );
+};
+
+const VisualizationCard: React.FC<{ visualization: ToolVisualization, onClick?: () => void, onReportLinkClick?: (stepId: number) => void }> = ({ visualization, onClick, onReportLinkClick }) => {
   return (
     <div 
         onClick={onClick}
@@ -22,6 +55,7 @@ const VisualizationCard: React.FC<{ visualization: ToolVisualization, onClick?: 
           {visualization.type === VisualizationType.BOX_PLOT && <Database className="w-4 h-4 text-purple-400" />}
           {visualization.type === VisualizationType.LITERATURE_LIST && <BookOpen className="w-4 h-4 text-amber-400" />}
           {visualization.type === VisualizationType.DATA_TABLE && <FileText className="w-4 h-4 text-emerald-400" />}
+          {visualization.type === VisualizationType.RESEARCH_REPORT && <FileCheck2 className="w-4 h-4 text-indigo-400" />}
           <span className="font-semibold text-slate-200">{visualization.title}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -77,12 +111,30 @@ const VisualizationCard: React.FC<{ visualization: ToolVisualization, onClick?: 
              ))}
            </div>
         )}
+
+        {visualization.type === VisualizationType.RESEARCH_REPORT && (
+          <div className="pointer-events-auto">
+            <ResearchReport 
+              data={visualization.data} 
+              onLinkClick={(stepId) => onReportLinkClick && onReportLinkClick(stepId)} 
+            />
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, datasetName, onVizClick }) => {
+  const handleReportLinkClick = (stepId: number) => {
+    // Find the report visualization that holds the mapping
+    const reportViz = visualizations.find(v => v.type === VisualizationType.RESEARCH_REPORT);
+    if (reportViz && reportViz.data.stepIdToMessageId[stepId]) {
+      const messageId = reportViz.data.stepIdToMessageId[stepId];
+      if (onVizClick) onVizClick(messageId);
+    }
+  };
+
   if (!visualizations || visualizations.length === 0) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-slate-500 bg-slate-900/30 rounded-xl border-2 border-dashed border-slate-700 p-8">
@@ -102,6 +154,7 @@ const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, dataset
              key={index} 
              visualization={viz} 
              onClick={() => onVizClick && onVizClick(viz.messageId)}
+             onReportLinkClick={handleReportLinkClick}
            />
         ))}
       </div>

@@ -12,9 +12,10 @@ import {
   generateResearchInsights, 
   generateLiterature, 
   generatePreprocessingMapping,
+  validatePlan,
   checkOllamaConnection, 
   getAvailableModels, 
-  setGeneralModel,
+  setGeneralModel, 
   setNeuroModel,
 } from './services/ollamaService';
 import { mcpClient } from './services/mcpService';
@@ -33,11 +34,9 @@ const App: React.FC = () => {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
 
-  // UI State for Models
   const [selectedGeneralModel, setSelectedGeneralModel] = useState<string>('llama3');
   const [selectedNeuroModel, setSelectedNeuroModel] = useState<string>('llama3');
 
-  // Initialize System (Ollama + MCP)
   useEffect(() => {
     const initSystem = async () => {
       const isOllamaUp = await checkOllamaConnection();
@@ -72,15 +71,12 @@ const App: React.FC = () => {
 
     initSystem();
     return () => { mcpClient.disconnect(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Welcome message
   useEffect(() => {
     if (messages.length === 0) {
       addMessage(AgentType.SYSTEM, "Welcome to the NeuroAgent Multi-Agent System. Please upload a neuroimaging dataset (CSV) or load the demo data.");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const addMessage = (role: AgentType, content: string, metadata?: any): ChatMessage => {
@@ -88,7 +84,7 @@ const App: React.FC = () => {
 
     if (role === AgentType.ORCHESTRATOR || role === AgentType.GENERAL_PLANNER) {
       usedModel = selectedGeneralModel;
-    } else if (role === AgentType.NEURO_PLANNER || role === AgentType.PREPROCESSOR || role === AgentType.RESEARCHER) {
+    } else if (role === AgentType.NEURO_PLANNER || role === AgentType.PLAN_VALIDATOR || role === AgentType.PREPROCESSOR || role === AgentType.RESEARCHER) {
       usedModel = selectedNeuroModel;
     }
 
@@ -161,7 +157,6 @@ const App: React.FC = () => {
     return null;
   };
 
-  // --- Execution Logic ---
   const executePlanSteps = async (
     plan: any, 
     startStepIndex: number = 0, 
@@ -171,37 +166,32 @@ const App: React.FC = () => {
     intent: 'RESEARCH' | 'GENERAL'
   ) => {
     const resultsSummary: string[] = [];
-    
-    // If restarting, we might want to preserve summary of previous steps? 
-    // For simplicity, we just summarize what we run now.
-
+    const stepIdToMessageId: Record<number, string> = {};
     const stepsToRun = plan.analysis_steps.slice(startStepIndex);
 
     for (let i = 0; i < stepsToRun.length; i++) {
       const step = stepsToRun[i];
-      // Use override params if this is the first step we are running (restarted step)
       const params = (i === 0 && initialParamsOverride) ? initialParamsOverride : step.parameters;
-      const actualStepIndex = startStepIndex + i + 1; // 1-based index for display
+      const actualStepIndex = startStepIndex + i + 1;
 
-      // Add Executor Message
       const executorMsg = addMessage(
         AgentType.EXECUTOR, 
         `Executing Step ${step.step_id}: ${step.tool}...`,
         { 
-          plan, // Store full plan to allow restarting later
-          stepIndex: startStepIndex + i, // Store 0-based index in plan array
+          plan, 
+          stepIndex: startStepIndex + i, 
           tool: step.tool,
           params: params
         }
       );
       
+      stepIdToMessageId[step.step_id] = executorMsg.id;
       let stepResult = "";
       let viz: ToolVisualization | null = null;
       const internalToolDef = INTERNAL_TOOLS.find(t => t.name === step.tool);
       const mcpToolDef = mcpTools.find(t => t.name === step.tool);
 
       try {
-        // A. EXECUTE INTERNAL TOOL
         if (internalToolDef) {
             if (step.tool === 'TRANSFORM_DATA') {
                 const col = params.column;
@@ -213,18 +203,19 @@ const App: React.FC = () => {
                     const mapping = mappingResult.mapping;
                     const rationale = mappingResult.rationale;
 
-                    // Update Preprocessor message with rationale
                     setMessages(prev => prev.map(m => 
                       m.id === preMsg.id 
                         ? { ...m, content: `**Analysis of '${col}':** ${rationale || 'Mapping generated.'}` } 
                         : m
                     ));
 
-                    const newColName = `${col}_numeric`;
-                    currentData = currentData.map(row => ({
-                        ...row,
-                        [newColName]: mapping[row[col]] !== undefined ? mapping[row[col]] : row[col]
-                    }));
+                    // Execute tool with pre-calculated mapping
+                    const result = executeInternalTool(step.tool, { ...params, mapping }, currentData);
+                    const transformResult = result as any;
+                    
+                    currentData = transformResult.transformedData;
+                    const newColName = transformResult.newColumn;
+                    
                     if (!currentColumns.includes(newColName)) currentColumns.push(newColName);
                     
                     setDataset(prev => prev ? ({ ...prev, data: currentData, columns: currentColumns }) : null);
@@ -243,22 +234,21 @@ const App: React.FC = () => {
                 const result = executeInternalTool(step.tool, params, currentData);
                 setVisualizations(prev => {
                     if (prev.length === 0) return prev;
-                    
-                    // Identify target visualization based on highlightedMessageId (selected card)
-                    // If no card is selected, default to the latest one (index 0).
                     const targetIndex = prev.findIndex(v => v.messageId === highlightedMessageId);
                     const indexToUpdate = targetIndex !== -1 ? targetIndex : 0;
-
                     const updated = [...prev];
                     const targetViz = { ...updated[indexToUpdate] };
-                    
                     targetViz.config = { ...targetViz.config, ...result };
                     if (result.title) targetViz.title = result.title;
-                    
                     updated[indexToUpdate] = targetViz;
                     return updated;
                 });
                 stepResult = `Updated visualization style: ${JSON.stringify(result)}`;
+            }
+            else if (step.tool === 'DATA_INSPECT') {
+                const result = executeInternalTool(step.tool, params, currentData) as any;
+                viz = { type: VisualizationType.DATA_TABLE, title: 'Data Inspection', data: result.data };
+                stepResult = `Inspected data. Loaded ${result.data.length} rows.`;
             }
             else {
                 const result = executeInternalTool(step.tool, params, currentData);
@@ -279,7 +269,6 @@ const App: React.FC = () => {
                 }
             }
         }
-        // B. EXECUTE MCP TOOL
         else if (mcpToolDef) {
            const args = { ...params };
            if (mcpToolDef.inputSchema.properties && 'data' in mcpToolDef.inputSchema.properties) {
@@ -290,11 +279,6 @@ const App: React.FC = () => {
            stepResult = textContent || "Tool executed successfully.";
            viz = parseMcpResultToVisualization(step.tool, textContent);
            if (result.isError) stepResult = `Error executing tool: ${stepResult}`;
-        } 
-        // C. EXECUTE FALLBACKS
-        else if (step.tool === 'DATA_INSPECT') {
-           viz = { type: VisualizationType.DATA_TABLE, title: 'Data Inspection', data: currentData };
-           stepResult = `Inspected data. Loaded ${currentData.length} rows.`;
         } 
         else if (step.tool === 'LITERATURE_SEARCH') {
            const topic = step.description.replace('Search literature for', '').trim();
@@ -309,25 +293,38 @@ const App: React.FC = () => {
         stepResult = `Error: ${e.message}`;
       }
 
-      // Update the executor message content with result
       setMessages(prev => prev.map(m => 
         m.id === executorMsg.id ? { ...m, content: `${m.content}\n\n✅ ${stepResult}` } : m
       ));
 
       if (viz) {
-        viz.messageId = executorMsg.id; // Link visualization to message
+        viz.messageId = executorMsg.id;
         addVisualization(viz);
       }
       
-      resultsSummary.push(`Step ${actualStepIndex} (${step.tool}): ${stepResult}`);
+      resultsSummary.push(`Step ${step.step_id} (${step.tool}): ${stepResult}`);
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    // Researcher Phase
     if (intent === 'RESEARCH') {
-      addMessage(AgentType.RESEARCHER, "Reviewing findings...");
+      const researchMsg = addMessage(AgentType.RESEARCHER, "Reviewing findings and generating report...");
       const finalInsights = await generateResearchInsights(resultsSummary.join('\n'));
-      addMessage(AgentType.RESEARCHER, finalInsights);
+      
+      setMessages(prev => prev.map(m => 
+        m.id === researchMsg.id ? { ...m, content: finalInsights } : m
+      ));
+
+      // Create a persistent report visualization
+      addVisualization({
+        type: VisualizationType.RESEARCH_REPORT,
+        title: "Scientific Research Report",
+        data: {
+          report: finalInsights,
+          stepIdToMessageId
+        },
+        messageId: researchMsg.id
+      });
+
     } else {
       addMessage(AgentType.SYSTEM, "Task complete.");
     }
@@ -335,43 +332,49 @@ const App: React.FC = () => {
 
   const handleRestartFromStep = async (messageId: string, newParams: any) => {
     if (!dataset) return;
-    
-    // Find the message to restart from
     const msgIndex = messages.findIndex(m => m.id === messageId);
     if (msgIndex === -1) return;
-    
     const msg = messages[msgIndex];
-    if (!msg.metadata || msg.metadata.stepIndex === undefined) return;
 
-    const { plan, stepIndex } = msg.metadata;
+    if (msg.role === AgentType.EXECUTOR) {
+        if (!msg.metadata || msg.metadata.stepIndex === undefined) return;
+        const { plan, stepIndex } = msg.metadata;
+        const newMessages = messages.slice(0, msgIndex);
+        setMessages(newMessages);
+        const validMessageIds = new Set(newMessages.map(m => m.id));
+        setVisualizations(prev => prev.filter(v => !v.messageId || validMessageIds.has(v.messageId)));
+        setIsProcessing(true);
+        addMessage(AgentType.SYSTEM, `Restarting execution from Step ${stepIndex + 1} with updated parameters...`);
+        await executePlanSteps(plan, stepIndex, newParams, [...dataset.data], [...dataset.columns], 'RESEARCH');
+        setIsProcessing(false);
+    } 
+    else if (msg.role === AgentType.NEURO_PLANNER || msg.role === AgentType.GENERAL_PLANNER) {
+        const newPlan = newParams;
+        const intent = msg.role === AgentType.NEURO_PLANNER ? 'RESEARCH' : 'GENERAL';
+        const newMessages = messages.slice(0, msgIndex + 1);
+        newMessages[msgIndex] = {
+            ...msg,
+            metadata: { ...msg.metadata, plan: newPlan },
+            content: `**Plan Updated Manually:**\n${newPlan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n')}\n\nRationale: ${newPlan.rationale || 'Manual update'}`
+        };
+        setMessages(newMessages);
+        const validMessageIds = new Set(newMessages.map(m => m.id));
+        setVisualizations(prev => prev.filter(v => !v.messageId || validMessageIds.has(v.messageId)));
+        setIsProcessing(true);
+        
+        addMessage(AgentType.PLAN_VALIDATOR, "Validating manually updated plan...");
+        const validation = await validatePlan(newPlan, [...INTERNAL_TOOLS, ...mcpTools], dataset.columns);
+        
+        if (!validation.valid) {
+            addMessage(AgentType.PLAN_VALIDATOR, `⚠️ Validation Error: ${validation.errors.join(', ')}\n\nSuggestion: ${validation.suggestions}`);
+            setIsProcessing(false);
+            return;
+        }
 
-    // 1. Truncate History
-    // Remove the selected message and everything after it
-    const newMessages = messages.slice(0, msgIndex);
-    setMessages(newMessages);
-
-    // 2. Truncate Visualizations
-    // Remove visualizations linked to deleted messages
-    const validMessageIds = new Set(newMessages.map(m => m.id));
-    setVisualizations(prev => prev.filter(v => !v.messageId || validMessageIds.has(v.messageId)));
-
-    // 3. Resume Execution
-    setIsProcessing(true);
-    addMessage(AgentType.SYSTEM, `Restarting execution from Step ${stepIndex + 1} with updated parameters...`);
-
-    // NOTE: In a real app we might need to "time travel" dataset state. 
-    // Here we use current dataset state which might include previous transformations. 
-    // This is a known limitation for simplicity.
-    await executePlanSteps(
-        plan, 
-        stepIndex, 
-        newParams, 
-        [...dataset.data], 
-        [...dataset.columns],
-        'RESEARCH' // Defaulting to RESEARCH as it includes Researcher step. 
-                   // Ideally we should store intent in metadata too.
-    );
-    setIsProcessing(false);
+        addMessage(AgentType.PLAN_VALIDATOR, "Plan validated successfully. Resuming execution...");
+        await executePlanSteps(newPlan, 0, null, [...dataset.data], [...dataset.columns], intent);
+        setIsProcessing(false);
+    }
   };
 
   const handleUserQuery = async (query: string) => {
@@ -397,27 +400,42 @@ const App: React.FC = () => {
 
       const allTools = [...INTERNAL_TOOLS, ...mcpTools];
       let plan: any = { analysis_steps: [] };
+      let planIsValid = false;
+      let planningRetries = 0;
+      const MAX_PLANNING_RETRIES = 3;
+      let currentFeedback = "";
 
-      if (intent === 'RESEARCH') {
-        addMessage(AgentType.NEURO_PLANNER, "Formulating research analysis plan...");
-        plan = await generateNeuroPlan(query, dataset.columns.join(', '), allTools);
-        // Store plan in metadata if we want to restart from Planner level (optional)
-        addMessage(AgentType.NEURO_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n')}\n\nRationale: ${plan.rationale}`, { plan });
-      } else {
-        addMessage(AgentType.GENERAL_PLANNER, "Formulating general task plan...");
-        plan = await generateGeneralPlan(query, allTools);
-        addMessage(AgentType.GENERAL_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n')}`, { plan });
+      while (!planIsValid && planningRetries < MAX_PLANNING_RETRIES) {
+        if (intent === 'RESEARCH') {
+          addMessage(AgentType.NEURO_PLANNER, planningRetries === 0 ? "Formulating research analysis plan..." : "Refining research plan based on feedback...");
+          plan = await generateNeuroPlan(query, dataset.columns.join(', '), allTools, currentFeedback);
+          addMessage(AgentType.NEURO_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n')}\n\nRationale: ${plan.rationale}`, { plan });
+        } else {
+          addMessage(AgentType.GENERAL_PLANNER, planningRetries === 0 ? "Formulating general task plan..." : "Refining general plan based on feedback...");
+          plan = await generateGeneralPlan(query, allTools, currentFeedback);
+          addMessage(AgentType.GENERAL_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n')}`, { plan });
+        }
+
+        addMessage(AgentType.PLAN_VALIDATOR, "Verifying analysis steps...");
+        const validation = await validatePlan(plan, allTools, dataset.columns);
+
+        if (validation.valid) {
+          planIsValid = true;
+          addMessage(AgentType.PLAN_VALIDATOR, "Plan verified. Proceeding to execution.");
+        } else {
+          planningRetries++;
+          currentFeedback = `Validation errors: ${validation.errors.join(', ')}. Suggestions: ${validation.suggestions}`;
+          addMessage(AgentType.PLAN_VALIDATOR, `Plan rejected (Attempt ${planningRetries}/${MAX_PLANNING_RETRIES}):\n${validation.errors.map((e: string) => `- ${e}`).join('\n')}\n\nProviding feedback to Planner for correction...`);
+          
+          if (planningRetries >= MAX_PLANNING_RETRIES) {
+            addMessage(AgentType.SYSTEM, "Critical: Planning failed to stabilize after multiple validation cycles. Stopping execution.");
+            setIsProcessing(false);
+            return;
+          }
+        }
       }
 
-      // Execute
-      await executePlanSteps(
-          plan, 
-          0, 
-          null, 
-          [...dataset.data], 
-          [...dataset.columns], 
-          intent
-      );
+      await executePlanSteps(plan, 0, null, [...dataset.data], [...dataset.columns], intent);
 
     } catch (error) {
       console.error(error);
@@ -437,7 +455,6 @@ const App: React.FC = () => {
     <div className="flex h-screen w-full overflow-hidden bg-slate-950 text-slate-200">
       <div className="w-1/2 p-4 flex flex-col h-full border-r border-slate-800">
         <header className="mb-4 flex-none flex flex-col gap-2">
-           {/* Header Content Omitted for Brevity - Same as before */}
            <div className="flex justify-between items-center">
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
               <span className="bg-indigo-600 p-1 rounded-lg">NA</span>

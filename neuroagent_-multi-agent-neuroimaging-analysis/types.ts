@@ -2,9 +2,10 @@
 export enum AgentType {
   USER = 'User',
   ORCHESTRATOR = 'Orchestrator',
-  PLANNER = 'Planner', // Keep for backward compatibility if needed, though we will use specific ones
+  PLANNER = 'Planner', 
   GENERAL_PLANNER = 'General Planner',
   NEURO_PLANNER = 'Neuro Planner',
+  PLAN_VALIDATOR = 'Plan Validator',
   PREPROCESSOR = 'Preprocessor',
   EXECUTOR = 'Executor',
   RESEARCHER = 'Researcher',
@@ -17,7 +18,7 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   isThinking?: boolean;
-  metadata?: any; // Stores tool params, plan info, etc.
+  metadata?: any; 
 }
 
 export interface DatasetRow {
@@ -36,7 +37,8 @@ export enum VisualizationType {
   SCATTER_PLOT = 'SCATTER_PLOT',
   BOX_PLOT = 'BOX_PLOT',
   MARKDOWN_REPORT = 'MARKDOWN_REPORT',
-  LITERATURE_LIST = 'LITERATURE_LIST'
+  LITERATURE_LIST = 'LITERATURE_LIST',
+  RESEARCH_REPORT = 'RESEARCH_REPORT'
 }
 
 export interface ToolVisualization {
@@ -44,7 +46,7 @@ export interface ToolVisualization {
   title: string;
   data: any;
   config?: any;
-  messageId?: string; // Links back to the chat message that generated this
+  messageId?: string; 
 }
 
 export interface AgentState {
@@ -52,12 +54,11 @@ export interface AgentState {
   currentTask?: string;
 }
 
-// Stats types
 export interface GroupComparisonResult {
   groupCol: string;
   valueCol: string;
   groups: string[];
-  pVal: number; // Simulated
+  pVal: number; 
   stats: { group: string; mean: number; median: number; min: number; max: number }[];
 }
 
@@ -69,7 +70,6 @@ export interface CorrelationResult {
   dataPoints: { x: number; y: number; group?: string }[];
 }
 
-// MCP Types
 export interface McpTool {
   name: string;
   description?: string;

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { AgentType, ChatMessage } from '../../types';
 import { AGENT_COLORS } from '../../constants';
-import { User, BrainCircuit, Bot, Microscope, Terminal, GitFork, Lightbulb, Settings, FileCog, RotateCcw, Check, X } from 'lucide-react';
+import { User, BrainCircuit, Bot, Microscope, Terminal, GitFork, Lightbulb, Settings, FileCog, RotateCcw, Check, X, ShieldCheck } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -16,7 +16,8 @@ const getIcon = (role: AgentType) => {
     case AgentType.ORCHESTRATOR: return <GitFork className="w-4 h-4" />;
     case AgentType.NEURO_PLANNER: return <BrainCircuit className="w-4 h-4" />;
     case AgentType.GENERAL_PLANNER: return <Settings className="w-4 h-4" />;
-    case AgentType.PLANNER: return <BrainCircuit className="w-4 h-4" />; // Fallback
+    case AgentType.PLANNER: return <BrainCircuit className="w-4 h-4" />;
+    case AgentType.PLAN_VALIDATOR: return <ShieldCheck className="w-4 h-4" />;
     case AgentType.PREPROCESSOR: return <FileCog className="w-4 h-4" />;
     case AgentType.EXECUTOR: return <Terminal className="w-4 h-4" />;
     case AgentType.RESEARCHER: return <Microscope className="w-4 h-4" />;
@@ -29,12 +30,24 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
   const isUser = message.role === AgentType.USER;
   const colorClass = AGENT_COLORS[message.role] || AGENT_COLORS[AgentType.SYSTEM];
   
-  const [isEditing, setIsEditing] = useState(false);
-  const [editParams, setEditParams] = useState(
-    message.metadata?.params ? JSON.stringify(message.metadata.params, null, 2) : ''
+  const isPlanner = message.role === AgentType.NEURO_PLANNER || message.role === AgentType.GENERAL_PLANNER;
+  const isExecutor = message.role === AgentType.EXECUTOR;
+
+  const canEdit = onRestart && (
+    (isExecutor && message.metadata?.params) || 
+    (isPlanner && message.metadata?.plan)
   );
 
-  const canEdit = message.role === AgentType.EXECUTOR && message.metadata && message.metadata.params && onRestart;
+  const [isEditing, setIsEditing] = useState(false);
+  const [editParams, setEditParams] = useState(() => {
+    if (isExecutor && message.metadata?.params) {
+        return JSON.stringify(message.metadata.params, null, 2);
+    }
+    if (isPlanner && message.metadata?.plan) {
+        return JSON.stringify(message.metadata.plan, null, 2);
+    }
+    return '';
+  });
 
   const handleRun = () => {
     try {
@@ -42,7 +55,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
         if (onRestart) onRestart(message.id, parsed);
         setIsEditing(false);
     } catch (e) {
-        alert("Invalid JSON parameters");
+        alert("Invalid JSON format");
     }
   };
 
@@ -80,18 +93,20 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
                   onClick={() => setIsEditing(true)}
                   className="flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200 bg-slate-900/40 px-2 py-1 rounded"
                 >
-                    <RotateCcw className="w-3 h-3" /> Edit & Restart Step
+                    <RotateCcw className="w-3 h-3" /> {isPlanner ? 'Edit Plan & Restart' : 'Edit & Restart Step'}
                 </button>
              </div>
           )}
 
           {isEditing && (
             <div className="mt-3 bg-slate-950/50 rounded p-2 border border-slate-700/50">
-                <p className="text-xs text-slate-400 mb-1">Edit Tool Parameters (JSON):</p>
+                <p className="text-xs text-slate-400 mb-1">
+                    {isPlanner ? 'Edit Plan (JSON):' : 'Edit Tool Parameters (JSON):'}
+                </p>
                 <textarea 
                     value={editParams}
                     onChange={(e) => setEditParams(e.target.value)}
-                    className="w-full h-24 bg-slate-900 text-xs font-mono text-slate-300 p-2 rounded border border-slate-700 focus:outline-none focus:border-indigo-500"
+                    className="w-full h-48 bg-slate-900 text-xs font-mono text-slate-300 p-2 rounded border border-slate-700 focus:outline-none focus:border-indigo-500"
                 />
                 <div className="flex justify-end gap-2 mt-2">
                     <button 
@@ -104,7 +119,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
                         onClick={handleRun}
                         className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1 rounded"
                     >
-                        <Check className="w-3 h-3" /> Run
+                        <Check className="w-3 h-3" /> {isPlanner ? 'Update Plan' : 'Run'}
                     </button>
                 </div>
             </div>
