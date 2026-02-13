@@ -109,3 +109,35 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
   
   throw new Error(`Tool ${toolName} not found internally.`);
 };
+
+// Programmatically validate column references in the plan
+export const validatePlanColumns = (plan: any, initialColumns: string[], columnsToCheck?: string[][]) => {
+  const knownColumns = new Set(initialColumns);
+  const errors: string[] = [];
+
+  if (!plan.analysis_steps || !Array.isArray(plan.analysis_steps)) {
+    return { valid: false, errors: ["Invalid plan format"] };
+  }
+
+  plan.analysis_steps.forEach((step: any, index: number) => {
+    // Check if specific columns are requested for validation for this step by the Planner/Validator
+    if (columnsToCheck && Array.isArray(columnsToCheck) && Array.isArray(columnsToCheck[index])) {
+        const cols = columnsToCheck[index];
+        cols.forEach(col => {
+            if (col && typeof col === 'string') {
+                 if (!knownColumns.has(col)) {
+                    errors.push(`Step ${step.step_id} (${step.tool}): Column '${col}' not found in dataset (and not created by previous steps).`);
+                 }
+            }
+        });
+    }
+
+    // Always track column creation for subsequent steps (e.g. TRANSFORM_DATA creates new columns)
+    const params = step.parameters || {};
+    if (step.tool === 'TRANSFORM_DATA' && params.column) {
+      knownColumns.add(`${params.column}_numeric`);
+    }
+  });
+
+  return { valid: errors.length === 0, errors };
+};

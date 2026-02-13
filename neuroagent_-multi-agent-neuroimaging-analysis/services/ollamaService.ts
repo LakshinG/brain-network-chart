@@ -2,11 +2,12 @@
 import { Ollama } from 'ollama';
 import { McpTool } from "../types";
 import { PROMPTS } from "../constants";
+import { validatePlanColumns } from './internalTools';
 
 const OLLAMA_HOST = 'http://127.0.0.1:11434';
 
-let generalModel = 'qwen3:latest'; 
-let neuroModel = 'qwen3:latest';
+let generalModel = 'llama3'; 
+let neuroModel = 'llama3';
 
 const ollama = new Ollama({ host: OLLAMA_HOST });
 
@@ -115,13 +116,27 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
   }));
 
   try {
+    // 1. Ask LLM to validate tool usage and schema, and request column check if needed
     const response = await ollama.generate({
       model: generalModel,
       prompt: PROMPTS.PLAN_VALIDATOR(existingColumns, JSON.stringify(toolManifest), JSON.stringify(plan, null, 2)),
       format: 'json',
       stream: false
     });
-    return JSON.parse(response.response);
+    
+    const result = JSON.parse(response.response);
+
+    // 2. If LLM response requests column validation, execute the internal tool
+    if (result.check_columns && Array.isArray(result.check_columns)) {
+        const colValidation = validatePlanColumns(plan, existingColumns, result.check_columns);
+        if (!colValidation.valid) {
+            result.valid = false;
+            result.errors = [...(result.errors || []), ...colValidation.errors];
+            result.suggestions = (result.suggestions || "") + " Please correct the invalid column names.";
+        }
+    }
+
+    return result;
   } catch (e) {
     console.error("Plan Validator Error:", e);
     return { valid: true, errors: [], suggestions: "Validation skipped due to service error." };

@@ -2,7 +2,7 @@
 import { McpTool, McpToolCallResult } from '../types';
 
 // Connection to Python FastAPI MCP Server
-// Endpoints: GET /health, GET /api/schema, POST /{name}
+// Endpoints: GET /health, GET /api/schema, POST /api/tools/{name}
 const MCP_API_URL = 'http://127.0.0.1:8010';
 
 export class McpService {
@@ -36,10 +36,33 @@ export class McpService {
       
       const data = await response.json();
       
-      // Handle potential schema structures from Python FastAPI
-      // Expecting a list of tool definitions
+      // Handle "endpoints" dictionary format (New Python Server Schema)
+      if (data.endpoints && typeof data.endpoints === 'object') {
+        return Object.entries(data.endpoints).map(([key, value]: [string, any]) => {
+          // Normalize input schema:
+          // Some endpoints return standard JSON schema ({ type: 'object', properties: {...} })
+          // Others might return a direct map of arguments.
+          let schema = value.parameters || { type: 'object', properties: {} };
+
+          // If it lacks 'properties' and 'type' isn't explicitly defined as object, 
+          // assume it's a simplified key-value map of parameters and wrap it.
+          if (!schema.properties && schema.type !== 'object') {
+             schema = {
+                type: 'object',
+                properties: schema
+             };
+          }
+
+          return {
+            name: key,
+            description: value.description || '',
+            inputSchema: schema
+          };
+        });
+      }
+
+      // Fallback: Handle legacy/array format if structure differs
       let toolsRaw: any[] = [];
-      
       if (Array.isArray(data)) {
         toolsRaw = data;
       } else if (data.tools && Array.isArray(data.tools)) {
@@ -64,7 +87,7 @@ export class McpService {
     }
     
     try {
-      // Assuming convention: POST /{tool_name}
+      // Assuming convention: POST /api/tools/{tool_name}
       const response = await fetch(`${MCP_API_URL}/${name}`, {
         method: 'POST',
         headers: {
