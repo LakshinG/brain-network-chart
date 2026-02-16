@@ -1,4 +1,5 @@
-from mcp.server.fastmcp import FastMCP
+# from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException
@@ -9,8 +10,10 @@ import time
 import os
 import re
 import requests
+from urllib.parse import quote_plus
 import json
 from requests.adapters import HTTPAdapter
+from threading import Lock
 from urllib3.util.retry import Retry
 from typing import Optional, List, Dict, Any
 from functools import wraps
@@ -31,7 +34,34 @@ from tools import (
     get_file_path,
 )
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+
 from stats_tools import StatsToolkit
+
+def _get_server_host_port() -> tuple[str, int]:
+    host = os.getenv("MCP_HOST", "0.0.0.0").strip() or "0.0.0.0"
+
+    port_raw = os.getenv("MCP_PORT", os.getenv("PORT", "8010")).strip() or "8010"
+    try:
+        port = int(port_raw)
+    except ValueError:
+        raise ValueError(f"Invalid port: {port_raw!r} (set MCP_PORT or PORT)")
+
+    if not (1 <= port <= 65535):
+        raise ValueError(f"Invalid port: {port} (must be 1-65535)")
+
+    return host, port
+
+
+_SERVER_HOST, _SERVER_PORT = _get_server_host_port()
+
+server = FastMCP(
+    'Brain Network Analysis Server',
+    # host=_SERVER_HOST,
+    # port=_SERVER_PORT,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -90,6 +120,29 @@ class PubMedSearchRequest(BaseModel):
     max_results: int = Field(20, ge=1, le=200, description="Maximum number of papers to return (1-200)")
     year_from: Optional[int] = Field(None, ge=1900, le=datetime.now().year, description="Filter Start year (inclusive)")
     year_to: Optional[int] = Field(None, ge=1900, le=datetime.now().year, description="Filter End year (inclusive)")
+
+class OpenAlexSearchRequest(BaseModel):
+    query: str = Field(..., description="Search query for OpenAlex works")
+    max_results: int = Field(10, ge=1, le=50, description="Max results (1-50)")
+    from_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter from publication year (inclusive)")
+    to_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter to publication year (inclusive)")
+
+
+class CrossrefEnrichRequest(BaseModel):
+    dois: List[str] = Field(..., description="List of DOIs to enrich via Crossref (e.g., 10.1038/...)")
+    max_items: int = Field(50, ge=1, le=200, description="Max DOIs to process (safety cap)")
+
+
+class InternetSearchRequest(BaseModel):
+    query: str = Field(..., description="Internet search query (OpenAlex + Crossref)")
+    max_results: int = Field(10, ge=1, le=50, description="Max results (1-50)")
+    from_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter from publication year (inclusive)")
+    to_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter to publication year (inclusive)")
+
+class OpenNeuroSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="Keyword query for OpenNeuro datasets")
+    max_results: int = Field(default=10, ge=1, le=50, description="Number of datasets to return (1-50)")
+    modality: Optional[str] = Field(None, description="Optional modality filter (best-effort; depends on OpenNeuro schema)")
 
 class ResponseSchema(BaseModel):
     status: str
@@ -314,29 +367,592 @@ def _pubmed_esummary(pmids: List[str]) -> Dict[str, Any]:
         return parts[0]
     return _merge_pubmed_esummary_json(parts)
 
+from urllib.parse import quote_plus
 
-def _get_server_host_port() -> tuple[str, int]:
-    host = os.getenv("MCP_HOST", "0.0.0.0").strip() or "0.0.0.0"
+OPENALEX_WORKS = "https://api.openalex.org/works"
+CROSSREF_WORKS = "https://api.crossref.org/works"
 
-    port_raw = os.getenv("MCP_PORT", os.getenv("PORT", "8010")).strip() or "8010"
-    try:
-        port = int(port_raw)
-    except ValueError:
-        raise ValueError(f"Invalid port: {port_raw!r} (set MCP_PORT or PORT)")
+CONTACT_EMAIL = os.getenv("CONTACT_EMAIL", "")
+TOOL_NAME = os.getenv("TOOL_NAME", "brain-network-chart")
 
-    if not (1 <= port <= 65535):
-        raise ValueError(f"Invalid port: {port} (must be 1-65535)")
+def _clean_doi(doi: str) -> str:
+    doi = (doi or "").strip()
+    if doi.startswith("https://doi.org/"):
+        doi = doi[len("https://doi.org/"):]
+    if doi.startswith("http://doi.org/"):
+        doi = doi[len("http://doi.org/"):]
+    return doi.lower()
 
-    return host, port
+def _openalex_get(params: dict) -> dict:
+    # OpenAlex recommends including mailto for good citizenship
+    p = dict(params)
+    if CONTACT_EMAIL:
+        p["mailto"] = CONTACT_EMAIL
+    r = requests.get(OPENALEX_WORKS, params=p, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+def _crossref_get_by_doi(doi: str) -> Optional[dict]:
+    doi = _clean_doi(doi)
+    if not doi:
+        return None
+    url = f"{CROSSREF_WORKS}/{quote_plus(doi)}"
+    headers = {
+        # Crossref asks for a descriptive UA with contact info when possible
+        "User-Agent": f"{TOOL_NAME} (mailto:{CONTACT_EMAIL})" if CONTACT_EMAIL else TOOL_NAME
+    }
+    r = requests.get(url, headers=headers, timeout=20)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.json().get("message")
+
+OPENNEURO_GQL_URL = "https://openneuro.org/crn/graphql"
+
+_openneuro_schema_cache: dict | None = None
+_openneuro_schema_lock = Lock()
 
 
-_SERVER_HOST, _SERVER_PORT = _get_server_host_port()
+def _openneuro_post(query: str, variables: dict | None = None, timeout_s: float = 20.0) -> dict:
+    payload = {"query": query, "variables": variables or {}}
+    headers = {
+        "User-Agent": "brain-network-chart-openneuro-client",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
 
-server = FastMCP(
-    'Brain Network Analysis Server',
-    host=_SERVER_HOST,
-    port=_SERVER_PORT,
-)
+    r = requests.post(OPENNEURO_GQL_URL, json=payload, headers=headers, timeout=timeout_s)
+
+    if not r.ok:
+        body = (r.text or "").strip()
+        if len(body) > 800:
+            body = body[:800] + " ...[truncated]"
+        raise ValueError(f"OpenNeuro HTTP {r.status_code} error. Body: {body}")
+
+    return r.json()
+
+def _openneuro_get_query_fields(timeout_s: float = 20.0) -> dict:
+    """
+    Introspect OpenNeuro GraphQL schema once per process and cache it.
+    We only need the root Query fields + their args to detect how dataset listing/search works.
+    """
+    global _openneuro_schema_cache
+    with _openneuro_schema_lock:
+        if _openneuro_schema_cache is not None:
+            return _openneuro_schema_cache
+
+        introspection = """
+        query IntrospectQueryFields {
+            __schema {
+                queryType {
+                    fields {
+                        name
+                        type { kind name ofType { kind name ofType { kind name ofType { kind name }}}}
+                        args {
+                            name
+                            type { kind name ofType { kind name ofType { kind name ofType { kind name }}}}
+                        }
+                    }
+                }
+            }
+        }
+        """
+        data = _openneuro_post(introspection, timeout_s=timeout_s)
+        _openneuro_schema_cache = data
+        return data
+
+
+def _gql_type_name(t: dict | None) -> str:
+    """
+    Best-effort extract a readable GraphQL type name from introspection output.
+    """
+    if not t:
+        return ""
+    cur = t
+    for _ in range(6):
+        name = cur.get("name")
+        if name:
+            return name
+        cur = cur.get("ofType") or {}
+    return ""
+
+
+def _gql_is_list(t: dict | None) -> bool:
+    if not t:
+        return False
+    cur = t
+    for _ in range(10):
+        if cur.get("kind") == "LIST":
+            return True
+        cur = cur.get("ofType") or {}
+    return False
+
+
+_openneuro_type_cache: dict[str, dict] = {}
+
+
+def _openneuro_get_type(type_name: str, timeout_s: float = 20.0) -> dict:
+    """Introspect a single GraphQL type definition and cache it."""
+    if not type_name:
+        return {}
+    with _openneuro_schema_lock:
+        if type_name in _openneuro_type_cache:
+            return _openneuro_type_cache[type_name]
+
+    q = """
+    query TypeDef($name: String!) {
+      __type(name: $name) {
+        name
+        kind
+        fields {
+          name
+          type { kind name ofType { kind name ofType { kind name ofType { kind name }}}}
+        }
+      }
+    }
+    """
+    data = _openneuro_post(q, variables={"name": type_name}, timeout_s=timeout_s)
+    with _openneuro_schema_lock:
+        _openneuro_type_cache[type_name] = data
+    return data
+
+
+def _openneuro_type_fields(type_name: str) -> list[dict]:
+    data = _openneuro_get_type(type_name)
+    return (data.get("data") or {}).get("__type", {}).get("fields", []) or []
+
+
+def _openneuro_pick_id_and_name_fields(type_name: str) -> tuple[str | None, str | None]:
+    fields = _openneuro_type_fields(type_name)
+    names = {f.get("name") for f in fields if f.get("name")}
+
+    id_candidates = [
+        "id",
+        "datasetId",
+        "accessionNumber",
+        "openneuroId",
+    ]
+    name_candidates = [
+        "name",
+        "title",
+    ]
+
+    id_field = next((c for c in id_candidates if c in names), None)
+    name_field = next((c for c in name_candidates if c in names), None)
+
+    # Best-effort fallback: any field containing 'id'
+    if not id_field:
+        for n in sorted(names):
+            if n and ("id" in n.lower()):
+                id_field = n
+                break
+
+    return id_field, name_field
+
+
+def _arg_is_string(arg: dict) -> bool:
+    """
+    Determine if an arg is (or wraps) a GraphQL String.
+    """
+    t = arg.get("type") or {}
+    if _gql_type_name(t) == "String":
+        return True
+    cur = t
+    for _ in range(8):
+        cur = cur.get("ofType") or {}
+        if _gql_type_name(cur) == "String":
+            return True
+    return False
+
+
+def _openneuro_pick_dataset_field() -> tuple[str, str | None, set[str], dict, list[str]]:
+    """
+    Detect a root query field suitable for dataset search/listing.
+
+        Returns:
+            (field_name, string_arg_name_or_none, arg_names, type_ref, available_field_names)
+
+    - If a field looks like search (has a String arg), returns that arg name.
+    - Else, tries a 'datasets' list field with no string arg (client-side filtering fallback).
+    - Else, returns ( "", None, available_fields ) and caller raises a helpful error.
+    """
+    schema = _openneuro_get_query_fields()
+    fields = schema.get("data", {}).get("__schema", {}).get("queryType", {}).get("fields", []) or []
+    available = sorted([f.get("name") for f in fields if f.get("name")])
+
+    if not fields:
+        return "", None, set(), {}, available
+
+    preferred_arg_names = ["q", "query", "search", "term", "text", "keywords"]
+    # Common non-search string args (pagination/filter/sort) that should not be treated
+    # as free-text search parameters.
+    non_search_string_args = {
+        "after",
+        "before",
+        "cursor",
+        "startcursor",
+        "endcursor",
+        "sort",
+        "order",
+        "orderby",
+        "direction",
+        "modality",
+    }
+
+    # 1) Prefer explicit search-like fields (search/find) with a String arg.
+    for f in fields:
+        fname = f.get("name") or ""
+        if not fname:
+            continue
+        lname = fname.lower()
+        if ("search" in lname) or ("find" in lname):
+            args = f.get("args", []) or []
+            # prefer well-known arg names
+            for an in preferred_arg_names:
+                for a in args:
+                    if a.get("name") == an and _arg_is_string(a):
+                        arg_names = {x.get("name") for x in args if x.get("name")}
+                        return fname, an, arg_names, (f.get("type") or {}), available
+            # else take any string arg
+            for a in args:
+                an = (a.get("name") or "").lower()
+                if _arg_is_string(a) and an and an not in non_search_string_args:
+                    arg_names = {x.get("name") for x in args if x.get("name")}
+                    return fname, a.get("name"), arg_names, (f.get("type") or {}), available
+
+    # 2) Dataset-like fields: only treat as search if they expose a known search arg name.
+    for f in fields:
+        fname = f.get("name") or ""
+        if not fname:
+            continue
+        lname = fname.lower()
+        if "dataset" in lname:
+            args = f.get("args", []) or []
+            for an in preferred_arg_names:
+                for a in args:
+                    if a.get("name") == an and _arg_is_string(a):
+                        arg_names = {x.get("name") for x in args if x.get("name")}
+                        return fname, an, arg_names, (f.get("type") or {}), available
+
+    # 3) Fallback: a datasets-like list field (plural) even if no search arg
+    for f in fields:
+        fname = f.get("name") or ""
+        if not fname:
+            continue
+        if "datasets" in fname.lower():
+            args = f.get("args", []) or []
+            arg_names = {x.get("name") for x in args if x.get("name")}
+            return fname, None, arg_names, (f.get("type") or {}), available
+
+    # 4) no usable field found
+    return "", None, set(), {}, available
+
+
+def _openneuro_parse_relay_connection(conn: dict) -> list[dict]:
+    """
+    Parse Relay-style connection objects: { edges: [{ node: {id, name, ...}}] }.
+    Returns list of nodes.
+    """
+    if not isinstance(conn, dict):
+        return []
+    edges = conn.get("edges") or []
+    out = []
+    for e in edges:
+        node = (e or {}).get("node") or {}
+        if isinstance(node, dict) and node.get("id"):
+            out.append(node)
+    return out
+
+
+def _openneuro_parse_nodes_list(nodes_payload: Any, id_key: str | None, name_key: str | None) -> list[dict]:
+    if not isinstance(nodes_payload, list):
+        return []
+    out: list[dict] = []
+    for node in nodes_payload:
+        if not isinstance(node, dict):
+            continue
+        if id_key and node.get(id_key):
+            out.append(node)
+        elif (not id_key) and (name_key and node.get(name_key)):
+            out.append(node)
+    return out
+
+
+def _openneuro_pick_container_shape(return_type_name: str) -> tuple[str, str | None, str]:
+    """
+    Determine how to traverse the result object to reach dataset nodes.
+
+    Returns:
+      (shape, edge_node_field, node_type_name)
+
+    shape: one of 'edges', 'nodes', 'results', 'self'
+    """
+    fields = _openneuro_type_fields(return_type_name)
+    by_name = {f.get("name"): f for f in fields if f.get("name")}
+
+    if "edges" in by_name:
+        edges_type = _gql_type_name((by_name["edges"].get("type") or {}))
+        edge_fields = _openneuro_type_fields(edges_type)
+        edge_field_names = {f.get("name") for f in edge_fields if f.get("name")}
+        node_field = "node" if "node" in edge_field_names else ("dataset" if "dataset" in edge_field_names else None)
+        if node_field:
+            node_type = _gql_type_name((next((f for f in edge_fields if f.get("name") == node_field), {}) or {}).get("type") or {})
+        else:
+            node_type = ""
+        return "edges", node_field, node_type
+
+    if "nodes" in by_name:
+        node_type = _gql_type_name((by_name["nodes"].get("type") or {}))
+        return "nodes", None, node_type
+
+    if "results" in by_name:
+        node_type = _gql_type_name((by_name["results"].get("type") or {}))
+        return "results", None, node_type
+
+    # Fall back: assume return type is itself a Dataset-like object
+    return "self", None, return_type_name
+
+
+def _openneuro_try_queries(
+    field_name: str,
+    arg_name: str | None,
+    arg_names: set[str],
+    return_type_ref: dict,
+    query_text: str,
+    max_results: int,
+    progress_log: list,
+    modality: str | None = None,
+) -> list[dict]:
+    """
+    Robust OpenNeuro GraphQL dataset retrieval.
+
+    Key fixes vs previous version:
+    - If field_name == "datasets", use a dedicated pagination query with `after` + `pageInfo`.
+      This is the only reliable way right now because OpenNeuro `search()` returns null.
+    - Remove the invalid "self" selection variant, which caused:
+        Cannot query field "id" on type "DatasetConnection".
+    - Stop safely on OpenNeuro cursor errors or datasets=null.
+
+    Returns: list of {dataset_id, name, url, source}
+    """
+    return_type_name = _gql_type_name(return_type_ref)
+    if not return_type_name:
+        raise ValueError("OpenNeuro schema introspection did not return a usable return type")
+
+    progress_log.append({"step": "schema", "message": f"OpenNeuro return type for '{field_name}' is {return_type_name!r}"})
+
+    # Determine dataset node type + fields
+    shape, edge_node_field, node_type_name = _openneuro_pick_container_shape(return_type_name)
+    if not node_type_name:
+        node_type_name = return_type_name
+
+    ds_id_field, ds_name_field = _openneuro_pick_id_and_name_fields(node_type_name)
+    if not ds_id_field:
+        ds_id_field = "id"
+    if not ds_name_field:
+        ds_name_field = "name"
+
+    leaf_fields = " ".join([f for f in [ds_id_field, ds_name_field] if f])
+
+    # ----------------------------
+    # Special-case: datasets() pagination (RECOMMENDED)
+    # ----------------------------
+    if field_name == "datasets":
+        # We will fetch up to a fixed number of pages; caller will do scoring/filtering.
+        # Over-fetch to increase chance of local matches.
+        page_size = min(50, max(10, max_results))  # keep it reasonable
+        max_pages = 12  # safety cap
+        after = None
+
+        gql = """
+        query ListDatasets($first: Int!, $after: String, $modality: String, $public: Boolean) {
+          datasets(first: $first, after: $after, modality: $modality, filterBy: { public: $public }) {
+            edges {
+              node {
+                %s
+              }
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+        """ % leaf_fields
+
+        results: list[dict] = []
+        seen: set[str] = set()
+
+        for page in range(1, max_pages + 1):
+            vars_ = {
+                "first": page_size,
+                "after": after,
+                "modality": modality,
+                "public": True,
+            }
+
+            progress_log.append(
+                {"step": "page", "message": f"OpenNeuro datasets(): fetching page {page} (first={page_size}, after={after!r})"}
+            )
+
+            data = _openneuro_post(gql, variables=vars_, timeout_s=25.0)
+
+            # Handle GraphQL errors safely
+            if isinstance(data, dict) and data.get("errors"):
+                msg = data["errors"][0].get("message", "Unknown GraphQL error")
+                progress_log.append({"step": "gql_error", "message": f"OpenNeuro datasets() error: {msg}"})
+                break
+
+            payload = (data.get("data") or {}).get("datasets")
+            if payload is None:
+                progress_log.append({"step": "warn", "message": "OpenNeuro returned datasets=null; stopping pagination"})
+                break
+
+            edges = payload.get("edges") or []
+            for e in edges:
+                node = (e or {}).get("node") or {}
+                ds_id = node.get(ds_id_field) or node.get("id")
+                name = (node.get(ds_name_field) or node.get("name") or "").strip()
+                if not ds_id or ds_id in seen:
+                    continue
+                seen.add(ds_id)
+                results.append(
+                    {
+                        "dataset_id": ds_id,
+                        "name": name,
+                        "url": f"https://openneuro.org/datasets/{quote_plus(ds_id)}",
+                        "source": "openneuro",
+                    }
+                )
+
+            page_info = payload.get("pageInfo") or {}
+            has_next = bool(page_info.get("hasNextPage"))
+            end_cursor = page_info.get("endCursor")
+
+            progress_log.append(
+                {"step": "cursor", "message": f"pageInfo: hasNextPage={has_next}, endCursor={end_cursor!r}"}
+            )
+
+            if not has_next or not end_cursor:
+                break
+
+            # Always pass the exact cursor string back; any corruption triggers OpenNeuro decode errors.
+            after = end_cursor
+
+            # If we already collected a lot, we can stop early. Caller will re-rank/filter.
+            if len(results) >= max(200, max_results * 50):
+                progress_log.append({"step": "stop", "message": "Collected enough candidate datasets; stopping early"})
+                break
+
+        return results
+
+    # ----------------------------
+    # Generic path for other fields (limited template tries)
+    # ----------------------------
+
+    def _call_args(include_limit: bool) -> tuple[str, dict, str]:
+        parts: list[str] = []
+        vars_: dict = {}
+        var_defs: list[str] = []
+
+        if arg_name is not None:
+            parts.append(f"{arg_name}: $q")
+            vars_["q"] = query_text
+            var_defs.append("$q: String!")
+
+        if modality and ("modality" in arg_names):
+            parts.append("modality: $modality")
+            vars_["modality"] = modality
+            var_defs.append("$modality: String")
+
+        if include_limit:
+            if "first" in arg_names:
+                parts.append("first: $limit")
+                vars_["limit"] = max_results
+                var_defs.append("$limit: Int!")
+            elif "limit" in arg_names:
+                parts.append("limit: $limit")
+                vars_["limit"] = max_results
+                var_defs.append("$limit: Int!")
+
+        return ", ".join(parts), vars_, ", ".join(var_defs)
+
+    selection_variants: list[tuple[str, str]] = []
+    if shape == "edges":
+        # Prefer detected edge field if present; else default to node/dataset
+        if edge_node_field:
+            selection_variants.append(("edges", f"edges {{ {edge_node_field} {{ {leaf_fields} }} }}"))
+        selection_variants.append(("edges", f"edges {{ node {{ {leaf_fields} }} }}"))
+        selection_variants.append(("edges", f"edges {{ dataset {{ {leaf_fields} }} }}"))
+    if shape in ("nodes", "results"):
+        selection_variants.append((shape, f"{shape} {{ {leaf_fields} }}"))
+    # Extra fallbacks (SAFE only — no "self")
+    selection_variants.extend([
+        ("nodes", f"nodes {{ {leaf_fields} }}"),
+        ("results", f"results {{ {leaf_fields} }}"),
+    ])
+
+    templates: list[tuple[str, dict, str]] = []
+    for include_limit in (True, False):
+        call_args, vars_, var_defs = _call_args(include_limit=include_limit)
+        call = f"{field_name}({call_args})" if call_args else field_name
+        defs = f"({var_defs})" if var_defs else ""
+        for label, selection in selection_variants:
+            gql = f"query OpenNeuro{defs} {{\n  {call} {{\n    {selection}\n  }}\n}}\n"
+            templates.append((gql, vars_, label))
+
+    last_err = None
+    for i, (gql, vars_, label) in enumerate(templates, start=1):
+        progress_log.append({"step": "gql", "message": f"Trying OpenNeuro GraphQL template #{i} (shape={label})"})
+        try:
+            data = _openneuro_post(gql, variables=vars_, timeout_s=25.0)
+            if "errors" in data and data["errors"]:
+                last_err = data["errors"][0].get("message", "Unknown GraphQL error")
+                continue
+
+            payload = (data.get("data") or {}).get(field_name)
+            nodes: list[dict] = []
+
+            if isinstance(payload, dict) and "edges" in payload:
+                edges = payload.get("edges") or []
+                for e in edges:
+                    if not isinstance(e, dict):
+                        continue
+                    node = e.get("node") or e.get("dataset")
+                    if isinstance(node, dict):
+                        nodes.append(node)
+            elif isinstance(payload, dict) and "nodes" in payload:
+                nodes = _openneuro_parse_nodes_list(payload.get("nodes"), ds_id_field, ds_name_field)
+            elif isinstance(payload, dict) and "results" in payload:
+                nodes = _openneuro_parse_nodes_list(payload.get("results"), ds_id_field, ds_name_field)
+            elif isinstance(payload, list):
+                nodes = _openneuro_parse_nodes_list(payload, ds_id_field, ds_name_field)
+            elif isinstance(payload, dict):
+                nodes = [payload]
+
+            results = []
+            for node in nodes:
+                ds_id = node.get(ds_id_field) if ds_id_field else node.get("id")
+                name = (node.get(ds_name_field) if ds_name_field else node.get("name")) or ""
+                if not ds_id:
+                    continue
+                results.append({
+                    "dataset_id": ds_id,
+                    "name": name,
+                    "url": f"https://openneuro.org/datasets/{quote_plus(ds_id)}",
+                    "source": "openneuro",
+                })
+
+            if results:
+                return results
+
+            last_err = "Template returned 0 datasets"
+        except Exception as e:
+            last_err = str(e)
+            continue
+
+    raise ValueError(f"OpenNeuro GraphQL query failed across templates. Last error: {last_err}")
+
 
 
 @server.tool(name="run_cfc_wavelet_analysis")
@@ -862,6 +1478,357 @@ def search_pubmed(
             "progress": progress_log,
         }
 
+@server.tool(name="openalex_search")
+@validate_parameters(max_results={"min": 1, "max": 50, "type": int})
+def openalex_search(
+    query: str,
+    max_results: int = 10,
+    from_year: Optional[int] = None,
+    to_year: Optional[int] = None,
+) -> dict:
+    progress_log = []
+    start_time = time.time()
+
+    try:
+        q = query.strip()
+        if not q:
+            raise ValueError("query must be a non-empty string")
+        if from_year is not None and to_year is not None and from_year > to_year:
+            raise ValueError("from_year must be <= to_year")
+
+        progress_log.append({"step": "search", "message": f"OpenAlex searching for: {q!r}"})
+
+        params = {
+            "search": q,
+            "per-page": max_results,
+        }
+
+        # OpenAlex filter syntax
+        filters = []
+        if from_year is not None:
+            filters.append(f"from_publication_year:{from_year}")
+        if to_year is not None:
+            filters.append(f"to_publication_year:{to_year}")
+        if filters:
+            params["filter"] = ",".join(filters)
+
+        data = _openalex_get(params)
+
+        results = []
+        for item in (data.get("results") or [])[:max_results]:
+            doi = item.get("doi") or ""
+            doi = _clean_doi(doi)
+
+            host_venue = item.get("host_venue") or {}
+            venue_name = host_venue.get("display_name") or ""
+
+            authorships = item.get("authorships") or []
+            authors = ", ".join(
+                [(a.get("author") or {}).get("display_name", "") for a in authorships if (a.get("author") or {}).get("display_name")]
+            )[:300]
+
+            results.append({
+                "title": (item.get("title") or "").strip(),
+                "year": item.get("publication_year"),
+                "doi": doi or None,
+                "url": (item.get("doi") or item.get("id") or "").strip(),
+                "venue": venue_name,
+                "authors": authors,
+                "cited_by_count": item.get("cited_by_count"),
+                "source": "openalex",
+            })
+
+        elapsed = time.time() - start_time
+        progress_log.append({"step": "done", "message": f"Returning {len(results)} results"})
+
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "query_used": q,
+            "count_returned": len(results),
+            "results": results,
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+    except Exception as e:
+        logger.error(f"OpenAlex search error: {str(e)}", exc_info=True)
+        progress_log.append({"step": "error", "message": f"Error: {str(e)}"})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+@server.tool(name="crossref_enrich")
+def crossref_enrich(dois: List[str], max_items: int = 50) -> dict:
+    progress_log = []
+    start_time = time.time()
+    try:
+        if not dois:
+            raise ValueError("dois must be a non-empty list")
+        dois = [_clean_doi(d) for d in dois][:max_items]
+        dois = [d for d in dois if d]
+
+        progress_log.append({"step": "enrich", "message": f"Crossref enriching {len(dois)} DOIs"})
+
+        results = []
+        for i, doi in enumerate(dois, start=1):
+            msg = _crossref_get_by_doi(doi)
+            if not msg:
+                continue
+
+            title_list = msg.get("title") or []
+            title = title_list[0].strip() if title_list else ""
+
+            container = msg.get("container-title") or []
+            journal = container[0].strip() if container else ""
+
+            issued = (msg.get("issued") or {}).get("date-parts") or []
+            year = None
+            if issued and issued[0] and isinstance(issued[0][0], int):
+                year = issued[0][0]
+
+            author_list = msg.get("author") or []
+            authors = ", ".join(
+                [(" ".join([a.get("given","").strip(), a.get("family","").strip()]).strip()) for a in author_list if (a.get("given") or a.get("family"))]
+            )[:300]
+
+            results.append({
+                "doi": doi,
+                "title": title,
+                "journal": journal,
+                "year": year,
+                "publisher": msg.get("publisher"),
+                "url": (msg.get("URL") or f"https://doi.org/{doi}"),
+                "authors": authors,
+                "type": msg.get("type"),
+                "source": "crossref",
+            })
+
+        elapsed = time.time() - start_time
+        progress_log.append({"step": "done", "message": f"Enriched {len(results)} items"})
+
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "count_returned": len(results),
+            "results": results,
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+    except Exception as e:
+        logger.error(f"Crossref enrich error: {str(e)}", exc_info=True)
+        progress_log.append({"step": "error", "message": f"Error: {str(e)}"})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+@server.tool(name="internet_search")
+@validate_parameters(max_results={"min": 1, "max": 50, "type": int})
+def internet_search(
+    query: str,
+    max_results: int = 10,
+    from_year: Optional[int] = None,
+    to_year: Optional[int] = None,
+) -> dict:
+    progress_log = []
+    start_time = time.time()
+
+    try:
+        progress_log.append({"step": "phase", "message": "Phase 1: OpenAlex discovery"})
+        oa = openalex_search(query=query, max_results=max_results, from_year=from_year, to_year=to_year)
+        if oa.get("status") != "success":
+            return oa  # propagate error
+
+        oa_results = oa.get("results") or []
+        dois = [r.get("doi") for r in oa_results if r.get("doi")]
+        dois = [_clean_doi(d) for d in dois if d]
+
+        progress_log.append({"step": "phase", "message": f"Phase 2: Crossref enrich ({len(dois)} DOIs)"})
+        cr_map = {}
+        if dois:
+            cr = crossref_enrich(dois=dois, max_items=50)
+            if cr.get("status") == "success":
+                for item in cr.get("results") or []:
+                    if item.get("doi"):
+                        cr_map[item["doi"]] = item
+
+        progress_log.append({"step": "phase", "message": "Phase 3: Merge results"})
+        merged = []
+        for r in oa_results:
+            doi = _clean_doi(r.get("doi") or "")
+            if doi and doi in cr_map:
+                c = cr_map[doi]
+                merged.append({
+                    "title": c.get("title") or r.get("title"),
+                    "year": c.get("year") or r.get("year"),
+                    "doi": doi,
+                    "url": c.get("url") or r.get("url"),
+                    "venue": c.get("journal") or r.get("venue"),
+                    "authors": c.get("authors") or r.get("authors"),
+                    "source": "openalex+crossref",
+                })
+            else:
+                merged.append({
+                    "title": r.get("title"),
+                    "year": r.get("year"),
+                    "doi": doi or None,
+                    "url": r.get("url"),
+                    "venue": r.get("venue"),
+                    "authors": r.get("authors"),
+                    "source": "openalex",
+                })
+
+        elapsed = time.time() - start_time
+        progress_log.append({"step": "done", "message": f"Returning {len(merged)} merged results"})
+
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "query_used": query,
+            "count_returned": len(merged),
+            "results": merged,
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+    except Exception as e:
+        logger.error(f"Internet search error: {str(e)}", exc_info=True)
+        progress_log.append({"step": "error", "message": f"Error: {str(e)}"})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+@server.tool(name="openneuro_search")
+def openneuro_search(query: str, max_results: int = 10, modality: str | None = None) -> dict:
+    """
+    OpenNeuro keyword search via GraphQL.
+
+    Practical reality (as of your tests):
+    - OpenNeuro root field `search(q, ...)` exists but returns `null` for all queries, so we
+      always prefer `datasets(...)` listing + client-side scoring/filtering.
+    - `DatasetFilter` does not support keyword filtering.
+    - Dataset `name` alone is often not descriptive (e.g., ds000005), so we at least match on id+name.
+      (You can later expand to metadata/latestSnapshot once you introspect those subfields.)
+    """
+    progress_log: list[dict] = []
+    start_time = time.time()
+
+    try:
+        q = (query or "").strip()
+        if not q:
+            raise ValueError("query must be a non-empty string")
+
+        max_results = int(max_results)
+        if max_results < 1:
+            raise ValueError("max_results must be >= 1")
+
+        # Keep tokens short and safe; cap to avoid overly strict matching
+        tokens = [t.lower() for t in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9\-]{2,}", q)]
+        tokens = tokens[:8]
+
+        progress_log.append({"step": "search", "message": f"Searching OpenNeuro for: {q!r} (tokens={tokens})"})
+        if modality:
+            progress_log.append({"step": "filter", "message": f"Modality filter requested: {modality!r} (best-effort)"})
+
+        field_name, arg_name, arg_names, return_type_ref, available_fields = _openneuro_pick_dataset_field()
+        if not field_name:
+            raise ValueError(
+                "OpenNeuro GraphQL schema did not expose a datasets/search field. "
+                f"Available root fields: {available_fields}"
+            )
+
+        progress_log.append({"step": "schema", "message": f"Picked OpenNeuro field={field_name!r} arg={arg_name!r}"})
+
+        # IMPORTANT: OpenNeuro's `search()` resolver returns null in practice (verified).
+        # Force fallback to `datasets()` listing.
+        if field_name == "search":
+            progress_log.append({"step": "schema", "message": "OpenNeuro search() returns null; switching to datasets() listing"})
+            field_name = "datasets"
+            arg_name = None
+
+        # If server-side search arg exists, we'd use it directly; but we force datasets listing above.
+        fetch_limit = min(200, max_results * 50)  # over-fetch to make local scoring meaningful
+
+        raw_rows = _openneuro_try_queries(
+            field_name=field_name,
+            arg_name=arg_name,              # should be None after the override
+            arg_names=arg_names,
+            return_type_ref=return_type_ref,
+            query_text=q,
+            max_results=fetch_limit,
+            progress_log=progress_log,
+            modality=modality,
+        )
+
+        def haystack(row: Dict[str, Any]) -> str:
+            return " ".join([
+                (row.get("dataset_id") or ""),
+                (row.get("name") or ""),
+            ]).lower()
+
+        def score(row: Dict[str, Any]) -> int:
+            h = haystack(row)
+            # score by # matched tokens (ANY-token match, not ALL)
+            return sum(1 for t in tokens if t in h)
+
+        # Local ranking/filtering
+        if tokens:
+            # Keep only rows that match at least one token
+            filtered = [r for r in raw_rows if score(r) > 0]
+            # Sort by score descending, then by name to stabilize ordering
+            filtered.sort(key=lambda r: (score(r), (r.get("name") or "").lower()), reverse=True)
+        else:
+            filtered = list(raw_rows)
+
+        results: List[Dict[str, Any]] = filtered[:max_results]
+
+        elapsed = time.time() - start_time
+        progress_log.append({"step": "done", "message": f"Returning {len(results)} datasets"})
+
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "query_used": q,
+            "count_returned": len(results),
+            "results": results,
+            "console_output": "",
+            "progress": progress_log,
+        }
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        logger.error(f"OpenNeuro search error: {str(e)}", exc_info=True)
+        progress_log.append({"step": "error", "message": str(e)})
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "elapsed_seconds": elapsed,
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "results": [],
+            "console_output": "",
+            "progress": progress_log,
+        }
 
 @server.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
@@ -909,25 +1876,45 @@ async def api_schema(request: Request) -> JSONResponse:
                 "description": "Search PubMed via NCBI E-utilities (esearch + esummary)",
                 "parameters": PubMedSearchRequest.model_json_schema(),
             },
-            "upload": {
+            "openalex_search": {
                 "method": "POST",
-                "description": "Upload a file for analysis (multipart/form-data)",
-                "parameters": {
-                    "file": {"type": "file", "description": "Multipart file field named 'file'"}
-                }
+                "description": "Scholarly discovery search via OpenAlex works",
+                "parameters": OpenAlexSearchRequest.model_json_schema(),
             },
-            "list_files": {
-                "method": "GET",
-                "description": "List uploaded files",
-                "parameters": {}
+            "crossref_enrich": {
+                "method": "POST",
+                "description": "Enrich/normalize bibliographic metadata by DOI via Crossref",
+                "parameters": CrossrefEnrichRequest.model_json_schema(),
             },
-            "delete_file": {
-                "method": "DELETE or POST",
-                "description": "Delete an uploaded file (JSON body: {\"filename\": \"...\"})",
-                "parameters": {
-                    "filename": {"type": "string", "description": "Name of the uploaded file to delete"}
-                }
+            "internet_search": {
+                "method": "POST",
+                "description": "Combined internet search (OpenAlex discovery + Crossref DOI enrichment)",
+                "parameters": InternetSearchRequest.model_json_schema(),
             },
+            "openneuro_search": {
+                "method": "POST",
+                "description": "Search OpenNeuro datasets via GraphQL",
+                "parameters": OpenNeuroSearchRequest.model_json_schema(),
+            },
+            # "upload": {
+            #     "method": "POST",
+            #     "description": "Upload a file for analysis (multipart/form-data)",
+            #     "parameters": {
+            #         "file": {"type": "file", "description": "Multipart file field named 'file'"}
+            #     }
+            # },
+            # "list_files": {
+            #     "method": "GET",
+            #     "description": "List uploaded files",
+            #     "parameters": {}
+            # },
+            # "delete_file": {
+            #     "method": "DELETE or POST",
+            #     "description": "Delete an uploaded file (JSON body: {\"filename\": \"...\"})",
+            #     "parameters": {
+            #         "filename": {"type": "string", "description": "Name of the uploaded file to delete"}
+            #     }
+            # },
         },
         "rate_limiting": {
             "requests_per_window": RATE_LIMIT_REQUESTS,
@@ -1058,97 +2045,132 @@ async def http_search_pubmed(request: Request) -> JSONResponse:
         logger.error(f"Request error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-
-
-@server.custom_route("/upload", methods=["POST"])
+@server.custom_route("/openalex_search", methods=["POST"])
 @rate_limit
-async def upload_file(request: Request) -> JSONResponse:
-    """Upload a file to the server for analysis.
-    
-    Expects multipart form data with 'file' field.
-    """
-    try:
-        form = await request.form()
-        
-        if 'file' not in form:
-            raise HTTPException(status_code=400, detail="No file provided in request")
-        
-        uploaded_file = form['file']
-        
-        if not uploaded_file.filename:
-            raise HTTPException(status_code=400, detail="File has no name")
-        
-        # Read file content
-        file_content = await uploaded_file.read()
-        
-        if not file_content:
-            raise HTTPException(status_code=400, detail="File is empty")
-        
-        # Save file
-        file_path, file_info = save_uploaded_file(file_content, uploaded_file.filename)
-        
-        logger.info(f"File uploaded: {file_info['saved_filename']}")
-        
-        return JSONResponse({
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "file_info": file_info,
-        })
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Upload error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+async def http_openalex_search(request: Request) -> JSONResponse:
+    data = await request.json()
+    v = OpenAlexSearchRequest(**data)
+    return JSONResponse(openalex_search(v.query, v.max_results, v.from_year, v.to_year))
 
 
-@server.custom_route("/list_files", methods=["GET"])
-async def list_files(request: Request) -> JSONResponse:
-    """List all uploaded files."""
+@server.custom_route("/crossref_enrich", methods=["POST"])
+@rate_limit
+async def http_crossref_enrich(request: Request) -> JSONResponse:
+    data = await request.json()
+    v = CrossrefEnrichRequest(**data)
+    return JSONResponse(crossref_enrich(v.dois, v.max_items))
+
+
+@server.custom_route("/internet_search", methods=["POST"])
+@rate_limit
+async def http_internet_search(request: Request) -> JSONResponse:
+    data = await request.json()
+    v = InternetSearchRequest(**data)
+    return JSONResponse(internet_search(v.query, v.max_results, v.from_year, v.to_year))
+
+@server.custom_route("/openneuro_search", methods=["POST"])
+@rate_limit
+async def http_openneuro_search(request: Request) -> JSONResponse:
     try:
-        files = list_uploaded_files()
-        logger.info(f"Listed {len(files)} uploaded files")
-        
-        return JSONResponse({
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "count": len(files),
-            "files": files,
-        })
+        data = await request.json()
+        validated = OpenNeuroSearchRequest(**data)
+        return JSONResponse(openneuro_search(query=validated.query, max_results=validated.max_results, modality=validated.modality))
+    except ValueError as e:
+        logger.error(f"Validation error in /openneuro_search: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
     except Exception as e:
-        logger.error(f"List files error: {str(e)}")
+        logger.error(f"Request error in /openneuro_search: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
-
-@server.custom_route("/delete_file", methods=["DELETE", "POST"])
-@rate_limit
-async def delete_file(request: Request) -> JSONResponse:
-    """Delete an uploaded file.
+# @server.custom_route("/upload", methods=["POST"])
+# @rate_limit
+# async def upload_file(request: Request) -> JSONResponse:
+#     """Upload a file to the server for analysis.
     
-    Expects JSON with 'filename' field.
-    """
-    try:
-        if request.method == "DELETE":
-            data = await request.json()
-        else:
-            data = await request.json()
+#     Expects multipart form data with 'file' field.
+#     """
+#     try:
+#         form = await request.form()
         
-        filename = data.get("filename", "")
-        if not filename:
-            raise HTTPException(status_code=400, detail="Filename required")
+#         if 'file' not in form:
+#             raise HTTPException(status_code=400, detail="No file provided in request")
         
-        result = delete_uploaded_file(filename)
-        logger.info(f"File deleted: {filename}")
+#         uploaded_file = form['file']
         
-        return JSONResponse({
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "result": result,
-        })
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Delete file error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+#         if not uploaded_file.filename:
+#             raise HTTPException(status_code=400, detail="File has no name")
+        
+#         # Read file content
+#         file_content = await uploaded_file.read()
+        
+#         if not file_content:
+#             raise HTTPException(status_code=400, detail="File is empty")
+        
+#         # Save file
+#         file_path, file_info = save_uploaded_file(file_content, uploaded_file.filename)
+        
+#         logger.info(f"File uploaded: {file_info['saved_filename']}")
+        
+#         return JSONResponse({
+#             "status": "success",
+#             "timestamp": datetime.now().isoformat(),
+#             "file_info": file_info,
+#         })
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Upload error: {str(e)}")
+#         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+# @server.custom_route("/list_files", methods=["GET"])
+# async def list_files(request: Request) -> JSONResponse:
+#     """List all uploaded files."""
+#     try:
+#         files = list_uploaded_files()
+#         logger.info(f"Listed {len(files)} uploaded files")
+        
+#         return JSONResponse({
+#             "status": "success",
+#             "timestamp": datetime.now().isoformat(),
+#             "count": len(files),
+#             "files": files,
+#         })
+#     except Exception as e:
+#         logger.error(f"List files error: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# @server.custom_route("/delete_file", methods=["DELETE", "POST"])
+# @rate_limit
+# async def delete_file(request: Request) -> JSONResponse:
+#     """Delete an uploaded file.
+    
+#     Expects JSON with 'filename' field.
+#     """
+#     try:
+#         if request.method == "DELETE":
+#             data = await request.json()
+#         else:
+#             data = await request.json()
+        
+#         filename = data.get("filename", "")
+#         if not filename:
+#             raise HTTPException(status_code=400, detail="Filename required")
+        
+#         result = delete_uploaded_file(filename)
+#         logger.info(f"File deleted: {filename}")
+        
+#         return JSONResponse({
+#             "status": "success",
+#             "timestamp": datetime.now().isoformat(),
+#             "result": result,
+#         })
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Delete file error: {str(e)}")
+#         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
 #stats tools
 
@@ -1199,6 +2221,51 @@ def check_data_normality(data_source: str, column: str) -> str:
     result = StatsToolkit.check_normality(data_source, column)
     return json.dumps(result)
 
+# app = FastAPI()
+
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["*"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# import uvicorn
+
+# app.mount("/", server)
+# from fastmcp.utilities.lifespan import combine_lifespans
+# from contextlib import asynccontextmanager
+
+# # Your existing lifespan
+# @asynccontextmanager
+# async def app_lifespan(app: FastAPI):
+#     print("Starting up the app...")
+#     yield
+#     print("Shutting down the app...")
+
+# # Create MCP server
+# mcp_app = server.http_app(path="/")
+
+# # Combine both lifespans
+# app = FastAPI(lifespan=combine_lifespans(app_lifespan, mcp_app.lifespan))
+# app.mount("/mcp", mcp_app)  # MCP endpoint at /mcp
+### 
+# uvicorn mcp_server:http_app --port 8010
+###
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+
+# Define middleware
+middleware = [
+    Middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+]
+http_app = server.http_app(middleware=middleware)
 if __name__ == "__main__":
     logger.info("="*60)
     logger.info("Brain Network Analysis MCP Server starting...")
@@ -1219,7 +2286,14 @@ if __name__ == "__main__":
     logger.info("="*60)
     
     try:
-        server.run(transport="streamable-http", mount_path='/ram/USERS/ziquanw/brain-network-chart/uploaded_files')
+        # server.run(transport="http", host="0.0.0.0", port=8010)
+        # server.run(transport="streamable-http", mount_path='/ram/USERS/ziquanw/brain-network-chart/uploaded_files')
+        server.run(transport="http", host="0.0.0.0", port=8010)
+        # uvicorn.run(
+        #     app,
+        #     host="127.0.0.1",
+        #     port=8010,
+        # )
     except KeyboardInterrupt:
         logger.info("Server shutdown requested")
     except Exception as e:
