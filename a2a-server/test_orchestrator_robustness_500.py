@@ -285,7 +285,8 @@ def generate_diverse_prompts(n=500):
         else:
             ptype = "mixed"
             should_trigger = any(word in prompt.lower() for word in [
-                'literature', 'pubmed', 'evidence', 'research', 'norms', 'compare'
+                'literature', 'pubmed', 'evidence', 'research', 'norms', 'normative', 'compare',
+                'typical', 'statistics', 'stats', 'validated', 'validate', 'valida', 'context'
             ])
         
         prompts.append(prompt)
