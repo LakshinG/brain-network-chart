@@ -27,7 +27,7 @@ MCP Server(s)
 
 ## Optional Environment Variables
 
-- `PORT` (default: `8787`) - Node backend port.
 - `MCP_SERVER_URL` (default: `http://localhost:8010/mcp`) - MCP endpoint for backend.
 - `FRONTEND_ORIGIN` (default: `*`) - CORS origin for backend.
-- `VITE_NODE_BACKEND_URL` (default: `http://localhost:8787`) - browser app target backend URL.
+- `NODE_BACKEND_URL` (default: `http://localhost:8787`) - browser app target backend URL.
+- `OLLAMA_URL` (default: `http://127.0.0.1:11434`)
