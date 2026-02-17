@@ -33,7 +33,7 @@ MCP Server(s)
 - Debug Executor: Tool calling order is the opposite to the response.
 - ~~Connect to MCP tool visualization (see `frontend-card/frontend`)~~
 - Improve the connection to MCP tool visualization (current only support AGING_CURVE/NORMATIVE_MODEL)
-- Four demos:
+- Three demos:
    - CT and IQ group comparison in terms of diagnosis
    - Spectral cluster: feature=[list of regional CT], y=IQ
    - Linear regression: x=CT, y=IQ, hue=Diagnosis
