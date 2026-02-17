@@ -1,21 +1,18 @@
-
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ToolVisualization, VisualizationType } from '../../types';
 import { ScatterPlot, StatsBarChart } from './Charts';
-import { FileText, Database, BookOpen, Link, FileCheck2 } from 'lucide-react';
+import { FileText, Database, BookOpen, Link, FileCheck2, CheckCircle2 } from 'lucide-react';
 
 interface VisualizerAreaProps {
   visualizations: ToolVisualization[];
   datasetName?: string;
-  onVizClick?: (messageId?: string) => void;
+  onVizClick?: (id?: string) => void;
+  activeDatasetIds?: string[];
 }
 
 const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => void }> = ({ data, onLinkClick }) => {
   const { report, stepIdToMessageId } = data;
-
-  // Pre-process the report to convert [[Step N]] into a unique markdown link scheme
-  // e.g. "See [[Step 1]]" -> "See [Step 1](urn:step:1)"
   const markdownContent = report.replace(/\[\[Step (\d+)\]\]/g, '[Step $1](urn:step:$1)');
 
   return (
@@ -23,7 +20,6 @@ const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => voi
       <div className="prose prose-invert max-w-none text-slate-300 leading-relaxed">
         <ReactMarkdown
           components={{
-            // Custom renderer for links to intercept step clicks
             a: ({ node, href, children, ...props }) => {
               if (href?.startsWith('urn:step:')) {
                 const stepId = parseInt(href.split(':')[2], 10);
@@ -37,7 +33,6 @@ const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => voi
                   </button>
                 );
               }
-              // Fallback for standard links
               return (
                 <a 
                   href={href} 
@@ -50,7 +45,6 @@ const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => voi
                 </a>
               );
             },
-            // Enhance headings
             h1: ({children}) => <h1 className="text-2xl font-bold text-slate-100 mb-4 pb-2 border-b border-slate-700">{children}</h1>,
             h2: ({children}) => <h2 className="text-xl font-semibold text-indigo-200 mt-6 mb-3">{children}</h2>,
             h3: ({children}) => <h3 className="text-lg font-medium text-slate-200 mt-4 mb-2">{children}</h3>,
@@ -66,11 +60,20 @@ const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => voi
   );
 };
 
-const VisualizationCard: React.FC<{ visualization: ToolVisualization, onClick?: () => void, onReportLinkClick?: (stepId: number) => void }> = ({ visualization, onClick, onReportLinkClick }) => {
+const VisualizationCard: React.FC<{ 
+    visualization: ToolVisualization, 
+    onClick?: () => void, 
+    onReportLinkClick?: (stepId: number) => void,
+    isActiveDataset?: boolean
+}> = ({ visualization, onClick, onReportLinkClick, isActiveDataset }) => {
+  const isClickable = visualization.messageId || visualization.datasetId;
+  
   return (
     <div 
         onClick={onClick}
-        className={`bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-xl flex-shrink-0 transition-all ${visualization.messageId ? 'cursor-pointer hover:ring-2 hover:ring-indigo-500/50 hover:border-indigo-500' : ''}`}
+        className={`bg-slate-800 rounded-xl border overflow-hidden shadow-xl flex-shrink-0 transition-all 
+        ${isActiveDataset ? 'border-indigo-500/60 ring-1 ring-indigo-500/30' : 'border-slate-700'}
+        ${isClickable ? 'cursor-pointer hover:ring-2 hover:ring-indigo-500/50 hover:border-indigo-500' : ''}`}
     >
       <div className="bg-slate-900 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
         <div className="flex items-center space-x-2">
@@ -82,6 +85,11 @@ const VisualizationCard: React.FC<{ visualization: ToolVisualization, onClick?: 
           <span className="font-semibold text-slate-200">{visualization.title}</span>
         </div>
         <div className="flex items-center gap-2">
+            {isActiveDataset && (
+                <span title="Active Dataset" className="flex">
+                    <CheckCircle2 className="w-4 h-4 text-indigo-400" />
+                </span>
+            )}
             {visualization.messageId && <Link className="w-3 h-3 text-slate-500" />}
             <span className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-600">
             {visualization.type}
@@ -90,7 +98,6 @@ const VisualizationCard: React.FC<{ visualization: ToolVisualization, onClick?: 
       </div>
 
       <div className="p-4 bg-slate-800/50 pointer-events-none"> 
-         {/* pointer-events-none ensures clicking charts doesn't interfere with card click unless handled specifically */}
         {visualization.type === VisualizationType.SCATTER_PLOT && (
           <ScatterPlot data={visualization.data} config={visualization.config} />
         )}
@@ -148,9 +155,8 @@ const VisualizationCard: React.FC<{ visualization: ToolVisualization, onClick?: 
   );
 };
 
-const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, datasetName, onVizClick }) => {
+const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, datasetName, onVizClick, activeDatasetIds }) => {
   const handleReportLinkClick = (stepId: number) => {
-    // Find the report visualization that holds the mapping
     const reportViz = visualizations.find(v => v.type === VisualizationType.RESEARCH_REPORT);
     if (reportViz && reportViz.data.stepIdToMessageId[stepId]) {
       const messageId = reportViz.data.stepIdToMessageId[stepId];
@@ -176,8 +182,9 @@ const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, dataset
            <VisualizationCard 
              key={index} 
              visualization={viz} 
-             onClick={() => onVizClick && onVizClick(viz.messageId)}
+             onClick={() => onVizClick && onVizClick(viz.datasetId || viz.messageId)}
              onReportLinkClick={handleReportLinkClick}
+             isActiveDataset={viz.datasetId ? activeDatasetIds?.includes(viz.datasetId) : false}
            />
         ))}
       </div>

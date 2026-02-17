@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool, SuspendedState 
 } from './types';
 import { MOCK_CSV_DATA } from './constants';
-import { parseCSV } from './utils/stats';
+import { parseCSV, mergeDatasets } from './utils/stats';
 import { 
   generateNeuroPlan,
   generateGeneralPlan,
@@ -25,7 +25,11 @@ import VisualizerArea from './components/Visualizer/VisualizerArea';
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [dataset, setDataset] = useState<Dataset | null>(null);
+  
+  // Multi-dataset state
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [activeDatasetIds, setActiveDatasetIds] = useState<string[]>([]);
+
   const [visualizations, setVisualizations] = useState<ToolVisualization[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [mcpTools, setMcpTools] = useState<McpTool[]>([]);
@@ -38,6 +42,12 @@ const App: React.FC = () => {
   const [selectedNeuroModel, setSelectedNeuroModel] = useState<string>('llama3');
 
   const [suspendedState, setSuspendedState] = useState<SuspendedState | null>(null);
+
+  // Derived active dataset (merged)
+  const activeDataset = useMemo(() => {
+    const selected = datasets.filter(d => activeDatasetIds.includes(d.id));
+    return mergeDatasets(selected);
+  }, [datasets, activeDatasetIds]);
 
   useEffect(() => {
     const initSystem = async () => {
@@ -77,7 +87,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (messages.length === 0) {
-      addMessage(AgentType.SYSTEM, "Welcome to the NeuroAgent Multi-Agent System. Please upload a neuroimaging dataset (CSV) or load the demo data.");
+      addMessage(AgentType.SYSTEM, "Welcome to the NeuroAgent Multi-Agent System. Please upload neuroimaging datasets (CSV) to the File System to begin.");
     }
   }, []);
 
@@ -105,17 +115,64 @@ const App: React.FC = () => {
     setVisualizations(prev => [viz, ...prev]);
   };
 
-  const handleFileUpload = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      loadData(text, file.name);
-    };
-    reader.readAsText(file);
+  const loadData = (csvText: string, name: string) => {
+    const { columns, data } = parseCSV(csvText);
+    const newId = Date.now().toString() + Math.random().toString().slice(2, 6);
+    const newDataset: Dataset = { id: newId, name, columns, data };
+    
+    setDatasets(prev => {
+        const next = [...prev, newDataset];
+        if (prev.length === 0) {
+            // First dataset
+             addMessage(AgentType.SYSTEM, `Dataset "${name}" loaded.`);
+        } else {
+             addMessage(AgentType.SYSTEM, `Dataset "${name}" added to File System.`);
+        }
+        return next;
+    });
+
+    // Automatically select the new dataset
+    setActiveDatasetIds(prev => [...prev, newDataset.id]);
+
+    // Show initial viz linked to this dataset
+    setVisualizations(prevViz => [{
+        type: VisualizationType.DATA_TABLE,
+        title: `Data Inspection: ${name}`,
+        data: data,
+        datasetId: newDataset.id
+    }, ...prevViz]);
+  };
+
+  const handleFileUpload = (files: FileList | null) => {
+    if (!files) return;
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        loadData(text, file.name);
+      };
+      reader.readAsText(file);
+    });
   };
 
   const handleLoadDemo = () => {
     loadData(MOCK_CSV_DATA, "Amyloid_SUVR_Swapped.csv");
+  };
+
+  const removeDataset = (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      setDatasets(prev => prev.filter(d => d.id !== id));
+      setActiveDatasetIds(prev => prev.filter(did => did !== id));
+  };
+
+  const toggleDataset = (id: string) => {
+    setActiveDatasetIds(prev => {
+        if (prev.includes(id)) {
+            return prev.filter(i => i !== id);
+        } else {
+            return [...prev, id];
+        }
+    });
   };
 
   const handleGeneralModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -130,17 +187,6 @@ const App: React.FC = () => {
     setSelectedNeuroModel(newModel);
     setNeuroModel(newModel);
     addMessage(AgentType.SYSTEM, `Neuro Model switched to: ${newModel}`);
-  };
-
-  const loadData = (csvText: string, name: string) => {
-    const { columns, data } = parseCSV(csvText);
-    setDataset({ name, columns, data });
-    addMessage(AgentType.SYSTEM, `Dataset "${name}" loaded with ${data.length} rows and columns: ${columns.join(', ')}.`);
-    setVisualizations([{
-      type: VisualizationType.DATA_TABLE,
-      title: 'Data Inspection',
-      data: data
-    }]);
   };
 
   const parseMcpResultToVisualization = (toolName: string, content: string): ToolVisualization | null => {
@@ -166,9 +212,6 @@ const App: React.FC = () => {
     return AgentType.EXECUTOR;
   };
 
-  /**
-   * Actuator function: Executes a single tool given specific parameters.
-   */
   const executeToolLogic = async (
       toolName: string, 
       params: any, 
@@ -188,7 +231,6 @@ const App: React.FC = () => {
           if (toolName === 'TRANSFORM_DATA') {
               const col = params.column;
               if (newCols.includes(col)) {
-                  // Preprocessor logic adds extra context
                   const preMsg = addMessage(AgentType.PREPROCESSOR, `Analyzing column '${col}' to determine numeric mapping...`);
                   
                   const uniqueVals = Array.from(new Set(newData.map(row => row[col])));
@@ -210,8 +252,13 @@ const App: React.FC = () => {
                   
                   if (!newCols.includes(newColName)) newCols.push(newColName);
                   
-                  // Update global dataset state as well
-                  setDataset(prev => prev ? ({ ...prev, data: newData, columns: newCols }) : null);
+                  // NOTE: In multi-dataset mode, updating a 'merged' dataset doesn't persist back to original CSVs easily.
+                  // For now, we assume transformations apply to the transient execution context (activeData).
+                  // If we want to persist, we would need to map rows back to original datasets, which is complex.
+                  // We accept that transformations are temporary for the session or we'd update the derived active dataset logic if we wanted persistence.
+                  // Given "activeDataset" is re-calculated on render from source datasets, persisting changes requires updating source datasets.
+                  // We will skip updating `setDatasets` for transformed columns in this simplified multi-file merge logic
+                  // to avoid ID conflicts or complexity. The analysis continues with `newData` in memory.
 
                   stepResult = `Converted '${col}' to '${newColName}' using mapping: ${JSON.stringify(mapping)}.`;
                   viz = {
@@ -297,12 +344,10 @@ const App: React.FC = () => {
     let activeData = [...currentData];
     let activeCols = [...currentColumns];
 
-    // 1. Execute the Planner's Static Steps
     for (let i = 0; i < stepsToRun.length; i++) {
       const step = stepsToRun[i];
       const instruction = step.instruction;
       
-      // Notify user that Executor is thinking
       const executorThinkingMsg = addMessage(
         AgentType.EXECUTOR, 
         `Step ${step.step_id} - ${step.tool}\nInstruction: "${instruction}"\n\nThinking about tool parameters...`,
@@ -315,12 +360,7 @@ const App: React.FC = () => {
       stepIdToMessageId[step.step_id] = executorThinkingMsg.id;
 
       try {
-          // --- EXECUTOR AGENT ---
-          // Ask the Executor Agent to convert the instruction into specific tool calls
-          // Pass clarification only if it's the first step we are running (which is the one we resumed for)
           const context = (i === 0) ? stepClarification : undefined;
-          
-          // Context from previous steps to allow using dynamic values
           const previousResultsContext = resultsSummary.join('\n\n');
 
           const executorResult = await runExecutorAgent(instruction, activeCols, allTools, context, previousResultsContext);
@@ -335,7 +375,6 @@ const App: React.FC = () => {
                 } : m
              ));
 
-             // Suspend execution and wait for user input
              setSuspendedState({
                  plan,
                  stepIndex: startStepIndex + i,
@@ -343,8 +382,7 @@ const App: React.FC = () => {
                  columns: activeCols,
                  intent
              });
-             
-             return; // EXIT FUNCTION TO WAIT FOR USER
+             return;
           }
 
           const toolCalls = executorResult.toolCalls;
@@ -360,15 +398,13 @@ const App: React.FC = () => {
               throw new Error("Executor Agent decided no tools were needed.");
           }
 
-          // --- ACTUATOR LOOP ---
           let stepAggregateResult = "";
           
           for (const call of toolCalls) {
               const toolName = call.tool;
               const params = call.parameters;
-              const agentRole = getAgentForTool(toolName); // Preprocessor, Researcher, or Executor
+              const agentRole = getAgentForTool(toolName);
               
-              // Only log distinct role messages if it's NOT the executor doing standard calc
               if (agentRole !== AgentType.EXECUTOR) {
                  addMessage(agentRole, `Sub-task: Running ${toolName}...`);
               }
@@ -404,7 +440,6 @@ const App: React.FC = () => {
       await new Promise(r => setTimeout(r, 1000));
     }
 
-    // 2. Dynamic Researcher Loop
     if (intent === 'RESEARCH') {
       let researcherActive = true;
       let loopCount = 0;
@@ -414,20 +449,11 @@ const App: React.FC = () => {
 
       while (researcherActive && loopCount < MAX_LOOPS) {
           const context = resultsSummary.join('\n');
-          
-          // Filter tools for Researcher: Only allow search/retrieval tools
           const researchTools = allTools.filter(t => {
              const name = t.name.toLowerCase();
-             return name.includes('search') || 
-                    name.includes('query') || 
-                    name.includes('literature') || 
-                    name.includes('pubmed') || 
-                    name.includes('web') || 
-                    name.includes('internet') ||
-                    name.includes('google');
+             return name.includes('search') || name.includes('query') || name.includes('literature') || name.includes('pubmed') || name.includes('web') || name.includes('internet') || name.includes('google');
           });
 
-          // Use filtered tools to restrict Researcher context
           const decision = await generateResearchInsights(context, researchTools);
           
           if (decision.decision === 'TOOL_CALL') {
@@ -437,108 +463,59 @@ const App: React.FC = () => {
                  addMessage(AgentType.RESEARCHER, `I need more information. Delegating to Executor: "${instruction}"`, {
                      thought: decision.thought
                  });
-                 
                  try {
-                     // Pass full context to executor in case researcher instruction implies "use the result from X"
                      const previousResultsContext = resultsSummary.join('\n\n');
                      const executorResult = await runExecutorAgent(instruction, activeCols, allTools, undefined, previousResultsContext);
-                     
-                     // NOTE: We do not handle clarification for dynamic researcher steps yet for simplicity, 
-                     // or we can fallback to just skipping if unsure.
-                     // A robust system would also suspend here.
-                     
                      const toolCalls = executorResult.toolCalls;
-                     
                      if (toolCalls && toolCalls.length > 0) {
                          for (const call of toolCalls) {
                              const toolName = call.tool;
                              const params = call.parameters;
-
                              const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
                                  toolName, params, activeData, activeCols
                              );
-                             
                              activeData = updatedData;
                              activeCols = updatedColumns;
-
                              if (viz) {
                                  addVisualization({ ...viz, title: `Researcher: ${viz.title}` });
                              }
-
                              addMessage(AgentType.RESEARCHER, `Tool Result (${toolName}):\n${resultText}`);
                              resultsSummary.push(`[Dynamic Researcher Step] Tool: ${toolName}\nResult: ${resultText}`);
                          }
                      } else {
-                         addMessage(AgentType.RESEARCHER, "Executor found no applicable tools for this instruction.");
+                         addMessage(AgentType.RESEARCHER, "Executor found no applicable tools.");
                      }
                  } catch (e: any) {
                      addMessage(AgentType.RESEARCHER, `Error executing researcher instruction: ${e.message}`);
                      researcherActive = false;
                  }
              } else {
-                 addMessage(AgentType.RESEARCHER, "Attempted to call tool but missing instruction.");
                  researcherActive = false;
              }
           } else {
              const finalReport = decision.report || "Analysis complete.";
              const researchMsg = addMessage(AgentType.RESEARCHER, "Final Analysis Report generated.");
-             
-             setMessages(prev => prev.map(m => 
-                m.id === researchMsg.id ? { ...m, content: finalReport } : m
-             ));
-
+             setMessages(prev => prev.map(m => m.id === researchMsg.id ? { ...m, content: finalReport } : m));
              addVisualization({
                 type: VisualizationType.RESEARCH_REPORT,
                 title: "Scientific Research Report",
-                data: {
-                  report: finalReport,
-                  stepIdToMessageId
-                },
+                data: { report: finalReport, stepIdToMessageId },
                 messageId: researchMsg.id
               });
-              
               researcherActive = false;
           }
       }
       
       if (loopCount >= MAX_LOOPS) {
-          addMessage(AgentType.SYSTEM, "Researcher loop limit reached. Generating final report based on gathered findings...");
-          
-          const context = resultsSummary.join('\n');
-          // Call researcher with NO tools to force a report
-          const decision = await generateResearchInsights(context, []); 
-          
-          const finalReport = decision.report || "Analysis stopped due to iteration limit. Summary of findings:\n" + context;
-          
-          const researchMsg = addMessage(AgentType.RESEARCHER, "Final Analysis Report (Limit Reached)");
-             
-          setMessages(prev => prev.map(m => 
-             m.id === researchMsg.id ? { ...m, content: finalReport } : m
-          ));
-
-          addVisualization({
-             type: VisualizationType.RESEARCH_REPORT,
-             title: "Scientific Research Report",
-             data: {
-               report: finalReport,
-               stepIdToMessageId
-             },
-             messageId: researchMsg.id
-           });
+          addMessage(AgentType.SYSTEM, "Researcher loop limit reached.");
       }
-
     } else {
       addMessage(AgentType.SYSTEM, "Task complete.");
     }
   };
 
   const handleRestartFromStep = async (messageId: string, newParams: any) => {
-    // Note: With the new Architecture, restarting a step usually means modifying parameters.
-    // However, the new messages store "plan" and "instruction", not specific parameters in metadata.
-    // Supporting restart with parameters would require hacking the executor result.
-    // For now, we allow restarting the PLAN.
-    
-    if (!dataset) return;
+    if (!activeDataset) return;
     const msgIndex = messages.findIndex(m => m.id === messageId);
     if (msgIndex === -1) return;
     const msg = messages[msgIndex];
@@ -558,7 +535,7 @@ const App: React.FC = () => {
         setIsProcessing(true);
         
         addMessage(AgentType.PLAN_VALIDATOR, "Validating manually updated plan...");
-        const validation = await validatePlan(newPlan, [...INTERNAL_TOOLS, ...mcpTools], dataset.columns);
+        const validation = await validatePlan(newPlan, [...INTERNAL_TOOLS, ...mcpTools], activeDataset.columns);
         
         if (!validation.valid) {
             addMessage(AgentType.PLAN_VALIDATOR, `⚠️ Validation Error: ${validation.errors.join(', ')}\n\nSuggestion: ${validation.suggestions}`);
@@ -567,35 +544,27 @@ const App: React.FC = () => {
         }
 
         addMessage(AgentType.PLAN_VALIDATOR, "Plan validated successfully. Resuming execution...");
-        await executePlanSteps(newPlan, 0, null, [...dataset.data], [...dataset.columns], intent);
+        await executePlanSteps(newPlan, 0, null, [...activeDataset.data], [...activeDataset.columns], intent);
         setIsProcessing(false);
     }
   };
 
   const handleUserQuery = async (query: string) => {
-    if (!dataset) return;
+    if (!activeDataset) {
+        addMessage(AgentType.SYSTEM, "Please select or upload a dataset first.");
+        return;
+    }
     
     addMessage(AgentType.USER, query);
     setIsProcessing(true);
 
-    // 1. Check if we are in a suspended state (waiting for clarification)
     if (suspendedState) {
        addMessage(AgentType.SYSTEM, "Received clarification. Resuming execution...");
        try {
            const { plan, stepIndex, data, columns, intent } = suspendedState;
-           setSuspendedState(null); // Clear suspension
-           
-           await executePlanSteps(
-               plan, 
-               stepIndex, // Resume from the step that needed help
-               null, 
-               data, 
-               columns, 
-               intent, 
-               query // Pass the user's message as clarification context
-           );
+           setSuspendedState(null);
+           await executePlanSteps(plan, stepIndex, null, data, columns, intent, query);
        } catch (error) {
-           console.error(error);
            addMessage(AgentType.SYSTEM, "Error resuming execution.");
        } finally {
            setIsProcessing(false);
@@ -628,7 +597,7 @@ const App: React.FC = () => {
       while (!planIsValid && planningRetries < MAX_PLANNING_RETRIES) {
         if (intent === 'RESEARCH') {
           addMessage(AgentType.NEURO_PLANNER, planningRetries === 0 ? "Formulating research analysis plan..." : "Refining research plan based on feedback...");
-          plan = await generateNeuroPlan(query, dataset.columns.join(', '), allTools, currentFeedback);
+          plan = await generateNeuroPlan(query, activeDataset.columns.join(', '), allTools, currentFeedback);
           addMessage(AgentType.NEURO_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}\n   Instruction: ${s.instruction}`).join('\n')}\n\nRationale: ${plan.rationale}`, { plan });
         } else {
           addMessage(AgentType.GENERAL_PLANNER, planningRetries === 0 ? "Formulating general task plan..." : "Refining general plan based on feedback...");
@@ -637,7 +606,7 @@ const App: React.FC = () => {
         }
 
         addMessage(AgentType.PLAN_VALIDATOR, "Verifying analysis steps...");
-        const validation = await validatePlan(plan, allTools, dataset.columns);
+        const validation = await validatePlan(plan, allTools, activeDataset.columns);
 
         if (validation.valid) {
           planIsValid = true;
@@ -655,7 +624,7 @@ const App: React.FC = () => {
         }
       }
 
-      await executePlanSteps(plan, 0, null, [...dataset.data], [...dataset.columns], intent);
+      await executePlanSteps(plan, 0, null, [...activeDataset.data], [...activeDataset.columns], intent);
 
     } catch (error) {
       console.error(error);
@@ -665,9 +634,14 @@ const App: React.FC = () => {
     }
   };
 
-  const handleVizClick = (messageId?: string) => {
-    if (messageId) {
-        setHighlightedMessageId(messageId);
+  const handleVizClick = (id?: string) => {
+    // Check if ID corresponds to a dataset ID for toggling selection
+    if (id && datasets.some(d => d.id === id)) {
+        toggleDataset(id);
+    } 
+    // Otherwise check if it's a message ID
+    else if (id) {
+        setHighlightedMessageId(id);
     }
   };
 
@@ -693,7 +667,7 @@ const App: React.FC = () => {
           </div>
           
           {availableModels.length > 0 && (
-            <div className="flex gap-2 text-xs">
+            <div className="flex gap-2 text-xs mt-2">
               <div className="flex flex-col gap-1 w-1/2">
                 <label className="text-slate-500">General Model</label>
                 <select 
@@ -724,8 +698,9 @@ const App: React.FC = () => {
         <div className="flex-1 min-h-0">
           <VisualizerArea 
             visualizations={visualizations} 
-            datasetName={dataset?.name} 
+            datasetName={activeDataset?.name} 
             onVizClick={handleVizClick}
+            activeDatasetIds={activeDatasetIds}
           />
         </div>
       </div>
@@ -734,16 +709,28 @@ const App: React.FC = () => {
         <ChatArea 
           messages={messages} 
           onSendMessage={handleUserQuery} 
-          onFileUpload={handleFileUpload}
+          onFileUpload={(file) => handleFileUpload(createFileList(file))}
           onLoadDemo={handleLoadDemo}
           isProcessing={isProcessing}
-          hasData={!!dataset}
+          hasData={!!activeDataset}
           highlightedMessageId={highlightedMessageId}
           onRestartStep={handleRestartFromStep}
+          datasets={datasets}
+          activeDatasetIds={activeDatasetIds}
+          onDatasetToggle={toggleDataset}
+          onDatasetRemove={removeDataset}
+          onMultiFileUpload={handleFileUpload}
         />
       </div>
     </div>
   );
 };
+
+// Helper to wrap single file in FileList-like object for compatibility
+function createFileList(file: File): FileList {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    return dt.files;
+}
 
 export default App;

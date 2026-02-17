@@ -1,8 +1,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { ChatMessage, AgentType } from '../../types';
+import { ChatMessage, AgentType, Dataset } from '../../types';
 import MessageBubble from './MessageBubble';
-import { Send, Upload, PlayCircle } from 'lucide-react';
+import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2 } from 'lucide-react';
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -13,10 +13,16 @@ interface ChatAreaProps {
   hasData: boolean;
   highlightedMessageId: string | null;
   onRestartStep: (messageId: string, newParams: any) => void;
+  datasets: Dataset[];
+  activeDatasetIds: string[];
+  onDatasetToggle: (id: string) => void;
+  onDatasetRemove: (id: string, e: React.MouseEvent) => void;
+  onMultiFileUpload: (files: FileList | null) => void;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({ 
-  messages, onSendMessage, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep 
+  messages, onSendMessage, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep,
+  datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload
 }) => {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -48,7 +54,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
+    if (e.target.files && e.target.files.length > 0) {
       onFileUpload(e.target.files[0]);
     }
   };
@@ -82,26 +88,66 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       </div>
 
       <div className="flex-none p-4 bg-slate-900 border-t border-slate-800">
-        {!hasData ? (
-          <div className="mb-4 p-4 bg-slate-800/50 rounded-lg border border-dashed border-slate-700 text-center">
-            <p className="text-sm text-slate-300 mb-3">Upload a CSV dataset to begin analysis</p>
-            <div className="flex justify-center gap-3">
-              <button 
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-sm transition-colors"
-              >
-                <Upload className="w-4 h-4" /> Upload CSV
-              </button>
-              <button 
-                onClick={onLoadDemo}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded text-sm transition-colors"
-              >
-                <PlayCircle className="w-4 h-4" /> Load Demo Data
-              </button>
-            </div>
-          </div>
-        ) : null}
         
+        {/* Compact File System */}
+        <div className="mb-4">
+            <div className="flex justify-between items-center mb-2">
+                 <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                      <FileSpreadsheet className="w-3 h-3" /> Data Context
+                  </h3>
+                   <div className="flex gap-2">
+                     <button 
+                        onClick={onLoadDemo}
+                        className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1"
+                      >
+                        <PlayCircle className="w-3 h-3" /> Demo
+                      </button>
+                      <label className="cursor-pointer text-xs flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded transition-colors">
+                          <Plus className="w-3 h-3" /> Add CSV
+                          <input 
+                            type="file" 
+                            multiple 
+                            accept=".csv" 
+                            className="hidden" 
+                            onChange={(e) => onMultiFileUpload(e.target.files)} 
+                          />
+                      </label>
+                   </div>
+            </div>
+            
+            <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto custom-scrollbar">
+                {datasets.length === 0 && (
+                     <div className="w-full py-2 text-xs text-slate-500 text-center border border-dashed border-slate-700 rounded bg-slate-800/50">
+                        No datasets active. Upload a CSV to begin.
+                     </div>
+                )}
+                {datasets.map(ds => {
+                    const isActive = activeDatasetIds.includes(ds.id);
+                    return (
+                        <div 
+                        key={ds.id}
+                        onClick={() => onDatasetToggle(ds.id)}
+                        className={`
+                            group flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border cursor-pointer transition-all select-none
+                            ${isActive
+                                ? 'bg-indigo-900/40 border-indigo-500/50 text-indigo-200' 
+                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}
+                        `}
+                        >
+                            {isActive && <CheckCircle2 className="w-3 h-3 text-indigo-400" />}
+                            <span className="truncate max-w-[120px]">{ds.name}</span>
+                            <button 
+                            onClick={(e) => onDatasetRemove(ds.id, e)}
+                            className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
+                            >
+                                <Trash2 className="w-3 h-3" />
+                            </button>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+
         <form onSubmit={handleSubmit} className="relative">
           <input
             type="text"

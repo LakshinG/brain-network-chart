@@ -1,4 +1,5 @@
-import { DatasetRow } from '../types';
+
+import { DatasetRow, Dataset } from '../types';
 
 export const parseCSV = (csvText: string): { columns: string[], data: DatasetRow[] } => {
   const lines = csvText.trim().split('\n');
@@ -17,6 +18,72 @@ export const parseCSV = (csvText: string): { columns: string[], data: DatasetRow
   });
 
   return { columns, data };
+};
+
+export const mergeDatasets = (datasets: Dataset[]): Dataset | null => {
+  if (datasets.length === 0) return null;
+  if (datasets.length === 1) return { ...datasets[0], name: datasets[0].name };
+
+  // Try to find a common ID column to join on
+  const potentialIds = ['ID', 'id', 'Subject', 'subject', 'RID', 'rid', 'Participant_ID', 'participant_id', 'Case', 'case'];
+  let idCol: string | null = null;
+
+  for (const cand of potentialIds) {
+    if (datasets.every(d => d.columns.includes(cand))) {
+      idCol = cand;
+      break;
+    }
+  }
+
+  if (idCol) {
+    // Perform Full Outer Join on idCol
+    const mergedDataMap = new Map<string | number, DatasetRow>();
+    const allColumns = new Set<string>();
+
+    datasets.forEach(ds => {
+      ds.columns.forEach(c => allColumns.add(c));
+      ds.data.forEach(row => {
+        const key = row[idCol!] as string | number;
+        if (key !== undefined) {
+          const existing = mergedDataMap.get(key) || {};
+          // Merge rows, later datasets overwrite earlier ones if keys conflict (except ID)
+          mergedDataMap.set(key, { ...existing, ...row });
+        }
+      });
+    });
+
+    const columns = Array.from(allColumns);
+    // Ensure ID col is first
+    const idIdx = columns.indexOf(idCol);
+    if (idIdx > -1) {
+      columns.splice(idIdx, 1);
+      columns.unshift(idCol);
+    }
+
+    return {
+      id: 'merged-' + Date.now(),
+      name: `Merged (${datasets.length} files)`,
+      columns,
+      data: Array.from(mergedDataMap.values())
+    };
+  } else {
+    // No common ID -> Concatenate Rows (Union of columns)
+    const allColumns = new Set<string>();
+    datasets.forEach(ds => ds.columns.forEach(c => allColumns.add(c)));
+    const columns = Array.from(allColumns);
+    
+    const data: DatasetRow[] = [];
+    datasets.forEach(ds => {
+      data.push(...ds.data);
+    });
+
+    return {
+      id: 'merged-concat-' + Date.now(),
+      name: `Concat (${datasets.length} files)`,
+      columns,
+      data
+    };
+  }
 };
 
 // Simple Pearson correlation

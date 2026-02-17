@@ -26,6 +26,7 @@ export interface DatasetRow {
 }
 
 export interface Dataset {
+  id: string;
   name: string;
   columns: string[];
   data: DatasetRow[];
@@ -47,6 +48,7 @@ export interface ToolVisualization {
   data: any;
   config?: any;
   messageId?: string; 
+  datasetId?: string;
 }
 
 export interface AgentState {
@@ -68,6 +70,19 @@ export interface GroupComparisonResult {
   groups: string[];
   pVal: number; 
   stats: { group: string; mean: number; median: number; min: number; max: number }[];
+  pairwiseComparisons?: {
+    groupA: string;
+    groupB: string;
+    testName: string;
+    statistic: number;
+    pVal: number;
+    significant: boolean;
+    cohensD: number;
+    effectSize: string;
+    meanA: number;
+    meanB: number;
+    explanation: string;
+  }[];
 }
 
 export interface CorrelationResult {
