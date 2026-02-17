@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool 
+  AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool, SuspendedState 
 } from './types';
 import { MOCK_CSV_DATA } from './constants';
 import { parseCSV } from './utils/stats';
@@ -12,6 +12,7 @@ import {
   generateResearchInsights, 
   generatePreprocessingMapping,
   validatePlan,
+  runExecutorAgent,
   checkOllamaConnection, 
   getAvailableModels, 
   setGeneralModel, 
@@ -35,6 +36,8 @@ const App: React.FC = () => {
 
   const [selectedGeneralModel, setSelectedGeneralModel] = useState<string>('llama3');
   const [selectedNeuroModel, setSelectedNeuroModel] = useState<string>('llama3');
+
+  const [suspendedState, setSuspendedState] = useState<SuspendedState | null>(null);
 
   useEffect(() => {
     const initSystem = async () => {
@@ -81,7 +84,7 @@ const App: React.FC = () => {
   const addMessage = (role: AgentType, content: string, metadata?: any): ChatMessage => {
     let usedModel: string | undefined;
 
-    if (role === AgentType.ORCHESTRATOR || role === AgentType.GENERAL_PLANNER) {
+    if (role === AgentType.ORCHESTRATOR || role === AgentType.GENERAL_PLANNER || role === AgentType.EXECUTOR) {
       usedModel = selectedGeneralModel;
     } else if (role === AgentType.NEURO_PLANNER || role === AgentType.PLAN_VALIDATOR || role === AgentType.PREPROCESSOR || role === AgentType.RESEARCHER) {
       usedModel = selectedNeuroModel;
@@ -164,14 +167,11 @@ const App: React.FC = () => {
   };
 
   /**
-   * Reusable logic to execute a single tool (Internal or MCP).
-   * It handles data updates, preprocessor prompts, and visualization creation.
-   * Returns a result string and an optional visualization object.
+   * Actuator function: Executes a single tool given specific parameters.
    */
   const executeToolLogic = async (
       toolName: string, 
       params: any, 
-      agentRole: AgentType, 
       currentData: any[], 
       currentColumns: string[]
   ): Promise<{ resultText: string, viz: ToolVisualization | null, updatedData: any[], updatedColumns: string[] }> => {
@@ -286,11 +286,13 @@ const App: React.FC = () => {
     initialParamsOverride: any = null,
     currentData: any[],
     currentColumns: string[],
-    intent: 'RESEARCH' | 'GENERAL'
+    intent: 'RESEARCH' | 'GENERAL',
+    stepClarification?: string
   ) => {
     const resultsSummary: string[] = [];
     const stepIdToMessageId: Record<number, string> = {};
     const stepsToRun = plan.analysis_steps.slice(startStepIndex);
+    const allTools = [...INTERNAL_TOOLS, ...mcpTools];
 
     let activeData = [...currentData];
     let activeCols = [...currentColumns];
@@ -298,44 +300,103 @@ const App: React.FC = () => {
     // 1. Execute the Planner's Static Steps
     for (let i = 0; i < stepsToRun.length; i++) {
       const step = stepsToRun[i];
-      const params = (i === 0 && initialParamsOverride) ? initialParamsOverride : step.parameters;
-      const agentRole = getAgentForTool(step.tool);
-
-      const executorMsg = addMessage(
-        agentRole, 
-        `Executing Step ${step.step_id}: ${step.tool}...`,
+      const instruction = step.instruction;
+      
+      // Notify user that Executor is thinking
+      const executorThinkingMsg = addMessage(
+        AgentType.EXECUTOR, 
+        `Step ${step.step_id} - ${step.tool}\nInstruction: "${instruction}"\n\nThinking about tool parameters...`,
         { 
           plan, 
           stepIndex: startStepIndex + i, 
-          tool: step.tool,
-          params: params
+          tool: step.tool
         }
       );
-      
-      stepIdToMessageId[step.step_id] = executorMsg.id;
+      stepIdToMessageId[step.step_id] = executorThinkingMsg.id;
 
       try {
-          const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
-              step.tool, params, agentRole, activeData, activeCols
-          );
+          // --- EXECUTOR AGENT ---
+          // Ask the Executor Agent to convert the instruction into specific tool calls
+          // Pass clarification only if it's the first step we are running (which is the one we resumed for)
+          const context = (i === 0) ? stepClarification : undefined;
           
-          activeData = updatedData;
-          activeCols = updatedColumns;
+          // Context from previous steps to allow using dynamic values
+          const previousResultsContext = resultsSummary.join('\n\n');
 
+          const executorResult = await runExecutorAgent(instruction, activeCols, allTools, context, previousResultsContext);
+          
+          if (executorResult.needs_clarification) {
+             const question = executorResult.clarification_question || "I need clarification on the parameters.";
+             
+             setMessages(prev => prev.map(m => 
+                m.id === executorThinkingMsg.id ? { 
+                    ...m, 
+                    content: `${m.content}\n\n⚠️ **Low Confidence (${executorResult.confidence || '?'})**\n${executorResult.thought || ''}\n\n**Question:** ${question}` 
+                } : m
+             ));
+
+             // Suspend execution and wait for user input
+             setSuspendedState({
+                 plan,
+                 stepIndex: startStepIndex + i,
+                 data: activeData,
+                 columns: activeCols,
+                 intent
+             });
+             
+             return; // EXIT FUNCTION TO WAIT FOR USER
+          }
+
+          const toolCalls = executorResult.toolCalls;
+          
           setMessages(prev => prev.map(m => 
-            m.id === executorMsg.id ? { ...m, content: `${m.content}\n\n✅ ${resultText}` } : m
+            m.id === executorThinkingMsg.id ? { 
+                ...m, 
+                content: `${m.content}\n\nDecision: ${executorResult.thought || "Tools selected."}` 
+            } : m
           ));
 
-          if (viz) {
-            viz.messageId = executorMsg.id;
-            addVisualization(viz);
+          if (!toolCalls || toolCalls.length === 0) {
+              throw new Error("Executor Agent decided no tools were needed.");
           }
+
+          // --- ACTUATOR LOOP ---
+          let stepAggregateResult = "";
           
-          resultsSummary.push(`Step ${step.step_id} (${step.tool} - ${agentRole}): ${resultText}`);
+          for (const call of toolCalls) {
+              const toolName = call.tool;
+              const params = call.parameters;
+              const agentRole = getAgentForTool(toolName); // Preprocessor, Researcher, or Executor
+              
+              // Only log distinct role messages if it's NOT the executor doing standard calc
+              if (agentRole !== AgentType.EXECUTOR) {
+                 addMessage(agentRole, `Sub-task: Running ${toolName}...`);
+              }
+
+              const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
+                  toolName, params, activeData, activeCols
+              );
+              
+              activeData = updatedData;
+              activeCols = updatedColumns;
+
+              if (viz) {
+                viz.messageId = executorThinkingMsg.id;
+                addVisualization(viz);
+              }
+              
+              stepAggregateResult += `\n- Tool: ${toolName}\n  Result: ${resultText}`;
+          }
+
+          setMessages(prev => prev.map(m => 
+            m.id === executorThinkingMsg.id ? { ...m, content: `${m.content}\n\n✅ Execution Complete:${stepAggregateResult}` } : m
+          ));
+          
+          resultsSummary.push(`Step ${step.step_id}: ${stepAggregateResult}`);
 
       } catch (e: any) {
          setMessages(prev => prev.map(m => 
-            m.id === executorMsg.id ? { ...m, content: `${m.content}\n\n❌ Error: ${e.message}` } : m
+            m.id === executorThinkingMsg.id ? { ...m, content: `${m.content}\n\n❌ Execution Error: ${e.message}` } : m
           ));
          resultsSummary.push(`Step ${step.step_id} FAILED: ${e.message}`);
       }
@@ -344,8 +405,6 @@ const App: React.FC = () => {
     }
 
     // 2. Dynamic Researcher Loop
-    // The researcher agent reviews findings and can decide to execute more tools (e.g. search)
-    // or write the final report.
     if (intent === 'RESEARCH') {
       let researcherActive = true;
       let loopCount = 0;
@@ -355,45 +414,75 @@ const App: React.FC = () => {
 
       while (researcherActive && loopCount < MAX_LOOPS) {
           const context = resultsSummary.join('\n');
-          const decision = await generateResearchInsights(context, mcpTools);
           
-          if (decision.decision === 'TOOL_CALL' && decision.tool) {
-             loopCount++;
-             const toolName = decision.tool;
-             const params = decision.parameters || {};
-             
-             addMessage(AgentType.RESEARCHER, `I need more information. Deciding to run tool: ${toolName}...`, {
-                 thought: decision.thought
-             });
-             
-             try {
-                const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
-                    toolName, params, AgentType.RESEARCHER, activeData, activeCols
-                );
-                
-                // Update active data just in case, though researcher tools usually don't modify data
-                activeData = updatedData;
-                activeCols = updatedColumns;
+          // Filter tools for Researcher: Only allow search/retrieval tools
+          const researchTools = allTools.filter(t => {
+             const name = t.name.toLowerCase();
+             return name.includes('search') || 
+                    name.includes('query') || 
+                    name.includes('literature') || 
+                    name.includes('pubmed') || 
+                    name.includes('web') || 
+                    name.includes('internet') ||
+                    name.includes('google');
+          });
 
-                if (viz) {
-                    addVisualization({ ...viz, title: `Researcher: ${viz.title}` });
-                }
+          // Use filtered tools to restrict Researcher context
+          const decision = await generateResearchInsights(context, researchTools);
+          
+          if (decision.decision === 'TOOL_CALL') {
+             const instruction = decision.instruction;
+             if (instruction) {
+                 loopCount++;
+                 addMessage(AgentType.RESEARCHER, `I need more information. Delegating to Executor: "${instruction}"`, {
+                     thought: decision.thought
+                 });
+                 
+                 try {
+                     // Pass full context to executor in case researcher instruction implies "use the result from X"
+                     const previousResultsContext = resultsSummary.join('\n\n');
+                     const executorResult = await runExecutorAgent(instruction, activeCols, allTools, undefined, previousResultsContext);
+                     
+                     // NOTE: We do not handle clarification for dynamic researcher steps yet for simplicity, 
+                     // or we can fallback to just skipping if unsure.
+                     // A robust system would also suspend here.
+                     
+                     const toolCalls = executorResult.toolCalls;
+                     
+                     if (toolCalls && toolCalls.length > 0) {
+                         for (const call of toolCalls) {
+                             const toolName = call.tool;
+                             const params = call.parameters;
 
-                addMessage(AgentType.RESEARCHER, `Tool Result (${toolName}):\n${resultText}`);
-                resultsSummary.push(`[Dynamic Researcher Step] Tool: ${toolName}\nResult: ${resultText}`);
-                
-             } catch (e: any) {
-                 addMessage(AgentType.RESEARCHER, `Failed to execute tool ${toolName}: ${e.message}`);
-                 // Break loop on failure to prevent spiraling
-                 researcherActive = false; 
+                             const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
+                                 toolName, params, activeData, activeCols
+                             );
+                             
+                             activeData = updatedData;
+                             activeCols = updatedColumns;
+
+                             if (viz) {
+                                 addVisualization({ ...viz, title: `Researcher: ${viz.title}` });
+                             }
+
+                             addMessage(AgentType.RESEARCHER, `Tool Result (${toolName}):\n${resultText}`);
+                             resultsSummary.push(`[Dynamic Researcher Step] Tool: ${toolName}\nResult: ${resultText}`);
+                         }
+                     } else {
+                         addMessage(AgentType.RESEARCHER, "Executor found no applicable tools for this instruction.");
+                     }
+                 } catch (e: any) {
+                     addMessage(AgentType.RESEARCHER, `Error executing researcher instruction: ${e.message}`);
+                     researcherActive = false;
+                 }
+             } else {
+                 addMessage(AgentType.RESEARCHER, "Attempted to call tool but missing instruction.");
+                 researcherActive = false;
              }
-
           } else {
-             // Decision is REPORT (or fallback)
              const finalReport = decision.report || "Analysis complete.";
              const researchMsg = addMessage(AgentType.RESEARCHER, "Final Analysis Report generated.");
              
-             // Update the final message with the content
              setMessages(prev => prev.map(m => 
                 m.id === researchMsg.id ? { ...m, content: finalReport } : m
              ));
@@ -413,7 +502,29 @@ const App: React.FC = () => {
       }
       
       if (loopCount >= MAX_LOOPS) {
-          addMessage(AgentType.SYSTEM, "Researcher loop limit reached. Stopping autonomous execution.");
+          addMessage(AgentType.SYSTEM, "Researcher loop limit reached. Generating final report based on gathered findings...");
+          
+          const context = resultsSummary.join('\n');
+          // Call researcher with NO tools to force a report
+          const decision = await generateResearchInsights(context, []); 
+          
+          const finalReport = decision.report || "Analysis stopped due to iteration limit. Summary of findings:\n" + context;
+          
+          const researchMsg = addMessage(AgentType.RESEARCHER, "Final Analysis Report (Limit Reached)");
+             
+          setMessages(prev => prev.map(m => 
+             m.id === researchMsg.id ? { ...m, content: finalReport } : m
+          ));
+
+          addVisualization({
+             type: VisualizationType.RESEARCH_REPORT,
+             title: "Scientific Research Report",
+             data: {
+               report: finalReport,
+               stepIdToMessageId
+             },
+             messageId: researchMsg.id
+           });
       }
 
     } else {
@@ -422,24 +533,17 @@ const App: React.FC = () => {
   };
 
   const handleRestartFromStep = async (messageId: string, newParams: any) => {
+    // Note: With the new Architecture, restarting a step usually means modifying parameters.
+    // However, the new messages store "plan" and "instruction", not specific parameters in metadata.
+    // Supporting restart with parameters would require hacking the executor result.
+    // For now, we allow restarting the PLAN.
+    
     if (!dataset) return;
     const msgIndex = messages.findIndex(m => m.id === messageId);
     if (msgIndex === -1) return;
     const msg = messages[msgIndex];
 
-    // Check if the message is an execution step (Metadata contains stepIndex)
-    if (msg.metadata?.stepIndex !== undefined) {
-        const { plan, stepIndex } = msg.metadata;
-        const newMessages = messages.slice(0, msgIndex);
-        setMessages(newMessages);
-        const validMessageIds = new Set(newMessages.map(m => m.id));
-        setVisualizations(prev => prev.filter(v => !v.messageId || validMessageIds.has(v.messageId)));
-        setIsProcessing(true);
-        addMessage(AgentType.SYSTEM, `Restarting execution from Step ${stepIndex + 1} with updated parameters...`);
-        await executePlanSteps(plan, stepIndex, newParams, [...dataset.data], [...dataset.columns], 'RESEARCH');
-        setIsProcessing(false);
-    } 
-    else if (msg.role === AgentType.NEURO_PLANNER || msg.role === AgentType.GENERAL_PLANNER) {
+    if (msg.role === AgentType.NEURO_PLANNER || msg.role === AgentType.GENERAL_PLANNER) {
         const newPlan = newParams;
         const intent = msg.role === AgentType.NEURO_PLANNER ? 'RESEARCH' : 'GENERAL';
         const newMessages = messages.slice(0, msgIndex + 1);
@@ -474,6 +578,31 @@ const App: React.FC = () => {
     addMessage(AgentType.USER, query);
     setIsProcessing(true);
 
+    // 1. Check if we are in a suspended state (waiting for clarification)
+    if (suspendedState) {
+       addMessage(AgentType.SYSTEM, "Received clarification. Resuming execution...");
+       try {
+           const { plan, stepIndex, data, columns, intent } = suspendedState;
+           setSuspendedState(null); // Clear suspension
+           
+           await executePlanSteps(
+               plan, 
+               stepIndex, // Resume from the step that needed help
+               null, 
+               data, 
+               columns, 
+               intent, 
+               query // Pass the user's message as clarification context
+           );
+       } catch (error) {
+           console.error(error);
+           addMessage(AgentType.SYSTEM, "Error resuming execution.");
+       } finally {
+           setIsProcessing(false);
+       }
+       return;
+    }
+
     try {
       if (!ollamaConnected) {
          const recheck = await checkOllamaConnection();
@@ -500,7 +629,7 @@ const App: React.FC = () => {
         if (intent === 'RESEARCH') {
           addMessage(AgentType.NEURO_PLANNER, planningRetries === 0 ? "Formulating research analysis plan..." : "Refining research plan based on feedback...");
           plan = await generateNeuroPlan(query, dataset.columns.join(', '), allTools, currentFeedback);
-          addMessage(AgentType.NEURO_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n')}\n\nRationale: ${plan.rationale}`, { plan });
+          addMessage(AgentType.NEURO_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}\n   Instruction: ${s.instruction}`).join('\n')}\n\nRationale: ${plan.rationale}`, { plan });
         } else {
           addMessage(AgentType.GENERAL_PLANNER, planningRetries === 0 ? "Formulating general task plan..." : "Refining general plan based on feedback...");
           plan = await generateGeneralPlan(query, allTools, currentFeedback);

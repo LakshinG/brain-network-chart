@@ -54,6 +54,14 @@ export interface AgentState {
   currentTask?: string;
 }
 
+export interface SuspendedState {
+  plan: any;
+  stepIndex: number;
+  data: any[];
+  columns: string[];
+  intent: 'RESEARCH' | 'GENERAL';
+}
+
 export interface GroupComparisonResult {
   groupCol: string;
   valueCol: string;

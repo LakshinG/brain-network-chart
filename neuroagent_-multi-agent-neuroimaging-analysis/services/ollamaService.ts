@@ -33,8 +33,8 @@ export const getAvailableModels = async (): Promise<string[]> => {
   }
 };
 
-export const setGeneralModel = (model) => { generalModel = model; };
-export const setNeuroModel = (model) => { neuroModel = model; };
+export const setGeneralModel = (model: string) => { generalModel = model; };
+export const setNeuroModel = (model: string) => { neuroModel = model; };
 export const getGeneralModel = () => generalModel;
 export const getNeuroModel = () => neuroModel;
 
@@ -56,8 +56,9 @@ export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERA
 };
 
 export const generateGeneralPlan = async (query: string, availableTools: McpTool[], feedback?: string) => {
+  // Only include name and description for high-level planning
   const toolDescriptions = availableTools.map(t => 
-    `- ${t.name}: ${t.description || 'No description'} (Args: ${Object.keys(t.inputSchema.properties || {}).join(', ')})`
+    `- ${t.name}: ${t.description || 'No description'}`
   ).join('\n    ');
 
   console.log('[General Planner Agent] Input:', PROMPTS.GENERAL_PLANNER(query, toolDescriptions, feedback || ""));
@@ -79,8 +80,9 @@ export const generateGeneralPlan = async (query: string, availableTools: McpTool
 };
 
 export const generateNeuroPlan = async (query: string, dataContext: string, availableTools: McpTool[], feedback?: string) => {
+  // Only include name and description for high-level planning
   const toolDescriptions = availableTools.map(t => 
-    `- ${t.name}: ${t.description || 'No description'} (Args: ${Object.keys(t.inputSchema.properties || {}).join(', ')})`
+    `- ${t.name}: ${t.description || 'No description'}`
   ).join('\n    ');
 
   const allToolDescs = `
@@ -119,13 +121,13 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
     parameters: t.inputSchema.properties || {},
     required: t.inputSchema.required || []
   }));
-  console.log('[Plan Validator Agent] Input:', PROMPTS.PLAN_VALIDATOR(existingColumns, JSON.stringify(toolManifest), JSON.stringify(plan, null, 2)));
+  console.log('[Plan Validator Agent] Input:', PROMPTS.PLAN_VALIDATOR(JSON.stringify(toolManifest), JSON.stringify(plan, null, 2)));
 
   try {
-    // 1. Ask LLM to validate tool usage and schema, and request column check if needed
+    // 1. Ask LLM to validate tool usage and schema
     const response = await ollama.generate({
       model: generalModel,
-      prompt: PROMPTS.PLAN_VALIDATOR(existingColumns, JSON.stringify(toolManifest), JSON.stringify(plan, null, 2)),
+      prompt: PROMPTS.PLAN_VALIDATOR(JSON.stringify(toolManifest), JSON.stringify(plan, null, 2)),
       format: 'json',
       stream: false
     });
@@ -146,6 +148,30 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
   } catch (e) {
     console.error("Plan Validator Error:", e);
     return { valid: true, errors: [], suggestions: "Validation skipped due to service error." };
+  }
+};
+
+export const runExecutorAgent = async (instruction: string, columns: string[], availableTools: McpTool[], clarification: string = "", previousResults: string = "") => {
+  const toolDefinitions = availableTools.map(t => 
+    `Tool: ${t.name}
+     Description: ${t.description}
+     Parameters Schema: ${JSON.stringify(t.inputSchema.properties || {})}`
+  ).join('\n\n');
+
+  console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults));
+  
+  try {
+    // Executor uses the GENERAL model for precise instruction following
+    const response = await ollama.generate({
+      model: generalModel,
+      prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults),
+      format: 'json',
+      stream: false
+    });
+    return JSON.parse(response.response);
+  } catch (e) {
+    console.error("Executor Agent Error:", e);
+    throw new Error("Executor Agent failed to generate tool calls.");
   }
 };
 
