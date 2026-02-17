@@ -25,6 +25,11 @@ Node backend (`backend/server.mjs`)
 MCP Server(s)
 ```
 
+## TODO list
+
+- Connect to MCP file system
+- Connect to MCP tool visualization (see `frontend-card/frontend`)
+
 ## Optional Environment Variables
 
 - `MCP_SERVER_URL` (default: `http://localhost:8010/mcp`) - MCP endpoint for backend.
