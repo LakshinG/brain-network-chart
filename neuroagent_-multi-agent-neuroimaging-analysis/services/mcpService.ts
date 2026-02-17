@@ -1,9 +1,8 @@
 
 import { McpTool, McpToolCallResult } from '../types';
-
 const BACKEND_BASE_URL = 'http://localhost:8787';
 const BACKEND_WS_URL = BACKEND_BASE_URL.replace(/^http/, 'ws');
-
+const MCP_API_URL = 'http://localhost:8010';
 export class McpService {
   public isConnected = false;
   private ws: WebSocket | null = null;
@@ -133,6 +132,32 @@ export class McpService {
 
     this.isConnected = false;
   }
+
+  async uploadFile(file: File): Promise<{ status: string, file_info: any } | null> {
+    if (!this.isConnected) {
+        return null;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(`${MCP_API_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.statusText}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error("MCP: File upload failed", error);
+      throw error;
+    }
+  }
+  
 }
 
 export const mcpClient = new McpService();

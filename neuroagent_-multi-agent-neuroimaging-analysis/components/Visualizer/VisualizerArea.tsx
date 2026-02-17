@@ -1,7 +1,8 @@
+
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
-import { ToolVisualization, VisualizationType } from '../../types';
-import { ScatterPlot, StatsBarChart } from './Charts';
+import { ToolVisualization, VisualizationType, GroupComparisonResult } from '../../types';
+import { ScatterPlot, StatsBarChart, AgingCurveChart } from './Charts';
 import { FileText, Database, BookOpen, Link, FileCheck2, CheckCircle2 } from 'lucide-react';
 
 interface VisualizerAreaProps {
@@ -60,6 +61,38 @@ const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => voi
   );
 };
 
+const PairwiseTable: React.FC<{ data: GroupComparisonResult }> = ({ data }) => {
+  if (!data.pairwiseComparisons || data.pairwiseComparisons.length === 0) return null;
+
+  return (
+    <div className="mt-4 overflow-x-auto">
+      <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2">Pairwise Comparisons</h4>
+      <table className="w-full text-left text-xs text-slate-300 border-collapse">
+        <thead>
+          <tr className="bg-slate-900/50 border-b border-slate-700">
+            <th className="px-2 py-2">Groups</th>
+            <th className="px-2 py-2">Difference</th>
+            <th className="px-2 py-2">Effect Size (d)</th>
+            <th className="px-2 py-2">P-Value</th>
+            <th className="px-2 py-2">Interpretation</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-800">
+          {data.pairwiseComparisons.map((comp, idx) => (
+            <tr key={idx} className={comp.significant ? "bg-indigo-900/10" : ""}>
+              <td className="px-2 py-2 font-medium">{comp.groupA} vs {comp.groupB}</td>
+              <td className="px-2 py-2">{(comp.meanA - comp.meanB).toFixed(2)}</td>
+              <td className="px-2 py-2">{comp.cohensD.toFixed(2)} ({comp.effectSize})</td>
+              <td className="px-2 py-2 font-mono">{comp.pVal < 0.001 ? '<0.001' : comp.pVal.toFixed(3)}</td>
+              <td className="px-2 py-2 opacity-80 max-w-[200px] truncate" title={comp.explanation}>{comp.explanation}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 const VisualizationCard: React.FC<{ 
     visualization: ToolVisualization, 
     onClick?: () => void, 
@@ -103,7 +136,16 @@ const VisualizationCard: React.FC<{
         )}
 
         {visualization.type === VisualizationType.BOX_PLOT && (
-          <StatsBarChart data={visualization.data} config={visualization.config} />
+          <div className="pointer-events-auto">
+            <StatsBarChart data={visualization.data} config={visualization.config} />
+            <PairwiseTable data={visualization.data} />
+          </div>
+        )}
+        
+        {visualization.type === VisualizationType.AGING_CURVE && (
+            <div className="pointer-events-auto">
+                <AgingCurveChart data={visualization.data} config={visualization.config} />
+            </div>
         )}
 
         {visualization.type === VisualizationType.DATA_TABLE && (

@@ -27,8 +27,16 @@ MCP Server(s)
 
 ## TODO list
 
-- Connect to MCP file system
-- Connect to MCP tool visualization (see `frontend-card/frontend`)
+- ~~Connect to MCP file system~~
+- ~~Explicitly call normative aging curves if data has age column~~
+- Debug FDR correction tool: `Input should be a valid list [type=list_type, input_value='[6.913e-1]', input_type=str]`
+- Debug Executor: Tool calling order is the opposite to the response.
+- ~~Connect to MCP tool visualization (see `frontend-card/frontend`)~~
+- Improve the connection to MCP tool visualization (current only support AGING_CURVE/NORMATIVE_MODEL)
+- Four demos:
+   - CT and IQ group comparison in terms of diagnosis
+   - Spectral cluster: feature=[list of regional CT], y=IQ
+   - Linear regression: x=CT, y=IQ, hue=Diagnosis
 
 ## Optional Environment Variables
 

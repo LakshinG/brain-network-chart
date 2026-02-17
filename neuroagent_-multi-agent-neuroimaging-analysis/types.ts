@@ -9,6 +9,7 @@ export enum AgentType {
   PREPROCESSOR = 'Preprocessor',
   EXECUTOR = 'Executor',
   RESEARCHER = 'Researcher',
+  PROPOSAL_REPORTER = 'Proposal Reporter',
   SYSTEM = 'System'
 }
 
@@ -30,6 +31,7 @@ export interface Dataset {
   name: string;
   columns: string[];
   data: DatasetRow[];
+  serverFilename?: string;
 }
 
 export enum VisualizationType {
@@ -37,6 +39,7 @@ export enum VisualizationType {
   DATA_TABLE = 'DATA_TABLE',
   SCATTER_PLOT = 'SCATTER_PLOT',
   BOX_PLOT = 'BOX_PLOT',
+  AGING_CURVE = 'AGING_CURVE',
   MARKDOWN_REPORT = 'MARKDOWN_REPORT',
   LITERATURE_LIST = 'LITERATURE_LIST',
   RESEARCH_REPORT = 'RESEARCH_REPORT'
@@ -62,6 +65,7 @@ export interface SuspendedState {
   data: any[];
   columns: string[];
   intent: 'RESEARCH' | 'GENERAL';
+  originalUserQuery?: string;
 }
 
 export interface GroupComparisonResult {
@@ -91,6 +95,14 @@ export interface CorrelationResult {
   r: number;
   p: number;
   dataPoints: { x: number; y: number; group?: string }[];
+}
+
+export interface GrowthCurveResult {
+  status: string;
+  phenotype: string;
+  data: { X: number[]; centiles: number[][] };
+  elapsed_seconds: number;
+  overlay?: { age: number[]; values: number[] };
 }
 
 export interface McpTool {

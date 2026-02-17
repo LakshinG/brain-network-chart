@@ -151,20 +151,20 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
   }
 };
 
-export const runExecutorAgent = async (instruction: string, columns: string[], availableTools: McpTool[], clarification: string = "", previousResults: string = "") => {
+export const runExecutorAgent = async (instruction: string, columns: string[], availableTools: McpTool[], clarification: string = "", previousResults: string = "", delegator: string = "Planner") => {
   const toolDefinitions = availableTools.map(t => 
     `Tool: ${t.name}
      Description: ${t.description}
      Parameters Schema: ${JSON.stringify(t.inputSchema.properties || {})}`
   ).join('\n\n');
 
-  console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults));
+  console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator));
   
   try {
     // Executor uses the GENERAL model for precise instruction following
     const response = await ollama.generate({
       model: generalModel,
-      prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults),
+      prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator),
       format: 'json',
       stream: false
     });
@@ -172,6 +172,25 @@ export const runExecutorAgent = async (instruction: string, columns: string[], a
   } catch (e) {
     console.error("Executor Agent Error:", e);
     throw new Error("Executor Agent failed to generate tool calls.");
+  }
+};
+
+export const interpretToolResult = async (instruction: string, toolName: string, toolOutput: any) => {
+  // Truncate output if too large to avoid context limit (e.g. data points)
+  let outputStr = JSON.stringify(toolOutput, null, 2);
+  // if (outputStr.length > 2000) outputStr = outputStr.substring(0, 2000) + "...(truncated)";
+
+  console.log('[Executor Agent] Interpreting result...');
+  try {
+    const response = await ollama.generate({
+      model: generalModel,
+      prompt: PROMPTS.EXECUTOR_INTERPRET(instruction, toolName, outputStr),
+      stream: false
+    });
+    return response.response;
+  } catch (e) {
+    console.error("Executor Interpretation Error:", e);
+    return "Analysis complete (could not generate detailed interpretation).";
   }
 };
 
@@ -211,5 +230,20 @@ export const generateResearchInsights = async (results: string, availableTools: 
       decision: "REPORT", 
       report: "Analysis complete. (Error generating autonomous research insights)." 
     };
+  }
+};
+
+export const generateProposalReport = async (userQuery: string, analysisResults: string, researcherNotes: string) => {
+  console.log('[Proposal Reporter Agent] Input:', PROMPTS.PROPOSAL_REPORTER(userQuery, analysisResults, researcherNotes));
+  try {
+    const response = await ollama.generate({
+      model: neuroModel,
+      prompt: PROMPTS.PROPOSAL_REPORTER(userQuery, analysisResults, researcherNotes),
+      stream: false
+    });
+    return response.response;
+  } catch (e) {
+    console.error("Proposal Reporter Error:", e);
+    return "Failed to generate report.";
   }
 };

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { AgentType, ChatMessage } from '../../types';
 import { AGENT_COLORS } from '../../constants';
-import { User, BrainCircuit, Bot, Microscope, Terminal, GitFork, Lightbulb, Settings, FileCog, RotateCcw, Check, X, ShieldCheck } from 'lucide-react';
+import { User, BrainCircuit, Bot, Microscope, Terminal, GitFork, Lightbulb, Settings, FileCog, RotateCcw, Check, X, ShieldCheck, FileText } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -21,6 +21,7 @@ const getIcon = (role: AgentType) => {
     case AgentType.PREPROCESSOR: return <FileCog className="w-4 h-4" />;
     case AgentType.EXECUTOR: return <Terminal className="w-4 h-4" />;
     case AgentType.RESEARCHER: return <Microscope className="w-4 h-4" />;
+    case AgentType.PROPOSAL_REPORTER: return <FileText className="w-4 h-4" />;
     case AgentType.SYSTEM: return <Bot className="w-4 h-4" />;
     default: return <Lightbulb className="w-4 h-4" />;
   }

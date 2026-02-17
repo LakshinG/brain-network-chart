@@ -11,6 +11,7 @@ export const AGENT_COLORS = {
   [AgentType.PREPROCESSOR]: 'bg-teal-900/50 border-teal-700 text-teal-200',
   [AgentType.EXECUTOR]: 'bg-emerald-900/50 border-emerald-700 text-emerald-200',
   [AgentType.RESEARCHER]: 'bg-purple-900/50 border-purple-700 text-purple-200',
+  [AgentType.PROPOSAL_REPORTER]: 'bg-amber-900/50 border-amber-700 text-amber-200',
   [AgentType.SYSTEM]: 'bg-gray-800 border-gray-700 text-gray-400',
 };
 
@@ -86,8 +87,11 @@ export const PROMPTS = {
 
     Planning Strategy:
     1. Analyze the user's scientific intent.
-    2. Design a multi-step flow.
-    3. DO NOT generate specific parameters (e.g., do not write JSON args). Instead, write a clear INSTRUCTION for the Executor Agent. The Executor will map columns and handle specifics.
+    2. **CRITICAL**: Inspect the "Dataset Context" for an 'Age' related column (e.g., 'Age', 'Age_Years', 'Visit_Age').
+       - If an 'Age' column exists, you MUST plan to use the "get_aging_curves" tool (or similar if available) to contextulize findings, especially for biomarkers.
+       - Pick a relevant biomarker/phenotype based on the tool description and the dataset to compare against the aging curve.
+    3. Design a multi-step flow.
+    4. DO NOT generate specific parameters (e.g., do not write JSON args). Instead, write a clear INSTRUCTION for the Executor Agent. The Executor will map columns and handle specifics.
     
     Example: 
     - Tool: "CORRELATION_ANALYSIS"
@@ -120,9 +124,8 @@ export const PROMPTS = {
     ${planJson}
 
     Validation Rules:
-    1. Tool Existence: The "tool" field in each step must match a tool in the whitelist.
-    2. Logical Sufficiency: Read the "instruction". Does this instruction provide enough context (like column names or goals) for a smart Executor agent to run the tool?
-    3. Goal Alignment: Will this sequence of steps answer the user's query?
+    1. Logical Sufficiency: Read the "instruction". Does this instruction provide enough context (like column names or goals) for a smart Executor agent to run the tool?
+    2. Goal Alignment: Will this sequence of steps answer the user's query?
 
     Return strictly a JSON object:
     {
@@ -132,9 +135,25 @@ export const PROMPTS = {
     }
   `,
 
-  EXECUTOR_AGENT: (instruction: string, columns: string, toolDefinitions: string, clarification: string, previousContext: string) => `
+  EXECUTOR_INTERPRET: (instruction: string, toolName: string, toolOutput: string) => `
+    You are an Executor Agent. You have just executed the tool "${toolName}".
+    
+    Original Instruction: "${instruction}"
+    
+    Tool Output Data:
+    ${toolOutput}
+    
+    Task: Interpret the data and provide a concise summary of the key findings relevant to the instruction.
+    - If "GROUP_COMPARISON": Identify significant differences between groups (p < 0.05). Mention direction (higher/lower) and effect size if available.
+    - If "CORRELATION_ANALYSIS": specificy the r-value and whether it is significant.
+    - Keep it under 2-3 sentences. Do NOT return JSON. Return natural language.
+  `,
+
+
+  EXECUTOR_AGENT: (instruction: string, columns: string, toolDefinitions: string, clarification: string, previousContext: string, delegator: string) => `
     You are an Executor Agent. Your job is to translate a Planner's instruction into exact Tool Calls.
     
+    Delegated by: "${delegator}"
     Instruction: "${instruction}"
     ${clarification ? `User Clarification/Additional Context: "${clarification}"` : ""}
     ${previousContext ? `Previous Step Results (Use these values if needed):\n${previousContext}` : ""}
@@ -149,6 +168,11 @@ export const PROMPTS = {
        - Does it require remapping categorical data (e.g., "Correlation with Diagnosis")? If "Diagnosis" is categorical (like "DX"), you must use 'TRANSFORM_DATA' first or ensure the tool handles categorical data.
     2. Check "Previous Step Results". If the instruction requires using a value found earlier (e.g., "Filter data where Age > X" where X was found in step 1, or "Search for the gene identified in step 2"), EXTRACT and USE that value in the tool parameters.
     3. Decide which tool(s) to call to fulfill the instruction.
+       ${delegator === 'Researcher' ? `
+       IMPORTANT CONSTRAINT: You are acting on behalf of the RESEARCHER. 
+       - You MUST NOT use data analysis tools (e.g. "CORRELATION_ANALYSIS", "GROUP_COMPARISON", "DATA_INSPECT", "TRANSFORM_DATA", "GET_AGING_CURVES").
+       - You MAY ONLY use external knowledge/search tools (e.g. "pubmed_search", "web_search", "google_search").
+       ` : ''}
     4. Map the instruction to the specific JSON parameters required by the tool schema.
        - Use GENERAL LOGIC and STRING MATCHING to map instructions to column names.
        - You do NOT need specific neuroscience knowledge to pick columns; rely on text similarity (e.g., "Diagnosis" -> "DX").
@@ -193,6 +217,7 @@ export const PROMPTS = {
     Return ONLY a valid JSON object: { "mapping": { "Val1": 0, "Val2": 1, ... }, "rationale": "Short explanation." }
   `,
 
+
   RESEARCHER_INSIGHTS: (results: string, tools: string) => `
     You are a Principal Investigator (Researcher Agent).
     
@@ -202,19 +227,43 @@ export const PROMPTS = {
     Available External Knowledge Tools:
     ${tools}
 
-    Task: Evaluate findings. Decide whether to retrieve external context to enrich the analysis (TOOL_CALL) or write a final report (REPORT).
+    Task: Evaluate findings. Decide whether to retrieve external context to enrich the analysis (TOOL_CALL) or if you have enough information to pass to the Proposal Reporter (REPORT).
 
     Constraints:
     1. You may ONLY use the tools listed above (e.g., pubmed_search, internet_search).
     2. Do NOT request data analysis tools (e.g., correlation, statistics) - those are already done.
-    3. If no relevant tools are listed, you MUST choose "REPORT".
+    3. If no relevant tools are listed or if the results are sufficient, you MUST choose "REPORT".
+    4. **CRITICAL**: If searching (TOOL_CALL), use SPECIFIC scientific keywords derived from the results (e.g. "high amyloid and cognition", "APOE4 effect on Tau"). Do NOT use generic terms like "correlation analysis" or "dataset inspection". Focus on the BIOLOGICAL or CLINICAL context.
 
     Return strictly a JSON object:
     {
       "thought": "Reasoning.",
       "decision": "TOOL_CALL" | "REPORT",
-      "instruction": "If TOOL_CALL, provide a natural language instruction for the Executor Agent to use one of the available external tools.",
-      "report": "If REPORT, provide the Markdown text..." 
+      "instruction": "If TOOL_CALL, provide a natural language instruction for the Executor Agent to use one of the available external tools with SPECIFIC search terms.",
+      "report": "If REPORT, provide a bulleted summary of the findings and any external context found so far." 
     }
+  `,
+
+  PROPOSAL_REPORTER: (userQuery: string, analysisResults: string, researcherNotes: string) => `
+    You are a Proposal Reporter Agent.
+    Your task is to synthesize all data analysis results and research insights into a professional, scientific research proposal/report in Markdown format.
+
+    Study Title: "${userQuery}"
+    
+    Data Analysis Results:
+    ${analysisResults}
+
+    External Context:
+    ${researcherNotes}
+
+    Structure the output as a Scientific Proposal:
+    1. **Title**: Summary of the study title.
+    2. **Executive Summary**: Brief overview of the goal and findings.
+    3. **Methodology**: Describe the analysis performed (e.g., correlation, group comparison) and variables used.
+    4. **Results**: Summarize the quantitative findings (statistics, p-values, correlations). Use bold text for key numbers.
+    5. **Discussion & Literature Context**: Find supporting and counterfactual evidence in the external context for data analysis results. 
+    6. **Conclusion**: Final takeaway.
+
+    Output strictly in clean MARKDOWN.
   `
 };

@@ -27,7 +27,7 @@ export const INTERNAL_TOOLS: McpTool[] = [
   },
   {
     name: 'GROUP_COMPARISON',
-    description: 'Compare a numeric value across different groups in a categorical column (e.g. Diagnosis, Sex). Performs statistical comparison.',
+    description: 'Compare a numeric value across all groups in a categorical column. Performs pairwise T-tests and Cohen\'s d analysis for all unique pairs.',
     inputSchema: {
       type: 'object',
       properties: {
