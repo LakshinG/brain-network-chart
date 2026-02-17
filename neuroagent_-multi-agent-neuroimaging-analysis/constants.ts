@@ -164,15 +164,20 @@ export const PROMPTS = {
     
     Task:
     1. Analyze the instruction for implicit PREPROCESSING needs.
-       - Does the instruction require combining multiple columns (e.g., "average of Amyloid columns")? If so, consider if you need to calculate a new variable first (if a tool exists) or select the most relevant existing column.
-       - Does it require remapping categorical data (e.g., "Correlation with Diagnosis")? If "Diagnosis" is categorical (like "DX"), you must use 'TRANSFORM_DATA' first or ensure the tool handles categorical data.
+       - Does the instruction require combining multiple columns (e.g., "average of Amyloid columns")? 
     2. Check "Previous Step Results". If the instruction requires using a value found earlier (e.g., "Filter data where Age > X" where X was found in step 1, or "Search for the gene identified in step 2"), EXTRACT and USE that value in the tool parameters.
     3. Decide which tool(s) to call to fulfill the instruction.
+       
        ${delegator === 'Researcher' ? `
        IMPORTANT CONSTRAINT: You are acting on behalf of the RESEARCHER. 
-       - You MUST NOT use data analysis tools (e.g. "CORRELATION_ANALYSIS", "GROUP_COMPARISON", "DATA_INSPECT", "TRANSFORM_DATA", "GET_AGING_CURVES").
+       - You MUST NOT use data analysis tools (e.g. "CORRELATION_ANALYSIS", "GROUP_COMPARISON", "DATA_INSPECT", "TRANSFORM_DATA", "GET_AGING_CURVE").
        - You MAY ONLY use external knowledge/search tools (e.g. "pubmed_search", "web_search", "google_search").
        ` : ''}
+
+       **QUOTA LIMIT**: You are restricted to a maximum of **5 tool calls** per step.
+       - If the instruction implies processing many columns individually (e.g. "Average of Col1, Col2, ... Col10"), doing this one by one would exceed the quota.
+       - **USE 'AVERAGE_MULTIPLE_COLUMNS'** to handle multiple columns in a single call if aggregation is needed and the quota would otherwise be exceeded.
+
     4. Map the instruction to the specific JSON parameters required by the tool schema.
        - Use GENERAL LOGIC and STRING MATCHING to map instructions to column names.
        - You do NOT need specific neuroscience knowledge to pick columns; rely on text similarity (e.g., "Diagnosis" -> "DX").

@@ -44,6 +44,9 @@ const App: React.FC = () => {
   const [selectedGeneralModel, setSelectedGeneralModel] = useState<string>('llama3');
   const [selectedNeuroModel, setSelectedNeuroModel] = useState<string>('llama3');
 
+  // Plan Validator Toggle
+  const [isPlanValidationEnabled, setIsPlanValidationEnabled] = useState<boolean>(true);
+
   const [suspendedState, setSuspendedState] = useState<SuspendedState | null>(null);
 
   // Derived active dataset (merged)
@@ -332,6 +335,23 @@ const App: React.FC = () => {
                   stepResult = `Error: Column '${col}' not found.`;
               }
           }
+          else if (toolName === 'AVERAGE_MULTIPLE_COLUMNS') {
+              const result = executeInternalTool(toolName, params, newData);
+              const aggResult = result as any;
+              
+              newData = aggResult.transformedData;
+              const newColName = aggResult.newColumn;
+              
+              if (!newCols.includes(newColName)) newCols.push(newColName);
+              
+              stepResult = `Created new column '${newColName}' by averaging: ${params.columns.join(', ')}.`;
+              viz = {
+                   type: VisualizationType.DATA_TABLE,
+                   title: `Aggregation: ${newColName}`,
+                   data: newData // Show data with new column
+              };
+              rawResult = result;
+          }
           else if (toolName === 'MODIFY_VISUALIZATION') {
               const result = executeInternalTool(toolName, params, newData);
               setVisualizations(prev => {
@@ -384,7 +404,7 @@ const App: React.FC = () => {
          const textContent = result.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
          stepResult = textContent || "Tool executed successfully.";
          viz = parseMcpResultToVisualization(toolName, textContent);
-         if (viz?.type === VisualizationType.AGING_CURVE) stepResult = `Aging curve analysis completed for ${viz.data.phenotype}.`;
+         if (viz?.type === VisualizationType.AGING_CURVE) stepResult = 'Aging curve successfully loaded';
          if (result.isError) stepResult = `Error executing tool: ${stepResult}`;
       } 
       else {
@@ -506,7 +526,7 @@ const App: React.FC = () => {
               let finalStepResult = resultText;
               
               // Interpret key results for statistical tools
-              if (['CORRELATION_ANALYSIS', 'GROUP_COMPARISON', 'GET_AGING_CURVE'].includes(toolName) && rawResult) {
+              if (rawResult) {
                   const summaryRaw = { ...rawResult };
                   if (summaryRaw.dataPoints && Array.isArray(summaryRaw.dataPoints)) summaryRaw.dataPoints = `[${summaryRaw.dataPoints.length} points]`;
                   if (summaryRaw.data && Array.isArray(summaryRaw.data)) summaryRaw.data = `[${summaryRaw.data.length} rows]`; 
@@ -646,16 +666,21 @@ const App: React.FC = () => {
         setVisualizations(prev => prev.filter(v => !v.messageId || validMessageIds.has(v.messageId)));
         setIsProcessing(true);
         
-        addMessage(AgentType.PLAN_VALIDATOR, "Validating manually updated plan...");
-        const validation = await validatePlan(newPlan, [...INTERNAL_TOOLS, ...mcpTools], activeDataset.columns);
-        
-        if (!validation.valid) {
-            addMessage(AgentType.PLAN_VALIDATOR, `⚠️ Validation Error: ${validation.errors.join(', ')}\n\nSuggestion: ${validation.suggestions}`);
-            setIsProcessing(false);
-            return;
-        }
+        if (isPlanValidationEnabled) {
+            addMessage(AgentType.PLAN_VALIDATOR, "Validating manually updated plan...");
+            const validation = await validatePlan(newPlan, [...INTERNAL_TOOLS, ...mcpTools], activeDataset.columns);
+            
+            if (!validation.valid) {
+                addMessage(AgentType.PLAN_VALIDATOR, `⚠️ Validation Error: ${validation.errors.join(', ')}\n\nSuggestion: ${validation.suggestions}`);
+                setIsProcessing(false);
+                return;
+            }
 
-        addMessage(AgentType.PLAN_VALIDATOR, "Plan validated successfully. Resuming execution...");
+            addMessage(AgentType.PLAN_VALIDATOR, "Plan validated successfully. Resuming execution...");
+        } else {
+            addMessage(AgentType.SYSTEM, "Validation disabled. Resuming execution with manual plan...");
+        }
+        
         await executePlanSteps(newPlan, 0, null, [...activeDataset.data], [...activeDataset.columns], intent, undefined, msg.content); // Simplified passing query
         setIsProcessing(false);
     }
@@ -717,22 +742,27 @@ const App: React.FC = () => {
           addMessage(AgentType.GENERAL_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n')}`, { plan });
         }
 
-        addMessage(AgentType.PLAN_VALIDATOR, "Verifying analysis steps...");
-        const validation = await validatePlan(plan, allTools, activeDataset.columns);
+        if (isPlanValidationEnabled) {
+          addMessage(AgentType.PLAN_VALIDATOR, "Verifying analysis steps...");
+          const validation = await validatePlan(plan, allTools, activeDataset.columns);
 
-        if (validation.valid) {
-          planIsValid = true;
-          addMessage(AgentType.PLAN_VALIDATOR, "Plan verified. Proceeding to execution.");
-        } else {
-          planningRetries++;
-          currentFeedback = `Validation errors: ${validation.errors.join(', ')}. Suggestions: ${validation.suggestions}`;
-          addMessage(AgentType.PLAN_VALIDATOR, `Plan rejected (Attempt ${planningRetries}/${MAX_PLANNING_RETRIES}):\n${validation.errors.map((e: string) => `- ${e}`).join('\n')}\n\nProviding feedback to Planner for correction...`);
-          
-          if (planningRetries >= MAX_PLANNING_RETRIES) {
-            addMessage(AgentType.SYSTEM, "Critical: Planning failed to stabilize after multiple validation cycles. Stopping execution.");
-            setIsProcessing(false);
-            return;
+          if (validation.valid) {
+            planIsValid = true;
+            addMessage(AgentType.PLAN_VALIDATOR, "Plan verified. Proceeding to execution.");
+          } else {
+            planningRetries++;
+            currentFeedback = `Validation errors: ${validation.errors.join(', ')}. Suggestions: ${validation.suggestions}`;
+            addMessage(AgentType.PLAN_VALIDATOR, `Plan rejected (Attempt ${planningRetries}/${MAX_PLANNING_RETRIES}):\n${validation.errors.map((e: string) => `- ${e}`).join('\n')}\n\nProviding feedback to Planner for correction...`);
+            
+            if (planningRetries >= MAX_PLANNING_RETRIES) {
+              addMessage(AgentType.SYSTEM, "Critical: Planning failed to stabilize after multiple validation cycles. Stopping execution.");
+              setIsProcessing(false);
+              return;
+            }
           }
+        } else {
+          planIsValid = true;
+          addMessage(AgentType.SYSTEM, "Plan Validation skipped (disabled). Proceeding to execution.");
         }
       }
 
@@ -779,30 +809,45 @@ const App: React.FC = () => {
           </div>
           
           {availableModels.length > 0 && (
-            <div className="flex gap-2 text-xs mt-2">
-              <div className="flex flex-col gap-1 w-1/2">
-                <label className="text-slate-500">General Model</label>
-                <select 
-                  value={selectedGeneralModel} 
-                  onChange={handleGeneralModelChange}
-                  className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
-                >
-                  {availableModels.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
+            <div className="flex flex-col gap-2 text-xs mt-2">
+              <div className="flex gap-2">
+                  <div className="flex flex-col gap-1 w-1/2">
+                    <label className="text-slate-500">General Model</label>
+                    <select 
+                      value={selectedGeneralModel} 
+                      onChange={handleGeneralModelChange}
+                      className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
+                    >
+                      {availableModels.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1 w-1/2">
+                    <label className="text-slate-500">Neuro Model</label>
+                    <select 
+                      value={selectedNeuroModel} 
+                      onChange={handleNeuroModelChange}
+                      className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
+                    >
+                      {availableModels.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
               </div>
-              <div className="flex flex-col gap-1 w-1/2">
-                <label className="text-slate-500">Neuro Model</label>
-                <select 
-                  value={selectedNeuroModel} 
-                  onChange={handleNeuroModelChange}
-                  className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
-                >
-                  {availableModels.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
+              
+              <div className="flex items-center pt-2">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={isPlanValidationEnabled} 
+                    onChange={(e) => setIsPlanValidationEnabled(e.target.checked)} 
+                    className="sr-only peer" 
+                  />
+                  <div className="w-8 h-4 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  <span className="ml-2 text-xs text-slate-400">Enable Plan Validator</span>
+                </label>
               </div>
             </div>
           )}
