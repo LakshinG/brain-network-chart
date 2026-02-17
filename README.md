@@ -17,11 +17,13 @@
 
 ## Runtime Architecture
 
+```
 Browser UI
 ↓ HTTP / WebSocket
 Node backend (`backend/server.mjs`)
 ↓ MCP
 MCP Server(s)
+```
 
 ## Optional Environment Variables
 
