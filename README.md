@@ -39,6 +39,8 @@ MCP Server(s)
 - Add linear regression using SVM
 - Merge visualizer agent by Xiyun for other MCP tool visualization.
 - Merge chat area frontend by Shaoqi.
+- Add an Observer to summarize the Normative model results.
+- Improve Proposal Reporter prompt, it now focuses more on literatures since they are have more chars than statistical results.
 - Three demos questions:
    - CT and IQ group comparisons in terms of diagnosis
    - Spectral cluster: feature=[list of regional CT], y=IQ
