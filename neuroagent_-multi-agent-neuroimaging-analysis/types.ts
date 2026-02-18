@@ -42,7 +42,9 @@ export enum VisualizationType {
   AGING_CURVE = 'AGING_CURVE',
   MARKDOWN_REPORT = 'MARKDOWN_REPORT',
   LITERATURE_LIST = 'LITERATURE_LIST',
-  RESEARCH_REPORT = 'RESEARCH_REPORT'
+  RESEARCH_REPORT = 'RESEARCH_REPORT',
+  CLUSTERING_DASHBOARD = 'CLUSTERING_DASHBOARD',
+  STRATIFICATION_RESULT = 'STRATIFICATION_RESULT'
 }
 
 export interface ToolVisualization {
@@ -100,9 +102,22 @@ export interface CorrelationResult {
 export interface GrowthCurveResult {
   status: string;
   phenotype: string;
-  data: { X: number[]; centiles: number[][] };
+  data: { X: number[]; centiles: number[][]; age?: number[]; values?: number[] };
   elapsed_seconds: number;
-  overlay?: { age: number[]; values: number[] };
+}
+
+export interface ClusteringResult {
+  featureCols: string[];
+  targetCol: string;
+  nCluster: number;
+  pcPoints: { x: number; y: number; cluster: number; target: number; id?: string }[];
+  clusterCorrelation: CorrelationResult;
+}
+
+export interface StratificationResult {
+  targetCol: string;
+  groupCol: string;
+  newColumns: { name: string; count: number }[];
 }
 
 export interface McpTool {

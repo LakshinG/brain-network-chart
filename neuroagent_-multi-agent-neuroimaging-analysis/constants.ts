@@ -149,8 +149,7 @@ export const PROMPTS = {
     - Keep it under 2-3 sentences. Do NOT return JSON. Return natural language.
   `,
 
-
-  EXECUTOR_AGENT: (instruction: string, columns: string, toolDefinitions: string, clarification: string, previousContext: string, delegator: string) => `
+  EXECUTOR_AGENT: (instruction: string, columns: string, toolDefinitions: string, clarification: string, previousContext: string, delegator: string, serverFilename: string = '') => `
     You are an Executor Agent. Your job is to translate a Planner's instruction into exact Tool Calls.
     
     Delegated by: "${delegator}"
@@ -158,6 +157,7 @@ export const PROMPTS = {
     ${clarification ? `User Clarification/Additional Context: "${clarification}"` : ""}
     ${previousContext ? `Previous Step Results (Use these values if needed):\n${previousContext}` : ""}
     Dataset Columns Available: [${columns}]
+    ${serverFilename ? `Server Filename: "${serverFilename}"` : ""}
     
     Available Tools (and their schemas):
     ${toolDefinitions}
@@ -165,7 +165,9 @@ export const PROMPTS = {
     Task:
     1. Analyze the instruction for implicit PREPROCESSING needs.
        - Does the instruction require combining multiple columns (e.g., "average of Amyloid columns")? 
-    2. Check "Previous Step Results". If the instruction requires using a value found earlier (e.g., "Filter data where Age > X" where X was found in step 1, or "Search for the gene identified in step 2"), EXTRACT and USE that value in the tool parameters.
+    2. Check "Previous Step Results". 
+       - If the instruction requires using a value found earlier (e.g., "Filter data where Age > X" where X was found in step 1, or "Search for the gene identified in step 2"), EXTRACT and USE that value in the tool parameters.
+       - **FILE HANDLING**: ${serverFilename ? `If the instruction requires to upload a CSV file then use "${serverFilename}" because this is already uploaded.` : `Check "Previous Step Results" for any server filename context.`}
     3. Decide which tool(s) to call to fulfill the instruction.
        
        ${delegator === 'Researcher' ? `

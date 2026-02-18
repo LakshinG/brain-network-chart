@@ -29,13 +29,18 @@ MCP Server(s)
 
 - ~~Connect to MCP file system~~
 - ~~Explicitly call normative aging curves if data has age column~~
-- Debug FDR correction tool: `Input should be a valid list [type=list_type, input_value='[6.913e-1]', input_type=str]`
+- Debug FDR correction tool: `ERROR: Input should be a valid list [type=list_type, input_value='[6.913e-1]', input_type=str]`
 - Debug Executor: Tool calling order is the opposite to the response.
 - ~~Connect to MCP tool visualization (see `frontend-card/frontend`)~~
 - ~~Increase efficiency by adding a switch to disable planValidator agent.~~
-- Improve the connection to MCP tool visualization (current only support AGING_CURVE/NORMATIVE_MODEL)
+- ~~Add overlay to aging curve.~~
+- Test spectral clustering
+- Test stratifying dataset by a grouping column.
+- Add linear regression using SVM
+- Merge visualizer agent by Xiyun for other MCP tool visualization.
+- Merge chat area frontend by Shaoqi.
 - Three demos questions:
-   - CT and IQ group comparison in terms of diagnosis
+   - CT and IQ group comparisons in terms of diagnosis
    - Spectral cluster: feature=[list of regional CT], y=IQ
    - Linear regression: x=CT, y=IQ, hue=Diagnosis
 

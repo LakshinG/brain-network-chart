@@ -151,20 +151,20 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
   }
 };
 
-export const runExecutorAgent = async (instruction: string, columns: string[], availableTools: McpTool[], clarification: string = "", previousResults: string = "", delegator: string = "Planner") => {
+export const runExecutorAgent = async (instruction: string, columns: string[], availableTools: McpTool[], clarification: string = "", previousResults: string = "", delegator: string = "Planner", serverFilename: string | null = null) => {
   const toolDefinitions = availableTools.map(t => 
     `Tool: ${t.name}
      Description: ${t.description}
      Parameters Schema: ${JSON.stringify(t.inputSchema.properties || {})}`
   ).join('\n\n');
 
-  console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator));
+  console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || ''));
   
   try {
     // Executor uses the GENERAL model for precise instruction following
     const response = await ollama.generate({
       model: generalModel,
-      prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator),
+      prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || ''),
       format: 'json',
       stream: false
     });

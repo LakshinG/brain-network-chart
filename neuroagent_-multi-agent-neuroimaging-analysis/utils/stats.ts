@@ -1,5 +1,5 @@
 
-import { DatasetRow, Dataset, GroupComparisonResult } from '../types';
+import { DatasetRow, Dataset, GroupComparisonResult, ClusteringResult, CorrelationResult, StratificationResult } from '../types';
 
 export const parseCSV = (csvText: string): { columns: string[], data: DatasetRow[] } => {
   const lines = csvText.trim().split('\n');
@@ -98,7 +98,7 @@ export const mergeDatasets = (datasets: Dataset[]): Dataset | null => {
 };
 
 // Simple Pearson correlation
-export const calculateCorrelation = (data: DatasetRow[], xCol: string, yCol: string) => {
+export const calculateCorrelation = (data: DatasetRow[], xCol: string, yCol: string): CorrelationResult => {
   let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
   let n = 0;
 
@@ -148,7 +148,7 @@ export const calculateCorrelation = (data: DatasetRow[], xCol: string, yCol: str
     }
   });
 
-  if (n === 0) return { r: 0, p: 0, dataPoints: [] };
+  if (n === 0) return { xCol, yCol, r: 0, p: 0, dataPoints: [] };
 
   const numerator = n * sumXY - sumX * sumY;
   const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
@@ -157,7 +157,7 @@ export const calculateCorrelation = (data: DatasetRow[], xCol: string, yCol: str
   // Mock p-value calculation based on r strength (simplified)
   const p = Math.max(0.001, Math.exp(-Math.abs(r) * 5)); 
 
-  return { r, p, dataPoints };
+  return { xCol, yCol, r, p, dataPoints };
 };
 
 // --- Statistics Helpers for Group Comparison ---
@@ -289,5 +289,279 @@ export const getGroupStats = (data: DatasetRow[], groupCol: string, valCol: stri
     pVal,
     stats,
     pairwiseComparisons
+  };
+};
+
+// --- Clustering Analysis Helpers ---
+
+// Calculate PCA using covariance method and Jacobi algorithm approximation
+const calculatePCA = (matrix: number[][]): { pc1: number[], pc2: number[] } => {
+  // matrix is N rows x F features
+  const n = matrix.length;
+  if (n === 0) return { pc1: [], pc2: [] };
+  const f = matrix[0].length;
+
+  // 1. Standardize the data (Centering and Scaling)
+  const means = Array(f).fill(0);
+  const stds = Array(f).fill(0);
+
+  for (let j = 0; j < f; j++) {
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += matrix[i][j];
+    means[j] = sum / n;
+  }
+
+  for (let j = 0; j < f; j++) {
+    let sumSq = 0;
+    for (let i = 0; i < n; i++) sumSq += Math.pow(matrix[i][j] - means[j], 2);
+    stds[j] = Math.sqrt(sumSq / (n - 1)) || 1; // avoid divide by zero
+  }
+
+  const standardized = matrix.map(row => row.map((val, j) => (val - means[j]) / stds[j]));
+
+  // 2. Compute Covariance Matrix (F x F)
+  const cov: number[][] = Array(f).fill(0).map(() => Array(f).fill(0));
+  for (let j = 0; j < f; j++) {
+    for (let k = j; k < f; k++) {
+      let sum = 0;
+      for (let i = 0; i < n; i++) {
+        sum += standardized[i][j] * standardized[i][k];
+      }
+      cov[j][k] = sum / (n - 1);
+      cov[k][j] = cov[j][k]; // Symmetric
+    }
+  }
+
+  // 3. Eigen decomposition (Simplified Power Iteration for Top 2 Components)
+  // Finding First Eigenvector
+  const getDominantEigenvector = (mat: number[][], iterations = 20): number[] => {
+    const dim = mat.length;
+    let v = Array(dim).fill(0).map(() => Math.random());
+    // Normalize
+    let norm = Math.sqrt(v.reduce((a, b) => a + b * b, 0));
+    v = v.map(x => x / norm);
+
+    for (let iter = 0; iter < iterations; iter++) {
+      // w = mat * v
+      const w = Array(dim).fill(0);
+      for (let i = 0; i < dim; i++) {
+        for (let j = 0; j < dim; j++) {
+          w[i] += mat[i][j] * v[j];
+        }
+      }
+      // v = w / norm(w)
+      norm = Math.sqrt(w.reduce((a, b) => a + b * b, 0));
+      if (norm === 0) break;
+      v = w.map(x => x / norm);
+    }
+    return v;
+  };
+
+  const ev1 = getDominantEigenvector(cov);
+  
+  // Deflate matrix to find second eigenvector: A' = A - lambda1 * v1 * v1^T
+  // lambda1 approx = v1^T * A * v1
+  let lambda1 = 0;
+  for (let i=0; i<f; i++) {
+    let rowSum = 0;
+    for(let j=0; j<f; j++) rowSum += cov[i][j] * ev1[j];
+    lambda1 += ev1[i] * rowSum;
+  }
+
+  const cov2 = cov.map((row, i) => row.map((val, j) => val - lambda1 * ev1[i] * ev1[j]));
+  const ev2 = getDominantEigenvector(cov2);
+
+  // 4. Project data onto PC1 and PC2
+  const pc1 = standardized.map(row => row.reduce((sum, val, j) => sum + val * ev1[j], 0));
+  const pc2 = standardized.map(row => row.reduce((sum, val, j) => sum + val * ev2[j], 0));
+
+  return { pc1, pc2 };
+};
+
+// Simple K-Means implementation
+const calculateKMeans = (points: {x: number, y: number}[], k: number): number[] => {
+  if (points.length === 0) return [];
+  const n = points.length;
+  // Initialize centroids (Pick first k points for simplicity, or random)
+  const centroids = points.slice(0, k).map(p => ({ ...p }));
+  // If n < k, we just return distinct clusters
+  if (n < k) return points.map((_, i) => i);
+
+  let assignments = new Array(n).fill(0);
+  let changed = true;
+  let iter = 0;
+  const maxIter = 50;
+
+  while (changed && iter < maxIter) {
+    changed = false;
+    // Assign points
+    for (let i = 0; i < n; i++) {
+      let minDist = Infinity;
+      let cluster = 0;
+      for (let c = 0; c < k; c++) {
+        const dist = Math.pow(points[i].x - centroids[c].x, 2) + Math.pow(points[i].y - centroids[c].y, 2);
+        if (dist < minDist) {
+          minDist = dist;
+          cluster = c;
+        }
+      }
+      if (assignments[i] !== cluster) {
+        assignments[i] = cluster;
+        changed = true;
+      }
+    }
+
+    // Update centroids
+    const sums = Array(k).fill(0).map(() => ({ x: 0, y: 0, count: 0 }));
+    for (let i = 0; i < n; i++) {
+      const c = assignments[i];
+      sums[c].x += points[i].x;
+      sums[c].y += points[i].y;
+      sums[c].count++;
+    }
+
+    for (let c = 0; c < k; c++) {
+      if (sums[c].count > 0) {
+        centroids[c].x = sums[c].x / sums[c].count;
+        centroids[c].y = sums[c].y / sums[c].count;
+      }
+    }
+    iter++;
+  }
+
+  return assignments;
+};
+
+// Spectral Clustering Orchestrator
+export const performSpectralClustering = (
+    data: DatasetRow[], 
+    featureCols: string[], 
+    targetCol: string, 
+    nCluster: number
+): ClusteringResult => {
+    // 1. Extract feature matrix
+    const matrix: number[][] = [];
+    const validIndices: number[] = [];
+
+    data.forEach((row, i) => {
+        // Ensure all features are present and numeric
+        const features = featureCols.map(c => parseFloat(String(row[c])));
+        const target = parseFloat(String(row[targetCol]));
+        if (features.every(val => !isNaN(val)) && !isNaN(target)) {
+            matrix.push(features);
+            validIndices.push(i);
+        }
+    });
+
+    if (matrix.length < nCluster) throw new Error("Not enough data points for clustering.");
+
+    // 2. PCA
+    const { pc1, pc2 } = calculatePCA(matrix);
+
+    // 3. K-Means on PC1, PC2
+    const points2D = pc1.map((v, i) => ({ x: v, y: pc2[i] }));
+    const clusterIds = calculateKMeans(points2D, nCluster);
+
+    // 4. Construct Result
+    const pcPoints = validIndices.map((origIdx, i) => {
+        return {
+            x: pc1[i],
+            y: pc2[i],
+            cluster: clusterIds[i],
+            target: parseFloat(String(data[origIdx][targetCol])),
+            id: String(data[origIdx]['ID'] || data[origIdx]['Subject'] || i)
+        };
+    });
+
+    // 5. Correlation: Cluster ID vs Target
+    // Prepare fake dataset for correlation calculation
+    const correlationData: DatasetRow[] = pcPoints.map(p => ({
+        Cluster: p.cluster,
+        Target: p.target
+    }));
+    
+    const correlation = calculateCorrelation(correlationData, 'Cluster', 'Target');
+
+    return {
+        featureCols,
+        targetCol,
+        nCluster,
+        pcPoints,
+        clusterCorrelation: correlation
+    };
+};
+
+// Stratify Dataset
+export const stratifyDataset = (data: DatasetRow[], targetCol: string, groupCol: string, maxGroups: number = 10) => {
+  const values = data.map(r => r[groupCol]).filter(v => v !== undefined && v !== null);
+  // Check if really numeric (heuristic: >80% are numbers)
+  const numCount = values.filter(v => !isNaN(parseFloat(String(v)))).length;
+  const isNumeric = (numCount / values.length) > 0.8;
+  const distinctCount = new Set(values).size;
+
+  let groups: { name: string, matcher: (val: any) => boolean }[] = [];
+
+  // Logic: Use bins if numeric AND high cardinality (> maxGroups). Else treat as discrete.
+  if (isNumeric && distinctCount > maxGroups) {
+      const nums = values.map(v => parseFloat(String(v))).filter(n => !isNaN(n));
+      const min = Math.min(...nums);
+      const max = Math.max(...nums);
+      const step = (max - min) / maxGroups;
+
+      for (let i = 0; i < maxGroups; i++) {
+          const lower = min + (i * step);
+          const upper = i === maxGroups - 1 ? max : min + ((i + 1) * step);
+          // Use safe naming
+          const label = `${targetCol}_${groupCol}_${lower.toFixed(1)}to${upper.toFixed(1)}`.replace(/\./g, 'p');
+          
+          groups.push({
+              name: label,
+              matcher: (val: any) => {
+                  const n = parseFloat(String(val));
+                  if (isNaN(n)) return false;
+                  return n >= lower && (i === maxGroups - 1 ? n <= upper : n < upper);
+              }
+          });
+      }
+  } else {
+      const counts: Record<string, number> = {};
+      values.forEach(v => {
+          const s = String(v);
+          counts[s] = (counts[s] || 0) + 1;
+      });
+      
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, maxGroups);
+      
+      groups = sorted.map(([val]) => ({
+          name: `${targetCol}_${groupCol}_${val.replace(/[^a-zA-Z0-9]/g, '')}`,
+          matcher: (rowVal: any) => String(rowVal) === val
+      }));
+  }
+
+  const newColsStats = groups.map(g => ({ name: g.name, count: 0 }));
+  const newData = data.map(row => {
+      const newRow = { ...row };
+      const gVal = row[groupCol];
+      const tVal = row[targetCol];
+      
+      let matched = false;
+      groups.forEach((g, idx) => {
+          if (g.matcher(gVal)) {
+              newRow[g.name] = tVal;
+              newColsStats[idx].count++;
+              matched = true;
+          }
+      });
+      
+      return newRow;
+  });
+
+  return {
+      transformedData: newData,
+      result: {
+          targetCol,
+          groupCol,
+          newColumns: newColsStats.filter(c => c.count > 0)
+      }
   };
 };

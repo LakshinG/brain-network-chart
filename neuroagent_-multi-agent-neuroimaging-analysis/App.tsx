@@ -391,6 +391,25 @@ const App: React.FC = () => {
                    const groupResult = result as any;
                    viz = { type: VisualizationType.BOX_PLOT, title: `Group Comparison`, data: groupResult };
                    stepResult = `Group Comparison complete. ANOVA p-value=${groupResult.pVal.toExponential(3)}.`;
+              } else if (toolName === 'SPECTRAL_CLUSTERING') {
+                   const clusterResult = result as any;
+                   viz = { type: VisualizationType.CLUSTERING_DASHBOARD, title: `Spectral Clustering (k=${clusterResult.nCluster})`, data: clusterResult };
+                   stepResult = `Spectral Clustering complete with ${clusterResult.nCluster} clusters. Cluster correlation with target: r=${clusterResult.clusterCorrelation.r.toFixed(3)}.`;
+              } else if (toolName === 'STRATIFY_DATASET') {
+                   const stratResult = result as any;
+                   newData = stratResult.transformedData;
+                   // Update columns
+                   stratResult.newColumns.forEach((c: string) => {
+                       if (!newCols.includes(c)) newCols.push(c);
+                   });
+                   
+                   viz = { 
+                      type: VisualizationType.STRATIFICATION_RESULT, 
+                      title: `Stratification: ${params.target_column} by ${params.group_column}`, 
+                      data: stratResult.result 
+                   };
+                   
+                   stepResult = `Stratified ${params.target_column} by ${params.group_column}. Created ${stratResult.newColumns.length} new columns: ${stratResult.newColumns.join(', ')}.`;
               }
           }
       }
@@ -447,110 +466,149 @@ const App: React.FC = () => {
       );
       stepIdToMessageId[step.step_id] = executorThinkingMsg.id;
 
-      try {
-          const context = (i === 0) ? stepClarification : undefined;
-          
-          // Inject Server File Context for Executor (Merged/Active Dataset)
-          const fileContext = activeServerFilename 
-            ? `\n\n[Server Context] The merged/active dataset is available on the MCP server as: '${activeServerFilename}'. Use this filename for tools that require a 'filename' or 'filepath'.` 
-            : "";
+      let retryCount = 0;
+      const MAX_RETRIES = 3;
+      let stepSuccess = false;
+      let executionError: string | null = null;
+      
+      // Snapshot state for this step to allow rollback on retry
+      const stepStartData = [...activeData];
+      const stepStartCols = [...activeCols];
 
-          const previousResultsContext = resultsSummary.join('\n\n') + fileContext;
+      while (!stepSuccess && retryCount < MAX_RETRIES) {
+        try {
+            const context = (i === 0 && retryCount === 0) ? stepClarification : undefined;
+            
+            let previousResultsContext = resultsSummary.join('\n\n');
+            
+            if (executionError) {
+                previousResultsContext += `\n\n[SYSTEM MESSAGE]: The previous attempt to execute this step failed with error: "${executionError}". Please adjust your tool parameters or choice to fix this.`;
+                
+                setMessages(prev => prev.map(m => 
+                  m.id === executorThinkingMsg.id ? { 
+                      ...m, 
+                      content: `${m.content}\n\n⚠️ Attempt ${retryCount} Failed: ${executionError}\nRetrying (Attempt ${retryCount + 1}/${MAX_RETRIES})...` 
+                  } : m
+                ));
+            }
 
-          const executorResult = await runExecutorAgent(
-            instruction, 
-            activeCols, 
-            allTools, 
-            context, 
-            previousResultsContext,
-            "Planner" // Delegated by Planner for main plan execution
-          );
-          
-          if (executorResult.needs_clarification) {
-             const question = executorResult.clarification_question || "I need clarification on the parameters.";
-             
+            // Use stepStartCols for planning context to ensure we don't assume columns created in failed attempts
+            const executorResult = await runExecutorAgent(
+              instruction, 
+              stepStartCols, 
+              allTools, 
+              context, 
+              previousResultsContext,
+              "Planner",
+              activeServerFilename 
+            );
+            
+            if (executorResult.needs_clarification) {
+               const question = executorResult.clarification_question || "I need clarification on the parameters.";
+               
+               setMessages(prev => prev.map(m => 
+                  m.id === executorThinkingMsg.id ? { 
+                      ...m, 
+                      content: `${m.content}\n\n⚠️ **Low Confidence (${executorResult.confidence || '?'})**\n${executorResult.thought || ''}\n\n**Question:** ${question}` 
+                  } : m
+               ));
+
+               setSuspendedState({
+                   plan,
+                   stepIndex: startStepIndex + i,
+                   data: stepStartData,
+                   columns: stepStartCols,
+                   intent,
+                   originalUserQuery: originalUserQuery 
+               });
+               return;
+            }
+
+            const toolCalls = executorResult.toolCalls;
+            
+            setMessages(prev => prev.map(m => 
+              m.id === executorThinkingMsg.id ? { 
+                  ...m, 
+                  content: `${m.content}\n\nDecision: ${executorResult.thought || "Tools selected."}` 
+              } : m
+            ));
+
+            if (!toolCalls || toolCalls.length === 0) {
+                throw new Error("Executor Agent decided no tools were needed.");
+            }
+
+            let stepAggregateResult = "";
+            let attemptData = [...stepStartData];
+            let attemptCols = [...stepStartCols];
+            
+            for (const call of toolCalls) {
+                const toolName = call.tool;
+                const params = call.parameters;
+                const agentRole = getAgentForTool(toolName);
+                
+                if (agentRole !== AgentType.EXECUTOR) {
+                   addMessage(agentRole, `Sub-task: Running ${toolName}...`);
+                }
+
+                const { resultText, viz, updatedData, updatedColumns, rawResult } = await executeToolLogic(
+                    toolName, params, attemptData, attemptCols
+                );
+                
+                // Check for explicit failure signals
+                if (rawResult && rawResult.isError) {
+                   throw new Error(`Tool ${toolName} failed: ${resultText}`);
+                }
+                if (resultText.startsWith("Error:")) {
+                   throw new Error(resultText);
+                }
+                
+                attemptData = updatedData;
+                attemptCols = updatedColumns;
+
+                if (viz) {
+                  viz.messageId = executorThinkingMsg.id;
+                  addVisualization(viz);
+                }
+
+                let finalStepResult = resultText;
+                
+                // Interpret key results for statistical tools
+                if (rawResult) {
+                    const summaryRaw = { ...rawResult };
+                    if (summaryRaw.dataPoints && Array.isArray(summaryRaw.dataPoints)) summaryRaw.dataPoints = `[${summaryRaw.dataPoints.length} points]`;
+                    if (summaryRaw.data && Array.isArray(summaryRaw.data)) summaryRaw.data = `[${summaryRaw.data.length} rows]`; 
+                    if (summaryRaw.subjectData) summaryRaw.subjectData = "payload";
+                    if (summaryRaw.curveData) summaryRaw.curveData = "payload";
+                    
+                    const interpreted = await interpretToolResult(instruction, toolName, summaryRaw);
+                    finalStepResult = `${resultText}\n\nKey Finding: ${interpreted}`;
+                }
+                
+                stepAggregateResult += `\n- Tool: ${toolName}\n  Result: ${finalStepResult}`;
+            }
+
+            // If success, commit changes
+            activeData = attemptData;
+            activeCols = attemptCols;
+            stepSuccess = true;
+
+            setMessages(prev => prev.map(m => 
+              m.id === executorThinkingMsg.id ? { ...m, content: `${m.content}\n\n✅ Execution Complete:${stepAggregateResult}` } : m
+            ));
+            
+            resultsSummary.push(`Step ${step.step_id}: ${stepAggregateResult}`);
+
+        } catch (e: any) {
+           executionError = e.message;
+           retryCount++;
+           
+           if (retryCount >= MAX_RETRIES) {
              setMessages(prev => prev.map(m => 
-                m.id === executorThinkingMsg.id ? { 
-                    ...m, 
-                    content: `${m.content}\n\n⚠️ **Low Confidence (${executorResult.confidence || '?'})**\n${executorResult.thought || ''}\n\n**Question:** ${question}` 
-                } : m
-             ));
-
-             setSuspendedState({
-                 plan,
-                 stepIndex: startStepIndex + i,
-                 data: activeData,
-                 columns: activeCols,
-                 intent,
-                 originalUserQuery: originalUserQuery // Save original query to resume later
-             });
-             return;
-          }
-
-          const toolCalls = executorResult.toolCalls;
-          
-          setMessages(prev => prev.map(m => 
-            m.id === executorThinkingMsg.id ? { 
-                ...m, 
-                content: `${m.content}\n\nDecision: ${executorResult.thought || "Tools selected."}` 
-            } : m
-          ));
-
-          if (!toolCalls || toolCalls.length === 0) {
-              throw new Error("Executor Agent decided no tools were needed.");
-          }
-
-          let stepAggregateResult = "";
-          
-          for (const call of toolCalls) {
-              const toolName = call.tool;
-              const params = call.parameters;
-              const agentRole = getAgentForTool(toolName);
-              
-              if (agentRole !== AgentType.EXECUTOR) {
-                 addMessage(agentRole, `Sub-task: Running ${toolName}...`);
-              }
-
-              const { resultText, viz, updatedData, updatedColumns, rawResult } = await executeToolLogic(
-                  toolName, params, activeData, activeCols
-              );
-              
-              activeData = updatedData;
-              activeCols = updatedColumns;
-
-              if (viz) {
-                viz.messageId = executorThinkingMsg.id;
-                addVisualization(viz);
-              }
-
-              let finalStepResult = resultText;
-              
-              // Interpret key results for statistical tools
-              if (rawResult) {
-                  const summaryRaw = { ...rawResult };
-                  if (summaryRaw.dataPoints && Array.isArray(summaryRaw.dataPoints)) summaryRaw.dataPoints = `[${summaryRaw.dataPoints.length} points]`;
-                  if (summaryRaw.data && Array.isArray(summaryRaw.data)) summaryRaw.data = `[${summaryRaw.data.length} rows]`; 
-                  if (summaryRaw.subjectData) summaryRaw.subjectData = "payload";
-                  if (summaryRaw.curveData) summaryRaw.curveData = "payload";
-                  
-                  const interpreted = await interpretToolResult(instruction, toolName, summaryRaw);
-                  finalStepResult = `${resultText}\n\nKey Finding: ${interpreted}`;
-              }
-              
-              stepAggregateResult += `\n- Tool: ${toolName}\n  Result: ${finalStepResult}`;
-          }
-
-          setMessages(prev => prev.map(m => 
-            m.id === executorThinkingMsg.id ? { ...m, content: `${m.content}\n\n✅ Execution Complete:${stepAggregateResult}` } : m
-          ));
-          
-          resultsSummary.push(`Step ${step.step_id}: ${stepAggregateResult}`);
-
-      } catch (e: any) {
-         setMessages(prev => prev.map(m => 
-            m.id === executorThinkingMsg.id ? { ...m, content: `${m.content}\n\n❌ Execution Error: ${e.message}` } : m
-          ));
-         resultsSummary.push(`Step ${step.step_id} FAILED: ${e.message}`);
+                m.id === executorThinkingMsg.id ? { ...m, content: `${m.content}\n\n❌ Execution Failed after ${MAX_RETRIES} attempts: ${e.message}` } : m
+              ));
+             resultsSummary.push(`Step ${step.step_id} FAILED: ${e.message}`);
+           }
+        }
       }
 
       await new Promise(r => setTimeout(r, 1000));
@@ -588,7 +646,8 @@ const App: React.FC = () => {
                          allTools, 
                          undefined, 
                          previousResultsContext,
-                         AgentType.RESEARCHER // Delegated by Researcher
+                         AgentType.RESEARCHER, // Delegated by Researcher
+                         activeServerFilename
                      );
                      const toolCalls = executorResult.toolCalls;
                      if (toolCalls && toolCalls.length > 0) {

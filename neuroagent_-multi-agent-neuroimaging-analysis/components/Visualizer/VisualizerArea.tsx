@@ -2,8 +2,8 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ToolVisualization, VisualizationType, GroupComparisonResult } from '../../types';
-import { ScatterPlot, StatsBarChart, AgingCurveChart } from './Charts';
-import { FileText, Database, BookOpen, Link, FileCheck2, CheckCircle2 } from 'lucide-react';
+import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart } from './Charts';
+import { FileText, Database, BookOpen, Link, FileCheck2, CheckCircle2, TrendingUp, Grid2X2, Layers } from 'lucide-react';
 
 interface VisualizerAreaProps {
   visualizations: ToolVisualization[];
@@ -112,6 +112,9 @@ const VisualizationCard: React.FC<{
         <div className="flex items-center space-x-2">
           {visualization.type === VisualizationType.SCATTER_PLOT && <Database className="w-4 h-4 text-sky-400" />}
           {visualization.type === VisualizationType.BOX_PLOT && <Database className="w-4 h-4 text-purple-400" />}
+          {visualization.type === VisualizationType.AGING_CURVE && <TrendingUp className="w-4 h-4 text-teal-400" />}
+          {visualization.type === VisualizationType.CLUSTERING_DASHBOARD && <Grid2X2 className="w-4 h-4 text-rose-400" />}
+          {visualization.type === VisualizationType.STRATIFICATION_RESULT && <Layers className="w-4 h-4 text-emerald-400" />}
           {visualization.type === VisualizationType.LITERATURE_LIST && <BookOpen className="w-4 h-4 text-amber-400" />}
           {visualization.type === VisualizationType.DATA_TABLE && <FileText className="w-4 h-4 text-emerald-400" />}
           {visualization.type === VisualizationType.RESEARCH_REPORT && <FileCheck2 className="w-4 h-4 text-indigo-400" />}
@@ -141,10 +144,22 @@ const VisualizationCard: React.FC<{
             <PairwiseTable data={visualization.data} />
           </div>
         )}
-        
+
         {visualization.type === VisualizationType.AGING_CURVE && (
             <div className="pointer-events-auto">
                 <AgingCurveChart data={visualization.data} config={visualization.config} />
+            </div>
+        )}
+
+        {visualization.type === VisualizationType.CLUSTERING_DASHBOARD && (
+            <div className="pointer-events-auto">
+                <ClusteringDashboard data={visualization.data} config={visualization.config} />
+            </div>
+        )}
+
+        {visualization.type === VisualizationType.STRATIFICATION_RESULT && (
+            <div className="pointer-events-auto">
+                <StratificationChart data={visualization.data} config={visualization.config} />
             </div>
         )}
 
