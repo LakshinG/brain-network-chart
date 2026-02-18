@@ -1,4 +1,3 @@
-
 export enum AgentType {
   USER = 'User',
   ORCHESTRATOR = 'Orchestrator',
@@ -38,7 +37,8 @@ export enum VisualizationType {
   BOX_PLOT = 'BOX_PLOT',
   MARKDOWN_REPORT = 'MARKDOWN_REPORT',
   LITERATURE_LIST = 'LITERATURE_LIST',
-  RESEARCH_REPORT = 'RESEARCH_REPORT'
+  RESEARCH_REPORT = 'RESEARCH_REPORT',
+  VIS_HTML = 'VIS_HTML',
 }
 
 export interface ToolVisualization {
@@ -47,6 +47,13 @@ export interface ToolVisualization {
   data: any;
   config?: any;
   messageId?: string; 
+}
+
+// NEW: Type for VIS_HTML data
+export interface HtmlVisualizationData {
+  html: string;
+  heightPx?: number;
+  version?: string;
 }
 
 export interface AgentState {

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool 
@@ -19,8 +18,19 @@ import {
 } from './services/ollamaService';
 import { mcpClient } from './services/mcpService';
 import { INTERNAL_TOOLS, executeInternalTool } from './services/internalTools';
+import { 
+  editVisualizationHtmlDirect,
+  editVisualizationHtmlWithStreaming,
+  isVisualizationEditRequest,
+  getActiveHtmlVisualization 
+} from './services/visualizerService';
 import ChatArea from './components/Chat/ChatArea';
 import VisualizerArea from './components/Visualizer/VisualizerArea';
+import ResizablePanels from './components/ResizablePanels';
+import { X, Pencil, Database, Palette, ChevronRight } from 'lucide-react';
+import { getMockVisualization, getAllMockVisualizations } from './mockVisualizations';
+
+const VISUALIZER_AGENT = AgentType.EXECUTOR;
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -35,6 +45,14 @@ const App: React.FC = () => {
 
   const [selectedGeneralModel, setSelectedGeneralModel] = useState<string>('llama3');
   const [selectedNeuroModel, setSelectedNeuroModel] = useState<string>('llama3');
+  
+  const [selectedVisualizationId, setSelectedVisualizationId] = useState<string | null>(null);
+  const [visualizerModel, setVisualizerModel] = useState<string>('qwen2.5-coder:32b');
+
+  // NEW: Visualization Mode - when enabled, ALL queries go to viz editor only
+  const [visualizationMode, setVisualizationMode] = useState(false);
+  // Store viz mode messages separately
+  const [vizModeMessages, setVizModeMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
     const initSystem = async () => {
@@ -51,6 +69,11 @@ const App: React.FC = () => {
           setSelectedNeuroModel(preferred);
           setGeneralModel(preferred);
           setNeuroModel(preferred);
+          
+          const coderModel = models.find(m => m.includes('coder'));
+          if (coderModel) {
+            setVisualizerModel(coderModel);
+          }
         }
       } else {
         addMessage(AgentType.SYSTEM, "CRITICAL WARNING: Could not connect to Ollama (http://127.0.0.1:11434). Ensure it is running with OLLAMA_ORIGINS=\"*\".");
@@ -78,6 +101,19 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Initialize viz mode welcome message
+  useEffect(() => {
+    if (visualizationMode && vizModeMessages.length === 0) {
+      const welcomeMsg: ChatMessage = {
+        id: 'viz-welcome-' + Date.now(),
+        role: AgentType.SYSTEM,
+        content: "🎨 **Visualization Mode Active**\n\nAll messages will be processed as visualization edits. You can:\n\n• Create charts with Plotly.js or Chart.js\n• Add bars, lines, scatter plots\n• Modify colors, titles, labels\n• Add insights and annotations\n\nClick a visualization on the left to select it, or type to create a new one.",
+        timestamp: Date.now()
+      };
+      setVizModeMessages([welcomeMsg]);
+    }
+  }, [visualizationMode]);
+
   const addMessage = (role: AgentType, content: string, metadata?: any): ChatMessage => {
     let usedModel: string | undefined;
 
@@ -94,12 +130,43 @@ const App: React.FC = () => {
       timestamp: Date.now(),
       metadata: { ...metadata, model: usedModel }
     };
-    setMessages(prev => [...prev, msg]);
+    
+    // Add to appropriate message list based on mode
+    if (visualizationMode) {
+      setVizModeMessages(prev => [...prev, msg]);
+    } else {
+      setMessages(prev => [...prev, msg]);
+    }
+    return msg;
+  };
+
+  // Add message specifically to viz mode
+  const addVizModeMessage = (role: AgentType, content: string, metadata?: any): ChatMessage => {
+    const msg: ChatMessage = {
+      id: Date.now().toString() + Math.random(),
+      role,
+      content,
+      timestamp: Date.now(),
+      metadata: { ...metadata, model: visualizerModel }
+    };
+    setVizModeMessages(prev => [...prev, msg]);
     return msg;
   };
 
   const addVisualization = (viz: ToolVisualization) => {
     setVisualizations(prev => [viz, ...prev]);
+  };
+
+  const updateVisualization = (messageId: string, newData: any) => {
+    setVisualizations(prev => prev.map(viz => 
+      viz.messageId === messageId 
+        ? { ...viz, data: newData }
+        : viz
+    ));
+  };
+
+  const handleHtmlChange = (messageId: string, newHtml: string) => {
+    updateVisualization(messageId, { html: newHtml });
   };
 
   const handleFileUpload = (file: File) => {
@@ -163,11 +230,6 @@ const App: React.FC = () => {
     return AgentType.EXECUTOR;
   };
 
-  /**
-   * Reusable logic to execute a single tool (Internal or MCP).
-   * It handles data updates, preprocessor prompts, and visualization creation.
-   * Returns a result string and an optional visualization object.
-   */
   const executeToolLogic = async (
       toolName: string, 
       params: any, 
@@ -185,251 +247,113 @@ const App: React.FC = () => {
       const mcpToolDef = mcpTools.find(t => t.name === toolName);
 
       if (internalToolDef) {
-          if (toolName === 'TRANSFORM_DATA') {
-              const col = params.column;
-              if (newCols.includes(col)) {
-                  // Preprocessor logic adds extra context
-                  const preMsg = addMessage(AgentType.PREPROCESSOR, `Analyzing column '${col}' to determine numeric mapping...`);
-                  
-                  const uniqueVals = Array.from(new Set(newData.map(row => row[col])));
-                  const mappingResult = await generatePreprocessingMapping(col, uniqueVals as string[]);
-                  const mapping = mappingResult.mapping;
-                  const rationale = mappingResult.rationale;
-
-                  setMessages(prev => prev.map(m => 
-                    m.id === preMsg.id 
-                      ? { ...m, content: `**Analysis of '${col}':** ${rationale || 'Mapping generated.'}` } 
-                      : m
-                  ));
-
-                  const result = executeInternalTool(toolName, { ...params, mapping }, newData);
-                  const transformResult = result as any;
-                  
-                  newData = transformResult.transformedData;
-                  const newColName = transformResult.newColumn;
-                  
-                  if (!newCols.includes(newColName)) newCols.push(newColName);
-                  
-                  // Update global dataset state as well
-                  setDataset(prev => prev ? ({ ...prev, data: newData, columns: newCols }) : null);
-
-                  stepResult = `Converted '${col}' to '${newColName}' using mapping: ${JSON.stringify(mapping)}.`;
-                  viz = {
-                       type: VisualizationType.DATA_TABLE,
-                       title: `Preprocessing: ${col} -> ${newColName}`,
-                       data: Object.entries(mapping).map(([k,v]) => ({ Original: k, Numeric: v }))
-                  };
-              } else {
-                  stepResult = `Error: Column '${col}' not found.`;
-              }
+          stepResult = await executeInternalTool(toolName, params, newData);
+          viz = parseMcpResultToVisualization(toolName, stepResult);
+      } else if (mcpToolDef) {
+          const result = await mcpClient.callTool(toolName, params);
+          if (result.isError) {
+              stepResult = `Error: ${result.content.map((c: any) => c.text || '').join(' ')}`;
+          } else {
+              stepResult = result.content.map((c: any) => c.text || '').join('\n');
+              viz = parseMcpResultToVisualization(toolName, stepResult);
           }
-          else if (toolName === 'MODIFY_VISUALIZATION') {
-              const result = executeInternalTool(toolName, params, newData);
-              setVisualizations(prev => {
-                  if (prev.length === 0) return prev;
-                  const targetIndex = prev.findIndex(v => v.messageId === highlightedMessageId);
-                  const indexToUpdate = targetIndex !== -1 ? targetIndex : 0;
-                  const updated = [...prev];
-                  const targetViz = { ...updated[indexToUpdate] };
-                  targetViz.config = { ...targetViz.config, ...result };
-                  if (result.title) targetViz.title = result.title;
-                  updated[indexToUpdate] = targetViz;
-                  return updated;
-              });
-              stepResult = `Updated visualization style: ${JSON.stringify(result)}`;
-          }
-          else if (toolName === 'DATA_INSPECT') {
-              const result = executeInternalTool(toolName, params, newData) as any;
-              viz = { type: VisualizationType.DATA_TABLE, title: 'Data Inspection', data: result.data };
-              stepResult = `Inspected data. Loaded ${result.data.length} rows.`;
-          }
-          else {
-              const result = executeInternalTool(toolName, params, newData);
-              
-              if (toolName === 'CORRELATION_ANALYSIS') {
-                  const corrResult = result as any;
-                  const vizData = {
-                    ...corrResult,
-                    xCol: params.x_column || params.x || 'X',
-                    yCol: params.y_column || params.y || 'Y'
-                  };
-                  viz = { type: VisualizationType.SCATTER_PLOT, title: `Correlation: ${corrResult.r.toFixed(2)}`, data: vizData };
-                  stepResult = `Correlation Analysis complete. R=${corrResult.r.toFixed(3)}, p-value=${corrResult.p.toExponential(3)}.`;
-              } else if (toolName === 'GROUP_COMPARISON') {
-                   const groupResult = result as any;
-                   viz = { type: VisualizationType.BOX_PLOT, title: `Group Comparison`, data: groupResult };
-                   stepResult = `Group Comparison complete. ANOVA p-value=${groupResult.pVal.toExponential(3)}.`;
-              }
+      } else {
+          stepResult = `Tool "${toolName}" not found.`;
+      }
+
+      if (agentRole === AgentType.PREPROCESSOR && viz?.type === VisualizationType.DATA_TABLE) {
+          newData = viz.data;
+          if (newData.length > 0) {
+              newCols = Object.keys(newData[0]);
           }
       }
-      else if (mcpToolDef) {
-         const args = { ...params };
-         if (mcpToolDef.inputSchema.properties && 'data' in mcpToolDef.inputSchema.properties) {
-            args.data = newData;
-         }
-         const result = await mcpClient.callTool(toolName, args);
-         const textContent = result.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
-         stepResult = textContent || "Tool executed successfully.";
-         viz = parseMcpResultToVisualization(toolName, textContent);
-         if (result.isError) stepResult = `Error executing tool: ${stepResult}`;
-      } 
-      else {
-         stepResult = `Unknown tool: ${toolName}. Skipping.`;
-      }
-      
+
       return { resultText: stepResult, viz, updatedData: newData, updatedColumns: newCols };
   };
 
   const executePlanSteps = async (
     plan: any, 
-    startStepIndex: number = 0, 
-    initialParamsOverride: any = null,
-    currentData: any[],
-    currentColumns: string[],
-    intent: 'RESEARCH' | 'GENERAL'
+    startStep: number, 
+    modifiedParams: any,
+    initialData: any[],
+    initialColumns: string[],
+    intent: string
   ) => {
-    const resultsSummary: string[] = [];
+    let currentData = [...initialData];
+    let currentColumns = [...initialColumns];
     const stepIdToMessageId: Record<number, string> = {};
-    const stepsToRun = plan.analysis_steps.slice(startStepIndex);
 
-    let activeData = [...currentData];
-    let activeCols = [...currentColumns];
-
-    // 1. Execute the Planner's Static Steps
-    for (let i = 0; i < stepsToRun.length; i++) {
-      const step = stepsToRun[i];
-      const params = (i === 0 && initialParamsOverride) ? initialParamsOverride : step.parameters;
+    for (let i = startStep; i < plan.analysis_steps.length; i++) {
+      const step = plan.analysis_steps[i];
       const agentRole = getAgentForTool(step.tool);
+      const isModifiedStep = (i === startStep && modifiedParams !== null);
+      const params = isModifiedStep ? modifiedParams : step.params;
 
-      const executorMsg = addMessage(
+      const stepMsg = addMessage(agentRole, `Executing Step ${step.step_id}: ${step.tool}...`, {
+        tool: step.tool,
+        params: params,
+        step_id: step.step_id
+      });
+      stepIdToMessageId[step.step_id] = stepMsg.id;
+
+      const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
+        step.tool, 
+        params, 
         agentRole, 
-        `Executing Step ${step.step_id}: ${step.tool}...`,
-        { 
-          plan, 
-          stepIndex: startStepIndex + i, 
-          tool: step.tool,
-          params: params
-        }
+        currentData, 
+        currentColumns
       );
       
-      stepIdToMessageId[step.step_id] = executorMsg.id;
+      currentData = updatedData;
+      currentColumns = updatedColumns;
 
-      try {
-          const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
-              step.tool, params, agentRole, activeData, activeCols
-          );
-          
-          activeData = updatedData;
-          activeCols = updatedColumns;
-
-          setMessages(prev => prev.map(m => 
-            m.id === executorMsg.id ? { ...m, content: `${m.content}\n\n✅ ${resultText}` } : m
-          ));
-
-          if (viz) {
-            viz.messageId = executorMsg.id;
-            addVisualization(viz);
-          }
-          
-          resultsSummary.push(`Step ${step.step_id} (${step.tool} - ${agentRole}): ${resultText}`);
-
-      } catch (e: any) {
-         setMessages(prev => prev.map(m => 
-            m.id === executorMsg.id ? { ...m, content: `${m.content}\n\n❌ Error: ${e.message}` } : m
-          ));
-         resultsSummary.push(`Step ${step.step_id} FAILED: ${e.message}`);
-      }
-
-      await new Promise(r => setTimeout(r, 1000));
-    }
-
-    // 2. Dynamic Researcher Loop
-    // The researcher agent reviews findings and can decide to execute more tools (e.g. search)
-    // or write the final report.
-    if (intent === 'RESEARCH') {
-      let researcherActive = true;
-      let loopCount = 0;
-      const MAX_LOOPS = 3;
-
-      addMessage(AgentType.RESEARCHER, "Reviewing findings...");
-
-      while (researcherActive && loopCount < MAX_LOOPS) {
-          const context = resultsSummary.join('\n');
-          const decision = await generateResearchInsights(context, mcpTools);
-          
-          if (decision.decision === 'TOOL_CALL' && decision.tool) {
-             loopCount++;
-             const toolName = decision.tool;
-             const params = decision.parameters || {};
-             
-             addMessage(AgentType.RESEARCHER, `I need more information. Deciding to run tool: ${toolName}...`, {
-                 thought: decision.thought
-             });
-             
-             try {
-                const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
-                    toolName, params, AgentType.RESEARCHER, activeData, activeCols
-                );
-                
-                // Update active data just in case, though researcher tools usually don't modify data
-                activeData = updatedData;
-                activeCols = updatedColumns;
-
-                if (viz) {
-                    addVisualization({ ...viz, title: `Researcher: ${viz.title}` });
-                }
-
-                addMessage(AgentType.RESEARCHER, `Tool Result (${toolName}):\n${resultText}`);
-                resultsSummary.push(`[Dynamic Researcher Step] Tool: ${toolName}\nResult: ${resultText}`);
-                
-             } catch (e: any) {
-                 addMessage(AgentType.RESEARCHER, `Failed to execute tool ${toolName}: ${e.message}`);
-                 // Break loop on failure to prevent spiraling
-                 researcherActive = false; 
-             }
-
-          } else {
-             // Decision is REPORT (or fallback)
-             const finalReport = decision.report || "Analysis complete.";
-             const researchMsg = addMessage(AgentType.RESEARCHER, "Final Analysis Report generated.");
-             
-             // Update the final message with the content
-             setMessages(prev => prev.map(m => 
-                m.id === researchMsg.id ? { ...m, content: finalReport } : m
-             ));
-
-             addVisualization({
-                type: VisualizationType.RESEARCH_REPORT,
-                title: "Scientific Research Report",
-                data: {
-                  report: finalReport,
-                  stepIdToMessageId
-                },
-                messageId: researchMsg.id
-              });
-              
-              researcherActive = false;
-          }
+      if (viz) {
+        viz.messageId = stepMsg.id;
+        addVisualization(viz);
       }
       
-      if (loopCount >= MAX_LOOPS) {
-          addMessage(AgentType.SYSTEM, "Researcher loop limit reached. Stopping autonomous execution.");
-      }
+      setMessages(prev => prev.map(m => 
+        m.id === stepMsg.id 
+          ? { ...m, content: `Step ${step.step_id} Complete: ${step.tool}\nResult: ${resultText.substring(0, 300)}...` } 
+          : m
+      ));
+    }
 
-    } else {
-      addMessage(AgentType.SYSTEM, "Task complete.");
+    if (intent === 'RESEARCH') {
+      addMessage(AgentType.RESEARCHER, "Synthesizing final research report...");
+      const allTools = [...INTERNAL_TOOLS, ...mcpTools];
+      const report = await generateResearchInsights(
+        plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n'),
+        allTools
+      );
+      
+      const reportMsg = addMessage(AgentType.RESEARCHER, "Research Report Generated.");
+      const reportViz: ToolVisualization = {
+        type: VisualizationType.RESEARCH_REPORT,
+        title: 'Research Summary',
+        data: { report, stepIdToMessageId },
+        messageId: reportMsg.id
+      };
+      addVisualization(reportViz);
     }
   };
 
   const handleRestartFromStep = async (messageId: string, newParams: any) => {
     if (!dataset) return;
+
     const msgIndex = messages.findIndex(m => m.id === messageId);
     if (msgIndex === -1) return;
+
     const msg = messages[msgIndex];
 
-    // Check if the message is an execution step (Metadata contains stepIndex)
-    if (msg.metadata?.stepIndex !== undefined) {
-        const { plan, stepIndex } = msg.metadata;
+    if (msg.metadata?.step_id) {
+        const stepIndex = msg.metadata.step_id - 1;
+        const plannerMessage = [...messages].reverse().find(
+            m => (m.role === AgentType.NEURO_PLANNER || m.role === AgentType.GENERAL_PLANNER) && m.metadata?.plan
+        );
+        if (!plannerMessage?.metadata?.plan) return;
+
+        const plan = plannerMessage.metadata.plan;
         const newMessages = messages.slice(0, msgIndex);
         setMessages(newMessages);
         const validMessageIds = new Set(newMessages.map(m => m.id));
@@ -468,8 +392,191 @@ const App: React.FC = () => {
     }
   };
 
+  // Handle visualization editing (used by both modes)
+  const handleVisualizationEdit = async (query: string, useVizModeMessages: boolean = false): Promise<boolean> => {
+    const activeViz = getActiveHtmlVisualization(visualizations, selectedVisualizationId || undefined);
+    
+    const addMsg = useVizModeMessages ? addVizModeMessage : addMessage;
+    const setMsgs = useVizModeMessages ? setVizModeMessages : setMessages;
+    
+    if (!activeViz) {
+      // Create new visualization
+      const starterHtml = `<div class="visualizationCard bg-slate-900 rounded-xl border border-slate-700 p-4">
+  <div class="vc-header">
+    <h3 class="vc-title text-slate-100 font-semibold text-base text-center">New Visualization</h3>
+    <p class="vc-subtitle text-slate-400 text-xs text-center mt-1">Created by VisualizerAgent</p>
+  </div>
+  <div class="vc-body mt-3">
+    <div id="chart" class="chart-container" style="width:100%;height:300px;"></div>
+  </div>
+</div>`;
+
+      const vizMsg = addMsg(VISUALIZER_AGENT, `🔄 Creating visualization...`, {
+        tool: 'visualizer_edit_html',
+        isVisualizerEdit: true
+      });
+
+      const result = await editVisualizationHtmlWithStreaming(
+        query, 
+        starterHtml, 
+        visualizerModel,
+        (progressText, isDone) => {
+          setMsgs(prev => prev.map(m => 
+            m.id === vizMsg.id 
+              ? { ...m, content: progressText }
+              : m
+          ));
+        }
+      );
+      
+      if (result.status === 'success' && result.html) {
+        const newViz: ToolVisualization = {
+          type: VisualizationType.VIS_HTML,
+          title: 'Custom Visualization',
+          data: { html: result.html, heightPx: 400 },
+          messageId: vizMsg.id
+        };
+        addVisualization(newViz);
+        setSelectedVisualizationId(vizMsg.id);
+        
+        setMsgs(prev => prev.map(m => 
+          m.id === vizMsg.id 
+            ? { ...m, content: `✅ Visualization created!\n\nApplied: "${query}"` }
+            : m
+        ));
+        return true;
+      } else {
+        setMsgs(prev => prev.map(m => 
+          m.id === vizMsg.id 
+            ? { ...m, content: `❌ Failed: ${result.message}` }
+            : m
+        ));
+        return false;
+      }
+    }
+
+    // Edit existing visualization
+    const currentHtml = activeViz.data?.html;
+    if (!currentHtml) {
+      addMsg(AgentType.SYSTEM, "Error: Selected visualization has no HTML content.");
+      return false;
+    }
+    
+    const editMsg = addMsg(VISUALIZER_AGENT, `🔄 Editing visualization...`, {
+      tool: 'visualizer_edit_html',
+      isVisualizerEdit: true,
+      targetVizId: activeViz.messageId
+    });
+
+    const result = await editVisualizationHtmlWithStreaming(
+      query, 
+      currentHtml, 
+      visualizerModel,
+      (progressText, isDone) => {
+        setMsgs(prev => prev.map(m => 
+          m.id === editMsg.id 
+            ? { ...m, content: progressText }
+            : m
+        ));
+      }
+    );
+
+    if (result.status === 'success' && result.html) {
+      updateVisualization(activeViz.messageId!, { 
+        html: result.html, 
+        heightPx: activeViz.data?.heightPx || 400 
+      });
+      
+      setMsgs(prev => prev.map(m => 
+        m.id === editMsg.id 
+          ? { ...m, content: `✅ Updated!\n\nApplied: "${query}"${result.warnings ? `\n\n⚠️ ${result.warnings.join(', ')}` : ''}` }
+          : m
+      ));
+      
+      setHighlightedMessageId(activeViz.messageId || null);
+      setTimeout(() => setHighlightedMessageId(null), 2000);
+      
+      return true;
+    } else {
+      setMsgs(prev => prev.map(m => 
+        m.id === editMsg.id 
+          ? { ...m, content: `❌ Failed: ${result.message}` }
+          : m
+      ));
+      return false;
+    }
+  };
+
+  // NEW: Handle queries in Visualization Mode - ALWAYS goes to viz editor
+  const handleVisualizationModeQuery = async (query: string) => {
+    // Add user message to viz mode messages
+    const userMsg: ChatMessage = {
+      id: Date.now().toString() + Math.random(),
+      role: AgentType.USER,
+      content: query,
+      timestamp: Date.now()
+    };
+    setVizModeMessages(prev => [...prev, userMsg]);
+    
+    setIsProcessing(true);
+    try {
+      await handleVisualizationEdit(query, true);
+    } catch (error) {
+      console.error('Visualization edit error:', error);
+      addVizModeMessage(AgentType.SYSTEM, `Error: ${error}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Original query handler for normal mode
   const handleUserQuery = async (query: string) => {
-    if (!dataset) return;
+    // If in visualization mode, route to viz handler
+    if (visualizationMode) {
+      await handleVisualizationModeQuery(query);
+      return;
+    }
+
+    // Normal mode logic...
+    const hasSelectedVizHtml = selectedVisualizationId !== null && 
+      visualizations.some(v => v.messageId === selectedVisualizationId && v.type === VisualizationType.VIS_HTML);
+    
+    const isVizEdit = isVisualizationEditRequest(query, hasSelectedVizHtml);
+    
+    if (isVizEdit && hasSelectedVizHtml) {
+      setIsProcessing(true);
+      try {
+        addMessage(AgentType.USER, query);
+        await handleVisualizationEdit(query, false);
+      } catch (error) {
+        console.error('Visualization edit error:', error);
+        addMessage(AgentType.SYSTEM, `Error editing visualization: ${error}`);
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
+    }
+    
+    const hasVizHtml = visualizations.some(v => v.type === VisualizationType.VIS_HTML);
+    if (isVizEdit && !dataset && (hasVizHtml || query.toLowerCase().includes('create') || query.toLowerCase().includes('new visualization'))) {
+      setIsProcessing(true);
+      try {
+        addMessage(AgentType.USER, query);
+        await handleVisualizationEdit(query, false);
+      } catch (error) {
+        console.error('Visualization edit error:', error);
+        addMessage(AgentType.SYSTEM, `Error editing visualization: ${error}`);
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
+    }
+
+    if (!dataset) {
+      addMessage(AgentType.USER, query);
+      addMessage(AgentType.SYSTEM, "Please upload a dataset first before asking questions.");
+      return;
+    }
     
     addMessage(AgentType.USER, query);
     setIsProcessing(true);
@@ -538,81 +645,261 @@ const App: React.FC = () => {
 
   const handleVizClick = (messageId?: string) => {
     if (messageId) {
-        setHighlightedMessageId(messageId);
+      setHighlightedMessageId(messageId);
+      const clickedViz = visualizations.find(v => v.messageId === messageId);
+      if (clickedViz?.type === VisualizationType.VIS_HTML) {
+        setSelectedVisualizationId(messageId);
+      }
     }
   };
 
-  return (
-    <div className="flex h-screen w-full overflow-hidden bg-slate-950 text-slate-200">
-      <div className="w-1/2 p-4 flex flex-col h-full border-r border-slate-800">
-        <header className="mb-4 flex-none flex flex-col gap-2">
-           <div className="flex justify-between items-center">
-            <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-              <span className="bg-indigo-600 p-1 rounded-lg">NA</span>
-              NeuroAgent <span className="text-slate-500 font-normal">Platform</span>
-            </h1>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${ollamaConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                <span className="text-xs text-slate-500">Ollama</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${mcpConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                <span className="text-xs text-slate-500">MCP</span>
-              </div>
-            </div>
-          </div>
+  // Toggle visualization mode
+  const toggleVisualizationMode = () => {
+    setVisualizationMode(prev => !prev);
+    // Auto-select first VIS_HTML if entering viz mode
+    if (!visualizationMode) {
+      const firstVizHtml = visualizations.find(v => v.type === VisualizationType.VIS_HTML);
+      if (firstVizHtml?.messageId) {
+        setSelectedVisualizationId(firstVizHtml.messageId);
+      }
+    }
+  };
+
+  // Header component
+  const Header = () => (
+    <header className="mb-4 flex-none flex flex-col gap-2">
+      <div className="flex justify-between items-center">
+        <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+          <span className="bg-indigo-600 p-1 rounded-lg">NA</span>
+          NeuroAgent <span className="text-slate-500 font-normal">Platform</span>
+        </h1>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => {
+              const testViz: ToolVisualization = {
+                type: VisualizationType.VIS_HTML,
+                title: 'Editable Visualization',
+                data: {
+                  html: `<div class="visualizationCard bg-slate-900 rounded-xl border border-slate-700 p-4">
+  <div class="vc-header">
+    <h3 class="vc-title text-slate-100 font-semibold text-base text-center">Sample Chart</h3>
+    <p class="vc-subtitle text-slate-400 text-xs text-center mt-1">Edit me via chat!</p>
+  </div>
+  <div class="vc-body mt-3">
+    <div id="chart" class="chart-container" style="width:100%;height:280px;display:flex;align-items:center;justify-content:center;border:1px solid #334155;border-radius:0.5rem;color:#64748b;">
+      Chart placeholder - ask me to create a chart!
+    </div>
+  </div>
+</div>`,
+                  heightPx: 380
+                },
+                messageId: 'test-viz-' + Date.now()
+              };
+              addVisualization(testViz);
+              setSelectedVisualizationId(testViz.messageId!);
+              if (!visualizationMode) {
+                addMessage(AgentType.SYSTEM, "Created a test visualization. Click on it and type edit commands in the chat!");
+              } else {
+                addVizModeMessage(AgentType.SYSTEM, "Created a new visualization. Type your edit commands below!");
+              }
+            }}
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-emerald-900/50 hover:bg-emerald-800/50 border border-emerald-700 rounded text-emerald-300 transition-colors"
+            title="Create a test VIS_HTML visualization"
+          >
+            <Pencil className="w-3 h-3" />
+            + Test Viz
+          </button>
+
+          <button
+            onClick={() => {
+              const mockVizs = getAllMockVisualizations();
+              mockVizs.forEach((viz, index) => {
+                const newViz = { ...viz, messageId: `mock-viz-${Date.now()}-${index}` };
+                addVisualization(newViz);
+              });
+              setSelectedVisualizationId(`mock-viz-${Date.now()}-0`);
+              if (!visualizationMode) {
+                addMessage(AgentType.SYSTEM, `Loaded ${mockVizs.length} mock visualizations. Click any visualization and edit it via chat!`);
+              } else {
+                addVizModeMessage(AgentType.SYSTEM, `Loaded ${mockVizs.length} mock visualizations. Select one and start editing!`);
+              }
+            }}
+            className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700 rounded text-violet-300 transition-colors"
+            title="Load mock neuroimaging visualizations"
+          >
+            <Database className="w-3 h-3" />
+            Mock Data
+          </button>
           
-          {availableModels.length > 0 && (
-            <div className="flex gap-2 text-xs">
-              <div className="flex flex-col gap-1 w-1/2">
-                <label className="text-slate-500">General Model</label>
-                <select 
-                  value={selectedGeneralModel} 
-                  onChange={handleGeneralModelChange}
-                  className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
-                >
-                  {availableModels.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-col gap-1 w-1/2">
-                <label className="text-slate-500">Neuro Model</label>
-                <select 
-                  value={selectedNeuroModel} 
-                  onChange={handleNeuroModelChange}
-                  className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
-                >
-                  {availableModels.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
-        </header>
-        <div className="flex-1 min-h-0">
-          <VisualizerArea 
-            visualizations={visualizations} 
-            datasetName={dataset?.name} 
-            onVizClick={handleVizClick}
-          />
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${ollamaConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-xs text-slate-500">Ollama</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${mcpConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-xs text-slate-500">MCP</span>
+          </div>
         </div>
       </div>
+      
+      {availableModels.length > 0 && !visualizationMode && (
+        <div className="flex gap-2 text-xs">
+          <div className="flex flex-col gap-1 w-1/3">
+            <label className="text-slate-500">General Model</label>
+            <select 
+              value={selectedGeneralModel} 
+              onChange={handleGeneralModelChange}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
+            >
+              {availableModels.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1 w-1/3">
+            <label className="text-slate-500">Neuro Model</label>
+            <select 
+              value={selectedNeuroModel} 
+              onChange={handleNeuroModelChange}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
+            >
+              {availableModels.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1 w-1/3">
+            <label className="text-slate-500 flex items-center gap-1">
+              <Pencil className="w-3 h-3" /> Visualizer
+            </label>
+            <select 
+              value={visualizerModel} 
+              onChange={(e) => setVisualizerModel(e.target.value)}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-500"
+            >
+              {availableModels.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
-      <div className="w-1/2 h-full flex flex-col">
-        <ChatArea 
-          messages={messages} 
-          onSendMessage={handleUserQuery} 
-          onFileUpload={handleFileUpload}
-          onLoadDemo={handleLoadDemo}
-          isProcessing={isProcessing}
-          hasData={!!dataset}
-          highlightedMessageId={highlightedMessageId}
-          onRestartStep={handleRestartFromStep}
+      {/* Visualizer model selector in viz mode */}
+      {visualizationMode && availableModels.length > 0 && (
+        <div className="flex gap-2 text-xs">
+          <div className="flex flex-col gap-1 flex-1">
+            <label className="text-slate-500 flex items-center gap-1">
+              <Palette className="w-3 h-3" /> Visualizer Model
+            </label>
+            <select 
+              value={visualizerModel} 
+              onChange={(e) => setVisualizerModel(e.target.value)}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-pink-500"
+            >
+              {availableModels.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+      
+      {selectedVisualizationId && !visualizationMode && (
+        <div className="flex items-center gap-2 text-xs bg-cyan-900/30 border border-cyan-800 rounded px-3 py-1.5">
+          <Pencil className="w-3 h-3 text-cyan-400" />
+          <span className="text-cyan-300">Editing visualization - type changes in chat</span>
+          <button 
+            onClick={() => setSelectedVisualizationId(null)}
+            className="ml-auto text-cyan-500 hover:text-cyan-300"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+    </header>
+  );
+
+  // Left panel (Visualizations)
+  const LeftPanel = () => (
+    <div className="p-4 flex flex-col h-full border-r border-slate-800">
+      <Header />
+      <div className="flex-1 min-h-0">
+        <VisualizerArea 
+          visualizations={visualizations} 
+          datasetName={dataset?.name} 
+          onVizClick={handleVizClick}
+          onHtmlChange={handleHtmlChange}
         />
       </div>
+    </div>
+  );
+
+  // Right panel (Chat) - shows different content based on mode
+  const RightPanel = () => (
+    <div className="h-full flex flex-col relative">
+      {/* Visualization Mode Banner */}
+      {visualizationMode && (
+        <div className="flex-none bg-gradient-to-r from-pink-900/50 via-purple-900/50 to-indigo-900/50 border-b border-pink-700/50 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-pink-600 rounded-lg">
+                <Palette className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-white">Visualization Mode</h3>
+                <p className="text-xs text-pink-200/70">All messages go to visualization editor only</p>
+              </div>
+            </div>
+            <button
+              onClick={toggleVisualizationMode}
+              className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-200 transition-colors"
+            >
+              <X className="w-4 h-4" />
+              Exit Mode
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0">
+        <ChatArea 
+          messages={visualizationMode ? vizModeMessages : messages} 
+          onSendMessage={handleUserQuery} 
+          onFileUpload={visualizationMode ? undefined : handleFileUpload}
+          onLoadDemo={visualizationMode ? undefined : handleLoadDemo}
+          isProcessing={isProcessing}
+          hasData={visualizationMode ? true : !!dataset}
+          highlightedMessageId={highlightedMessageId}
+          onRestartStep={visualizationMode ? undefined : handleRestartFromStep}
+        />
+      </div>
+
+      {/* Floating Visualization Mode Button - only show when NOT in viz mode */}
+      {!visualizationMode && (
+        <button
+          onClick={toggleVisualizationMode}
+          className="absolute bottom-20 right-4 flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 rounded-full text-white shadow-lg shadow-pink-900/50 transition-all hover:scale-105 hover:shadow-xl hover:shadow-pink-900/50"
+          title="Enter Visualization Mode - all queries go to viz editor"
+        >
+          <Palette className="w-5 h-5" />
+          <span className="font-medium">Visualization & Edits</span>
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="h-screen w-full overflow-hidden bg-slate-950 text-slate-200">
+      <ResizablePanels
+        leftPanel={<LeftPanel />}
+        rightPanel={<RightPanel />}
+        defaultLeftWidth={50}
+        minLeftWidth={25}
+        maxLeftWidth={75}
+        localStorageKey="neuroagent-panel-width"
+      />
     </div>
   );
 };

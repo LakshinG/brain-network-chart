@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 import { ChatMessage, AgentType } from '../../types';
 import MessageBubble from './MessageBubble';
@@ -7,16 +6,25 @@ import { Send, Upload, PlayCircle } from 'lucide-react';
 interface ChatAreaProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
-  onFileUpload: (file: File) => void;
-  onLoadDemo: () => void;
+  onFileUpload?: (file: File) => void;  // Optional for viz mode
+  onLoadDemo?: () => void;               // Optional for viz mode
   isProcessing: boolean;
   hasData: boolean;
   highlightedMessageId: string | null;
-  onRestartStep: (messageId: string, newParams: any) => void;
+  onRestartStep?: (messageId: string, newParams: any) => void;  // Optional for viz mode
+  placeholder?: string;  // Custom placeholder text
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({ 
-  messages, onSendMessage, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep 
+  messages, 
+  onSendMessage, 
+  onFileUpload, 
+  onLoadDemo, 
+  isProcessing, 
+  hasData, 
+  highlightedMessageId, 
+  onRestartStep,
+  placeholder 
 }) => {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -48,10 +56,20 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
+    if (e.target.files && e.target.files[0] && onFileUpload) {
       onFileUpload(e.target.files[0]);
     }
   };
+
+  // Determine if we should show the upload prompt
+  // Don't show if onFileUpload is not provided (viz mode) or if we already have data
+  const showUploadPrompt = !hasData && onFileUpload && onLoadDemo;
+
+  // Default placeholder based on context
+  const inputPlaceholder = placeholder 
+    || (hasData 
+      ? "Ask about the data (e.g., 'Correlation between Amyloid and Age?')" 
+      : "Upload data first...");
 
   return (
     <div className="flex flex-col h-full bg-slate-900 border-l border-slate-800">
@@ -82,7 +100,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       </div>
 
       <div className="flex-none p-4 bg-slate-900 border-t border-slate-800">
-        {!hasData ? (
+        {showUploadPrompt && (
           <div className="mb-4 p-4 bg-slate-800/50 rounded-lg border border-dashed border-slate-700 text-center">
             <p className="text-sm text-slate-300 mb-3">Upload a CSV dataset to begin analysis</p>
             <div className="flex justify-center gap-3">
@@ -100,7 +118,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               </button>
             </div>
           </div>
-        ) : null}
+        )}
         
         <form onSubmit={handleSubmit} className="relative">
           <input
@@ -108,7 +126,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={isProcessing}
-            placeholder={hasData ? "Ask about the data (e.g., 'Correlation between Amyloid and Age?')" : "Upload data first..."}
+            placeholder={inputPlaceholder}
             className="w-full bg-slate-800 text-slate-200 rounded-lg pl-4 pr-12 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 disabled:opacity-50 placeholder-slate-500"
           />
           <button
@@ -119,13 +137,15 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             <Send className="w-4 h-4" />
           </button>
         </form>
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          onChange={handleFileChange} 
-          accept=".csv" 
-          className="hidden" 
-        />
+        {onFileUpload && (
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept=".csv" 
+            className="hidden" 
+          />
+        )}
       </div>
     </div>
   );
