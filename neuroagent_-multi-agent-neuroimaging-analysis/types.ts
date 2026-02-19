@@ -44,7 +44,8 @@ export enum VisualizationType {
   RESEARCH_REPORT = 'RESEARCH_REPORT',
   VIS_HTML = 'VIS_HTML',
   CLUSTERING_DASHBOARD = 'CLUSTERING_DASHBOARD',
-  STRATIFICATION_RESULT = 'STRATIFICATION_RESULT'
+  STRATIFICATION_RESULT = 'STRATIFICATION_RESULT',
+  SVM_BOUNDARY = 'SVM_BOUNDARY'
 }
 
 export interface ToolVisualization {
@@ -99,12 +100,30 @@ export interface GroupComparisonResult {
   }[];
 }
 
+export interface CorrelationSeries {
+  name: string;
+  r: number;
+  p: number;
+  n: number;
+  dataPoints: { x: number; y: number; id?: string }[];
+}
+
 export interface CorrelationResult {
   xCol: string;
   yCol: string;
-  r: number;
-  p: number;
-  dataPoints: { x: number; y: number; group?: string }[];
+  groupCol?: string;
+  series: CorrelationSeries[];
+}
+
+export interface SVMResult {
+  xCol: string;
+  yCol: string;
+  targetCol: string;
+  accuracy: number;
+  weights: { wx: number; wy: number; b: number };
+  classes: any[];
+  dataPoints: { x: number; y: number; classLabel: any; predicted: any }[];
+  decisionBoundary: { x1: number; y1: number; x2: number; y2: number };
 }
 
 export interface GrowthCurveResult {
@@ -112,14 +131,16 @@ export interface GrowthCurveResult {
   phenotype: string;
   data: { X: number[]; centiles: number[][]; age?: number[]; values?: number[] };
   elapsed_seconds: number;
+  overlayDot_color?: number[];
 }
 
 export interface ClusteringResult {
   featureCols: string[];
-  targetCol: string;
+  targetCol?: string;
   nCluster: number;
-  pcPoints: { x: number; y: number; cluster: number; target: number; id?: string }[];
-  clusterCorrelation: CorrelationResult;
+  pcPoints: { x: number; y: number; cluster: number; target?: number; id?: string }[];
+  clusterCorrelation?: CorrelationResult;
+  assignments?: { originalIndex: number; cluster: number }[];
 }
 
 export interface StratificationResult {

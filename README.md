@@ -12,7 +12,7 @@
 3. Run UI:
    `npm run dev`
 4. Run backend at 8787: `node backend/server.mjs`
-5. Go to validator branch, run MCP server: `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`
+5. Go to validator branch, run MCP server: `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010` 
 6. Build SSH tunnel for above ports.
 
 ## Runtime Architecture
@@ -42,9 +42,14 @@ MCP Server(s)
 - Add an Observer to summarize the Normative model results.
 - Improve Proposal Reporter prompt, it now focuses more on literatures since they are have more chars than statistical results.
 - Three demos questions:
-   - CT and IQ group comparisons in terms of diagnosis
-   - Spectral cluster: feature=[list of regional CT], y=IQ
-   - Linear regression: x=CT, y=IQ, hue=Diagnosis
+   - ~~Correlation between Global Cortical Thickness (CT) and IQ (sb_abiq_ss column) grouping by mental health status (FinalDiagnosis column) to see if disease changes the correlation.~~
+   - ~~Brain chart of CT.~~
+   - ~~Spectral cluster: feature columns are [list of regional Cortical Thickness], target column is sb_abiq_ss~~
+
+## Scripts:
+   - Study on correlation between Global Cortical Thickness (CT) and IQ (sb_abiq_ss column) grouping by mental health status (FinalDiagnosis column) to see if disease changes the correlation. (llama + MedGemma)
+   - Overlay global cortical thickness on top of the aging curve. (llama + MedGemma)
+   - Clustering samples into k=3 clusters given their regional Cortical Thickness (CT). Then overlay average cortical thickness in global CT on top of the aging curve. (llama + llama)
 
 ## Optional Environment Variables
 

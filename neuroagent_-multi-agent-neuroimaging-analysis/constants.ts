@@ -46,10 +46,13 @@ export const PROMPTS = {
     Return strictly a JSON object: { "category": "RESEARCH" } or { "category": "GENERAL" }
   `,
 
-  GENERAL_PLANNER: (query: string, toolDescriptions: string, feedback: string) => `
+  GENERAL_PLANNER: (query: string, toolDescriptions: string, feedback: string, history: string) => `
     You are a General Task Planner.
     User Query: "${query}"
     
+    Conversation History (Context):
+    ${history || "No previous history."}
+
     Available Tools:
     ${toolDescriptions}
     
@@ -76,20 +79,25 @@ export const PROMPTS = {
     }
   `,
 
-  NEURO_PLANNER: (query: string, dataContext: string, allToolDescs: string, feedback: string) => `
+  NEURO_PLANNER: (query: string, dataContext: string, allToolDescs: string, feedback: string, history: string) => `
     You are an expert Neuroimaging Research Planner. Your goal is to design a scientifically rigorous analysis workflow.
 
     User Query: "${query}"
     Dataset Context (Columns): [${dataContext}]
 
+    Conversation History (Context for follow-up questions):
+    ${history || "No previous history. Treat this as a new analysis."}
+
     Available Tools:
     ${allToolDescs}
 
     Planning Strategy:
-    1. Analyze the user's scientific intent.
+    1. Analyze the user's scientific intent. 
+       - If the user refers to "previous results", "that data", or "the filtered set", refer to the Conversation History to understand what was just done.
     2. **CRITICAL**: Inspect the "Dataset Context" for an 'Age' related column (e.g., 'Age', 'Age_Years', 'Visit_Age').
-       - If an 'Age' column exists, you MUST plan to use the "get_aging_curves" tool (or similar if available) to contextulize findings, especially for biomarkers.
-       - Pick a relevant biomarker/phenotype based on the tool description and the dataset to compare against the aging curve.
+       - If an 'Age' column exists, you SHOULD plan to use the "GET_AGING_CURVE" tool (or similar if available) to contextulize findings, especially for biomarkers.
+       - Pick a relevant biomarker/phenotype from the dataset (e.g. 'Tau', 'Amyloid', 'Volume', 'Thickness') to compare against the aging curve.
+       - Example Instruction: "Fetch aging curves for 'Amyloid_lS_orbital_med' and compare with subject data using Age column."
     3. Design a multi-step flow.
     4. DO NOT generate specific parameters (e.g., do not write JSON args). Instead, write a clear INSTRUCTION for the Executor Agent. The Executor will map columns and handle specifics.
     
@@ -135,26 +143,20 @@ export const PROMPTS = {
     }
   `,
 
-  EXECUTOR_INTERPRET: (instruction: string, toolName: string, toolOutput: string) => `
-    You are an Executor Agent. You have just executed the tool "${toolName}".
-    
-    Original Instruction: "${instruction}"
-    
-    Tool Output Data:
-    ${toolOutput}
-    
-    Task: Interpret the data and provide a concise summary of the key findings relevant to the instruction.
-    - If "GROUP_COMPARISON": Identify significant differences between groups (p < 0.05). Mention direction (higher/lower) and effect size if available.
-    - If "CORRELATION_ANALYSIS": specificy the r-value and whether it is significant.
-    - Keep it under 2-3 sentences. Do NOT return JSON. Return natural language.
-  `,
-
-  EXECUTOR_AGENT: (instruction: string, columns: string, toolDefinitions: string, clarification: string, previousContext: string, delegator: string, serverFilename: string = '') => `
+  EXECUTOR_AGENT: (instruction: string, columns: string, toolDefinitions: string, clarification: string, previousContext: string, delegator: string, serverFilename: string = '', retryError: string = '') => `
     You are an Executor Agent. Your job is to translate a Planner's instruction into exact Tool Calls.
     
     Delegated by: "${delegator}"
     Instruction: "${instruction}"
     ${clarification ? `User Clarification/Additional Context: "${clarification}"` : ""}
+    ${retryError ? `
+    ⚠️ **PREVIOUS EXECUTION FAILED**
+    The system attempted to run this step but encountered an error:
+    "${retryError}"
+    
+    ACTION REQUIRED: Analyze why it failed. Did you use a wrong column name? Wrong parameter type?
+    Correct your tool call in this attempt.
+    ` : ""}
     ${previousContext ? `Previous Step Results (Use these values if needed):\n${previousContext}` : ""}
     Dataset Columns Available: [${columns}]
     ${serverFilename ? `Server Filename: "${serverFilename}"` : ""}
@@ -178,7 +180,9 @@ export const PROMPTS = {
 
        **QUOTA LIMIT**: You are restricted to a maximum of **5 tool calls** per step.
        - If the instruction implies processing many columns individually (e.g. "Average of Col1, Col2, ... Col10"), doing this one by one would exceed the quota.
-       - **USE 'AVERAGE_MULTIPLE_COLUMNS'** to handle multiple columns in a single call if aggregation is needed and the quota would otherwise be exceeded.
+       - **USE 'AVERAGE_MULTIPLE_COLUMNS'** with a 'condition' (e.g. "Amyloid") to average all columns sharing that name pattern in a single call.
+       - **BULK COLUMN SELECTION**: For tools like **SPECTRAL_CLUSTERING** or **DATA_INSPECT**, prefer using the **pattern parameter** (e.g. \`feature_pattern: "Amyloid"\`) to select all matching columns automatically. This avoids errors in listing them manually.
+       - **CORRELATION_ANALYSIS**: You can pass a SINGLE 'x_column' and an OPTIONAL 'group_column' (e.g. "DX") to see correlations for each group separately in one chart.
 
     4. Map the instruction to the specific JSON parameters required by the tool schema.
        - Use GENERAL LOGIC and STRING MATCHING to map instructions to column names.
@@ -208,6 +212,20 @@ export const PROMPTS = {
     }
   `,
 
+  EXECUTOR_INTERPRET: (instruction: string, toolName: string, toolOutput: string) => `
+    You are an Executor Agent. You have just executed the tool "${toolName}".
+    
+    Original Instruction: "${instruction}"
+    
+    Tool Output Data:
+    ${toolOutput}
+    
+    Task: Interpret the data and provide a concise summary of the key findings relevant to the instruction.
+    - If "GROUP_COMPARISON": Identify significant differences between groups (p < 0.05). Mention direction (higher/lower) and effect size if available.
+    - If "CORRELATION_ANALYSIS": specificy the r-value and whether it is significant.
+    - Keep it under 2-3 sentences. Do NOT return JSON. Return natural language.
+  `,
+
   PREPROCESSOR_MAPPING: (column: string, values: string[]) => `
     You are a Data Preprocessor Agent in a neuroimaging study.
     Column Name: "${column}"
@@ -223,7 +241,6 @@ export const PROMPTS = {
     
     Return ONLY a valid JSON object: { "mapping": { "Val1": 0, "Val2": 1, ... }, "rationale": "Short explanation." }
   `,
-
 
   RESEARCHER_INSIGHTS: (results: string, tools: string) => `
     You are a Principal Investigator (Researcher Agent).
@@ -253,24 +270,31 @@ export const PROMPTS = {
 
   PROPOSAL_REPORTER: (userQuery: string, analysisResults: string, researcherNotes: string) => `
     You are a Proposal Reporter Agent.
-    Your task is to synthesize all data analysis results and research insights into a professional, scientific research proposal/report in Markdown format.
+    Your task is to write a data-centric research report based on the executed analysis.
 
-    Study Title: "${userQuery}"
+    User Query/Study Goal: "${userQuery}"
     
-    Data Analysis Results:
+    Data Analysis Findings (Primary Source):
     ${analysisResults}
 
-    External Context:
+    External Knowledge (Secondary Source):
     ${researcherNotes}
 
-    Structure the output as a Scientific Proposal:
-    1. **Title**: Summary of the study title.
-    2. **Executive Summary**: Brief overview of the goal and findings.
-    3. **Methodology**: Describe the analysis performed (e.g., correlation, group comparison) and variables used.
-    4. **Results**: Summarize the quantitative findings (statistics, p-values, correlations). Use bold text for key numbers.
-    5. **Discussion & Literature Context**: Find supporting and counterfactual evidence in the external context for data analysis results. 
-    6. **Conclusion**: Final takeaway.
+    Task:
+    Generata a "Research Analysis Report" in Markdown.
+    
+    Structure:
+    1. **Title**: A professional title for this analysis.
+    2. **Objective**: Restate the goal based on the User Query.
+    3. **Key Findings (Data Analysis)**: 
+       - This is the MOST IMPORTANT section.
+       - Systematically summarize the statistics, correlations, p-values, and group differences found in the "Data Analysis Findings".
+       - Use bullet points and bold text for specific numbers (e.g., **p=0.003**, **r=0.75**).
+       - Describe the direction of effects (e.g., "Group A was higher than Group B").
+    4. **Methodology**: Briefly list the Data Analysis tools and steps used (e.g., "Performed T-tests", "Calculated Pearson correlation").
+    5. **Research Context**: (Optional) If "External Knowledge" is provided, briefly mention how it aligns with the data findings. Do not write a literature review; just connect it to the results.
+    6. **Conclusion**: A one-sentence summary of the outcome.
 
-    Output strictly in clean MARKDOWN.
+    Output strictly in clean MARKDOWN. Do not use conversational filler.
   `
 };

@@ -1,11 +1,11 @@
 import React, { useRef, useCallback, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ToolVisualization, VisualizationType, GroupComparisonResult } from '../../types';
-import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart } from './Charts';
+import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart, SVMBoundaryChart } from './Charts';
 import { HtmlVisualizationRenderer } from './HtmlVisualizationRenderer';
 import CodeEditorModal from './CodeEditorModal';
 import { chartDataToHtml } from '../../utils/chartToHtml';
-import { FileText, Database, BookOpen, Link, FileCheck2, Code2, CheckCircle2, TrendingUp, Grid2X2, Layers, Download, Code } from 'lucide-react';
+import { FileText, Database, BookOpen, Link, FileCheck2, Code2, CheckCircle2, TrendingUp, Grid2X2, Layers, Download, Code, Binary } from 'lucide-react';
 
 interface VisualizerAreaProps {
   visualizations: ToolVisualization[];
@@ -152,7 +152,6 @@ const VisualizationCard: React.FC<{
   
   return (
     <div 
-        onClick={onClick}
         className={`bg-slate-800 rounded-xl border overflow-hidden shadow-xl flex-shrink-0 transition-all 
         ${isSelected ? 'border-cyan-400 ring-2 ring-cyan-400/50 shadow-cyan-900/30' : isActiveDataset ? 'border-indigo-500/60 ring-1 ring-indigo-500/30' : 'border-slate-700'}
         ${isClickable ? 'cursor-pointer hover:ring-2 hover:ring-cyan-500/40 hover:border-cyan-500/60' : ''}`}
@@ -165,6 +164,7 @@ const VisualizationCard: React.FC<{
           {visualization.type === VisualizationType.AGING_CURVE && <TrendingUp className="w-4 h-4 text-teal-400" />}
           {visualization.type === VisualizationType.CLUSTERING_DASHBOARD && <Grid2X2 className="w-4 h-4 text-rose-400" />}
           {visualization.type === VisualizationType.STRATIFICATION_RESULT && <Layers className="w-4 h-4 text-emerald-400" />}
+          {visualization.type === VisualizationType.SVM_BOUNDARY && <Binary className="w-4 h-4 text-blue-500" />}
           {visualization.type === VisualizationType.LITERATURE_LIST && <BookOpen className="w-4 h-4 text-amber-400" />}
           {visualization.type === VisualizationType.DATA_TABLE && <FileText className="w-4 h-4 text-emerald-400" />}
           {visualization.type === VisualizationType.RESEARCH_REPORT && <FileCheck2 className="w-4 h-4 text-indigo-400" />}
@@ -240,6 +240,12 @@ const VisualizationCard: React.FC<{
         {visualization.type === VisualizationType.STRATIFICATION_RESULT && (
             <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
                 <StratificationChart data={visualization.data} config={visualization.config} />
+            </div>
+        )}
+
+        {visualization.type === VisualizationType.SVM_BOUNDARY && (
+            <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
+                <SVMBoundaryChart data={visualization.data} config={visualization.config} />
             </div>
         )}
 

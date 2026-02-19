@@ -1,5 +1,5 @@
 {
-  "name": "NeuroAgent: Multi-Agent Neuroimaging Analysis",
+  "name": "CyberNeuro: Multi-Agent Neuroimaging Analysis",
   "description": "A multi-agent system for neuroimaging study planning, execution, and research analysis using local Ollama models.",
   "requestFramePermissions": []
 }

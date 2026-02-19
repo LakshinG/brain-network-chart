@@ -1,5 +1,5 @@
 
-import { DatasetRow, Dataset, GroupComparisonResult, ClusteringResult, CorrelationResult, StratificationResult } from '../types';
+import { DatasetRow, Dataset, GroupComparisonResult, ClusteringResult, CorrelationResult, StratificationResult, SVMResult, CorrelationSeries } from '../types';
 
 export const parseCSV = (csvText: string): { columns: string[], data: DatasetRow[] } => {
   const lines = csvText.trim().split('\n');
@@ -35,6 +35,10 @@ export const mergeDatasets = (datasets: Dataset[]): Dataset | null => {
   if (datasets.length === 0) return null;
   if (datasets.length === 1) return { ...datasets[0], name: datasets[0].name };
 
+  // 1. Identify all unique columns across all datasets
+  const allColumnsSet = new Set<string>();
+  datasets.forEach(ds => ds.columns.forEach(c => allColumnsSet.add(c)));
+
   // Try to find a common ID column to join on
   const potentialIds = ['ID', 'id', 'Subject', 'subject', 'RID', 'rid', 'Participant_ID', 'participant_id', 'Case', 'case'];
   let idCol: string | null = null;
@@ -46,13 +50,14 @@ export const mergeDatasets = (datasets: Dataset[]): Dataset | null => {
     }
   }
 
+  let mergedData: DatasetRow[] = [];
+  let finalColumns: string[] = [];
+
   if (idCol) {
     // Perform Full Outer Join on idCol
     const mergedDataMap = new Map<string | number, DatasetRow>();
-    const allColumns = new Set<string>();
 
     datasets.forEach(ds => {
-      ds.columns.forEach(c => allColumns.add(c));
       ds.data.forEach(row => {
         const key = row[idCol!] as string | number;
         if (key !== undefined) {
@@ -63,101 +68,115 @@ export const mergeDatasets = (datasets: Dataset[]): Dataset | null => {
       });
     });
 
-    const columns = Array.from(allColumns);
+    mergedData = Array.from(mergedDataMap.values());
+    finalColumns = Array.from(allColumnsSet);
+    
     // Ensure ID col is first
-    const idIdx = columns.indexOf(idCol);
+    const idIdx = finalColumns.indexOf(idCol);
     if (idIdx > -1) {
-      columns.splice(idIdx, 1);
-      columns.unshift(idCol);
+      finalColumns.splice(idIdx, 1);
+      finalColumns.unshift(idCol);
     }
-
-    return {
-      id: 'merged-' + Date.now(),
-      name: `Merged (${datasets.length} files)`,
-      columns,
-      data: Array.from(mergedDataMap.values())
-    };
   } else {
-    // No common ID -> Concatenate Rows (Union of columns)
-    const allColumns = new Set<string>();
-    datasets.forEach(ds => ds.columns.forEach(c => allColumns.add(c)));
-    const columns = Array.from(allColumns);
+    // Concatenate Rows (Union of columns)
+    finalColumns = Array.from(allColumnsSet);
     
-    const data: DatasetRow[] = [];
     datasets.forEach(ds => {
-      data.push(...ds.data);
+      // Create shallow copy of rows to avoid mutating original datasets during normalization
+      mergedData.push(...ds.data.map(r => ({ ...r })));
     });
-
-    return {
-      id: 'merged-concat-' + Date.now(),
-      name: `Concat (${datasets.length} files)`,
-      columns,
-      data
-    };
   }
-};
 
-// Simple Pearson correlation
-export const calculateCorrelation = (data: DatasetRow[], xCol: string, yCol: string): CorrelationResult => {
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
-  let n = 0;
-
-  const dataPoints: { x: number, y: number, group?: string }[] = [];
-
-  // Helper to determine if we need to remap categorical/string values to numbers
-  const createMapper = (col: string) => {
-    const colValues = data.map(d => d[col]).filter(v => v !== undefined && v !== null);
-    const isAllNumeric = colValues.every(v => typeof v === 'number');
-
-    if (isAllNumeric) {
-      return (val: any) => val as number;
-    }
-
-    // Identify unique values and assign an index
-    const uniqueVals = Array.from(new Set(colValues)).sort();
-    const valMap = new Map(uniqueVals.map((v, i) => [v, i]));
-    return (val: any) => valMap.get(val);
-  };
-
-  const xMapper = createMapper(xCol);
-  const yMapper = createMapper(yCol);
-
-  data.forEach(row => {
-    const rawX = row[xCol];
-    const rawY = row[yCol];
-    
-    if (rawX === undefined || rawX === null || rawY === undefined || rawY === null) return;
-
-    const x = xMapper(rawX);
-    const y = yMapper(rawY);
-
-    if (typeof x === 'number' && typeof y === 'number') {
-      sumX += x;
-      sumY += y;
-      sumXY += x * y;
-      sumX2 += x * x;
-      sumY2 += y * y;
-      n++;
-      
-      let label = undefined;
-      // If we remapped, store the original label for visualization context
-      if (typeof rawX === 'string' || typeof rawY === 'string') {
-        label = `(${rawX}, ${rawY})`;
-      }
-      dataPoints.push({ x, y, group: label });
-    }
+  // Normalize: Ensure all rows have all columns defined (fill missing with empty string)
+  const normalizedData = mergedData.map(row => {
+      const newRow: DatasetRow = { ...row };
+      finalColumns.forEach(col => {
+          if (newRow[col] === undefined || newRow[col] === null) {
+              newRow[col] = ""; 
+          }
+      });
+      return newRow;
   });
 
-  if (n === 0) return { xCol, yCol, r: 0, p: 0, dataPoints: [] };
+  return {
+    id: 'merged-' + Date.now(),
+    name: `Merged (${datasets.length} files)`,
+    columns: finalColumns,
+    data: normalizedData
+  };
+};
 
-  const numerator = n * sumXY - sumX * sumY;
-  const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
-  
-  const r = denominator === 0 ? 0 : numerator / denominator;
-  // Mock p-value calculation based on r strength (simplified)
-  const p = Math.max(0.001, Math.exp(-Math.abs(r) * 5)); 
+// Pearson correlation supporting grouping
+export const calculateCorrelation = (data: DatasetRow[], xCol: string, yCol: string, groupCol?: string): CorrelationResult => {
+  const seriesList: CorrelationSeries[] = [];
 
-  return { xCol, yCol, r, p, dataPoints };
+  const calcSeries = (subset: DatasetRow[], name: string): CorrelationSeries | null => {
+      let sumX: number = 0;
+      let sumY: number = 0;
+      let sumXY: number = 0;
+      let sumX2: number = 0;
+      let sumY2: number = 0;
+      let n = 0;
+      const dataPoints: { x: number, y: number, id?: string }[] = [];
+
+      subset.forEach(row => {
+        const rawX = row[xCol];
+        const rawY = row[yCol];
+        
+        if (rawX === undefined || rawX === null || rawY === undefined || rawY === null) return;
+
+        const x = typeof rawX === 'number' ? rawX : parseFloat(String(rawX));
+        const y = typeof rawY === 'number' ? rawY : parseFloat(String(rawY));
+
+        if (!isNaN(x) && !isNaN(y)) {
+          if (x === 0 || y === 0) return; // Exclude zeros
+
+          sumX += x;
+          sumY += y;
+          sumXY += x * y;
+          sumX2 += x * x;
+          sumY2 += y * y;
+          n++;
+          
+          let id = undefined;
+          if (row['ID'] || row['id']) id = String(row['ID'] || row['id']);
+          
+          dataPoints.push({ x, y, id });
+        }
+      });
+
+      if (n === 0) return null;
+
+      const numerator = n * sumXY - sumX * sumY;
+      const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+      
+      const r = denominator === 0 ? 0 : numerator / denominator;
+      const p = Math.max(0.001, Math.exp(-Math.abs(r) * 5)); // Simplified p-value
+
+      return { name, r, p, n, dataPoints };
+  };
+
+  if (groupCol) {
+      const groups: Record<string, DatasetRow[]> = {};
+      data.forEach(row => {
+         const g = row[groupCol];
+         if (g !== undefined && g !== null) {
+             const key = String(g);
+             if (!groups[key]) groups[key] = [];
+             groups[key].push(row);
+         }
+      });
+      
+      Object.keys(groups).sort().forEach(gName => {
+          const s = calcSeries(groups[gName], gName);
+          if (s) seriesList.push(s);
+      });
+  } else {
+      const s = calcSeries(data, 'All Data');
+      if (s) seriesList.push(s);
+  }
+
+  return { xCol, yCol, groupCol, series: seriesList };
 };
 
 // --- Statistics Helpers for Group Comparison ---
@@ -436,7 +455,7 @@ const calculateKMeans = (points: {x: number, y: number}[], k: number): number[] 
 export const performSpectralClustering = (
     data: DatasetRow[], 
     featureCols: string[], 
-    targetCol: string, 
+    targetCol: string | undefined, 
     nCluster: number
 ): ClusteringResult => {
     // 1. Extract feature matrix
@@ -446,8 +465,14 @@ export const performSpectralClustering = (
     data.forEach((row, i) => {
         // Ensure all features are present and numeric
         const features = featureCols.map(c => parseFloat(String(row[c])));
-        const target = parseFloat(String(row[targetCol]));
-        if (features.every(val => !isNaN(val)) && !isNaN(target)) {
+        let validTarget = true;
+        
+        if (targetCol) {
+            const target = parseFloat(String(row[targetCol]));
+            if (isNaN(target)) validTarget = false;
+        }
+        
+        if (features.every(val => !isNaN(val)) && validTarget) {
             matrix.push(features);
             validIndices.push(i);
         }
@@ -464,30 +489,44 @@ export const performSpectralClustering = (
 
     // 4. Construct Result
     const pcPoints = validIndices.map((origIdx, i) => {
-        return {
+        const p: any = {
             x: pc1[i],
             y: pc2[i],
             cluster: clusterIds[i],
-            target: parseFloat(String(data[origIdx][targetCol])),
             id: String(data[origIdx]['ID'] || data[origIdx]['Subject'] || i)
         };
+        if (targetCol) {
+            p.target = parseFloat(String(data[origIdx][targetCol]));
+        }
+        return p;
     });
 
-    // 5. Correlation: Cluster ID vs Target
-    // Prepare fake dataset for correlation calculation
-    const correlationData: DatasetRow[] = pcPoints.map(p => ({
-        Cluster: p.cluster,
-        Target: p.target
-    }));
+    // 5. Correlation: Cluster ID vs Target (Optional)
+    let correlation: CorrelationResult | undefined;
     
-    const correlation = calculateCorrelation(correlationData, 'Cluster', 'Target');
+    if (targetCol) {
+        // Prepare fake dataset for correlation calculation
+        const correlationData: DatasetRow[] = pcPoints.map((p: any) => ({
+            Cluster: p.cluster,
+            Target: p.target
+        }));
+        
+        correlation = calculateCorrelation(correlationData, 'Cluster', 'Target');
+    }
+
+    // 6. Assignments for merging back
+    const assignments = validIndices.map((origIdx, i) => ({
+        originalIndex: origIdx,
+        cluster: clusterIds[i]
+    }));
 
     return {
         featureCols,
         targetCol,
         nCluster,
         pcPoints,
-        clusterCorrelation: correlation
+        clusterCorrelation: correlation,
+        assignments
     };
 };
 
@@ -563,5 +602,119 @@ export const stratifyDataset = (data: DatasetRow[], targetCol: string, groupCol:
           groupCol,
           newColumns: newColsStats.filter(c => c.count > 0)
       }
+  };
+};
+
+// --- SVM Classification Helpers (Simplified SGD) ---
+
+export const calculateLinearSVM = (data: DatasetRow[], xCol: string, yCol: string, targetCol: string): SVMResult => {
+  // 1. Prepare data
+  let validData = data.filter(row => {
+      const x = parseFloat(String(row[xCol]));
+      const y = parseFloat(String(row[yCol]));
+      const t = row[targetCol];
+      return !isNaN(x) && !isNaN(y) && t !== undefined && t !== null && t !== '';
+  });
+
+  if (validData.length < 4) throw new Error("Not enough data for SVM Classification.");
+
+  // 2. Map Target to Binary (-1, 1)
+  const targetValues = Array.from(new Set(validData.map(r => String(r[targetCol]))));
+  if (targetValues.length < 2) throw new Error("Target column must have at least 2 distinct classes.");
+  
+  // Use first two unique values, ignore others or treat as binary split
+  const class0 = targetValues[0];
+  const class1 = targetValues[1];
+  const classes = [class0, class1];
+
+  // 3. Normalize Features (StandardScaler)
+  const xVals = validData.map(r => parseFloat(String(r[xCol])));
+  const yVals = validData.map(r => parseFloat(String(r[yCol])));
+  
+  const meanX = getMean(xVals), stdX = Math.sqrt(getVariance(xVals)) || 1;
+  const meanY = getMean(yVals), stdY = Math.sqrt(getVariance(yVals)) || 1;
+
+  const trainingData = validData.map(r => ({
+      x: (parseFloat(String(r[xCol])) - meanX) / stdX,
+      y: (parseFloat(String(r[yCol])) - meanY) / stdY,
+      label: String(r[targetCol]) === class1 ? 1 : -1,
+      original: r
+  }));
+
+  // 4. Train Linear SVM using SGD (Hinge Loss)
+  // Minimize: 0.5 * ||w||^2 + C * sum(max(0, 1 - y_i(w*x_i + b)))
+  // Gradient for w: w - C*y_i*x_i (if error) else w
+  let wx = 0.1, wy = 0.1, b = 0.0; // Weights
+  const learningRate = 0.01;
+  const C = 1.0; // Regularization parameter
+  const epochs = 500;
+
+  for (let epoch = 0; epoch < epochs; epoch++) {
+      // Shuffle roughly
+      trainingData.sort(() => Math.random() - 0.5);
+      
+      let eta = learningRate / (1 + epoch * learningRate); // Decaying learning rate
+
+      trainingData.forEach(point => {
+          const prediction = wx * point.x + wy * point.y + b;
+          if (point.label * prediction < 1) {
+              // Misclassified or within margin
+              wx = wx - eta * (wx - C * point.label * point.x);
+              wy = wy - eta * (wy - C * point.label * point.y);
+              b = b - eta * (-C * point.label);
+          } else {
+              // Correctly classified outside margin
+              wx = wx - eta * (wx);
+              wy = wy - eta * (wy);
+          }
+      });
+  }
+
+  // 5. Calculate Accuracy
+  let correct = 0;
+  const plotPoints = trainingData.map(p => {
+      const val = wx * p.x + wy * p.y + b;
+      const predLabel = val >= 0 ? 1 : -1;
+      if (predLabel === p.label) correct++;
+      
+      // Denormalize coordinates for plotting
+      return {
+          x: p.x * stdX + meanX,
+          y: p.y * stdY + meanY,
+          classLabel: p.label === 1 ? class1 : class0,
+          predicted: predLabel === 1 ? class1 : class0
+      };
+  });
+  
+  const accuracy = correct / trainingData.length;
+
+  // 6. Calculate De-normalized Hyperplane
+  // Normalized: wx * ((X - mx)/sx) + wy * ((Y - my)/sy) + b = 0
+  // Real scale: WX * X + WY * Y + B = 0
+  // WX = wx / sx
+  // WY = wy / sy
+  // B = b - (wx * mx / sx) - (wy * my / sy)
+  
+  const WX = wx / stdX;
+  const WY = wy / stdY;
+  const B = b - (wx * meanX / stdX) - (wy * meanY / stdY);
+
+  // Find two points to draw the line within the data range
+  const minX = Math.min(...plotPoints.map(p => p.x));
+  const maxX = Math.max(...plotPoints.map(p => p.x));
+  
+  // y = (-B - WX * x) / WY
+  const y1 = (-B - WX * minX) / WY;
+  const y2 = (-B - WX * maxX) / WY;
+
+  return {
+      xCol,
+      yCol,
+      targetCol,
+      accuracy,
+      weights: { wx: WX, wy: WY, b: B },
+      classes,
+      dataPoints: plotPoints,
+      decisionBoundary: { x1: minX, y1, x2: maxX, y2 }
   };
 };

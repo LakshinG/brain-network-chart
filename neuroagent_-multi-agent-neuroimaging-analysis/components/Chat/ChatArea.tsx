@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ChatMessage, AgentType, Dataset } from '../../types';
 import MessageBubble from './MessageBubble';
-import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2 } from 'lucide-react';
+import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw } from 'lucide-react';
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -18,12 +18,14 @@ interface ChatAreaProps {
   onDatasetToggle: (id: string) => void;
   onDatasetRemove: (id: string, e: React.MouseEvent) => void;
   onMultiFileUpload: (files: FileList | null) => void;
+  onMergeDatasets: () => void;
+  onSyncDataset: () => void;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = ({ 
   messages, onSendMessage, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep,
   placeholder,
-  datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload
+  datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload, onMergeDatasets, onSyncDataset
 }) => {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -132,13 +134,31 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                       <FileSpreadsheet className="w-3 h-3" /> Data Context
                   </h3>
                    <div className="flex gap-2">
+                     {activeDatasetIds.length > 1 && (
+                        <button 
+                            onClick={onMergeDatasets}
+                            className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 bg-indigo-900/20 px-2 py-1 rounded border border-indigo-900/50"
+                            title="Merge selected datasets into a new file"
+                        >
+                            <Merge className="w-3 h-3" /> Merge
+                        </button>
+                     )}
+                     {hasData && (
+                        <button 
+                            onClick={onSyncDataset}
+                            className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded"
+                            title="Force sync active context to server"
+                        >
+                            <RefreshCw className="w-3 h-3" /> Sync
+                        </button>
+                     )}
                      <button 
                         onClick={onLoadDemo}
-                        className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1"
+                        className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded"
                       >
                         <PlayCircle className="w-3 h-3" /> Demo
                       </button>
-                      <label className="cursor-pointer text-xs flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded transition-colors">
+                      <label className="cursor-pointer text-xs flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded transition-colors shadow-sm">
                           <Plus className="w-3 h-3" /> Add CSV
                           <input 
                             type="file" 

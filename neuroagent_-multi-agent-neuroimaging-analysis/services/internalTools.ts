@@ -1,26 +1,28 @@
 
 import { McpTool, DatasetRow } from '../types';
-import { calculateCorrelation, getGroupStats, performSpectralClustering, stratifyDataset } from '../utils/stats';
+import { calculateCorrelation, getGroupStats, performSpectralClustering, stratifyDataset, calculateLinearSVM } from '../utils/stats';
 
 export const INTERNAL_TOOLS: McpTool[] = [
   {
     name: 'DATA_INSPECT',
-    description: 'Inspect the distribution and summary of columns in the dataset. Useful for initial data exploration.',
+    description: 'Return the actual data rows to the user interface. Use this when the user explicitly asks to "see" or "show" the data, or when you need to check the format of values (e.g. strings vs numbers) within a column.',
     inputSchema: {
       type: 'object',
       properties: {
-        columns: { type: 'array', items: { type: 'string' }, description: 'Specific columns to inspect' }
+        columns: { type: 'array', items: { type: 'string' }, description: 'Specific columns to retrieve (optional)' },
+        column_pattern: { type: 'string', description: 'Substring to match multiple columns to inspect (e.g. "Amyloid"). matches all columns containing this string.' }
       }
     }
   },
   {
     name: 'CORRELATION_ANALYSIS',
-    description: 'Calculate Pearson correlation between two numeric columns. Use this to find linear relationships between continuous variables.',
+    description: 'Calculate Pearson correlation between two numeric columns. Optionally group by a categorical column to see correlations per group.',
     inputSchema: {
       type: 'object',
       properties: {
-        x_column: { type: 'string', description: 'The first numeric column (e.g., Age, Amyloid values)' },
-        y_column: { type: 'string', description: 'The second numeric column' }
+        x_column: { type: 'string', description: 'The first numeric column (X-axis)' },
+        y_column: { type: 'string', description: 'The second numeric column (Y-axis)' },
+        group_column: { type: 'string', description: 'Optional categorical column to group by (e.g. DX, Sex)' }
       },
       required: ['x_column', 'y_column']
     }
@@ -62,26 +64,26 @@ export const INTERNAL_TOOLS: McpTool[] = [
   },
   {
     name: 'AVERAGE_MULTIPLE_COLUMNS',
-    description: 'Calculate average values across multiple columns for each row, insert the result as a new column, and return the new column name. Use this to aggregate multiple metrics (e.g. regional brain volumes) into a single composite score.',
+    description: 'Calculate average values across multiple columns for each row. Matches columns by name using a "condition" string (substring match). Use this to aggregate multiple metrics (e.g. "Amyloid" matches "Amyloid_Orbital", "Amyloid_Frontal").',
     inputSchema: {
       type: 'object',
       properties: {
-        columns: { type: 'array', items: { type: 'string' }, description: 'List of column names to average' }
+        condition: { type: 'string', description: 'Substring to search for in column names (e.g. "Amyloid")' }
       },
-      required: ['columns']
+      required: ['condition']
     }
   },
   {
     name: 'SPECTRAL_CLUSTERING',
-    description: 'Perform spectral clustering (PCA + K-Means) on a set of feature columns and analyze correlation of clusters with a target column. Plots PC1 vs PC2 colored by Cluster and Target, plus a correlation plot.',
+    description: 'Perform spectral clustering (PCA + K-Means) on a set of feature columns defined by a pattern, and optionally analyze correlation of clusters with a target column. Plots PC1 vs PC2 colored by Cluster.',
     inputSchema: {
       type: 'object',
       properties: {
-        feature_columns: { type: 'array', items: { type: 'string' }, description: 'List of numeric columns to use for clustering (e.g., regional thickness/volume)' },
-        target_column: { type: 'string', description: 'The numeric column to correlate with cluster IDs (e.g., IQ, MMSE)' },
+        feature_pattern: { type: 'string', description: 'Substring that is included in multiple feature columns (e.g. "CT_") to include automatically.' },
+        target_column: { type: 'string', description: 'Optional numeric column to correlate with cluster IDs (e.g., IQ, MMSE)' },
         ncluster: { type: 'number', description: 'Number of clusters (default 5)' }
       },
-      required: ['feature_columns', 'target_column']
+      required: ['feature_pattern']
     }
   },
   {
@@ -95,6 +97,19 @@ export const INTERNAL_TOOLS: McpTool[] = [
         max_group_num: { type: 'number', description: 'Max number of groups to create (default 10)' }
       },
       required: ['target_column', 'group_column']
+    }
+  },
+  {
+    name: 'SVM_CLASSIFICATION',
+    description: 'Fit a Linear SVM classifier to predict a target categorical column based on two numeric feature columns. Preprocesses target to binary if needed. Outputs accuracy and a plot with the decision boundary.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x_column: { type: 'string', description: 'The first numeric feature column (X-axis)' },
+        y_column: { type: 'string', description: 'The second numeric feature column (Y-axis)' },
+        target_column: { type: 'string', description: 'The target categorical column (Classes)' }
+      },
+      required: ['x_column', 'y_column', 'target_column']
     }
   }
 ];
@@ -124,19 +139,56 @@ const fuzzyMatchColumn = (candidate: string, data: DatasetRow[]): string => {
   return candidate; // fallback to original
 };
 
+const validateColumns = (data: DatasetRow[], cols: string[]) => {
+    if (data.length === 0) return;
+    const available = new Set(Object.keys(data[0]));
+    const missing = cols.filter(c => !available.has(c));
+    if (missing.length > 0) {
+        throw new Error(`Input validation failed: Column(s) '${missing.join(', ')}' not found in dataset. Available columns: ${Array.from(available).join(', ')}`);
+    }
+};
+
+const resolveColumnSelection = (data: DatasetRow[], explicitCols?: string[], pattern?: string): string[] => {
+    const selected = new Set<string>(explicitCols || []);
+    if (pattern && data.length > 0) {
+        const allCols = Object.keys(data[0]);
+        const lowerPattern = pattern.toLowerCase();
+        allCols.filter(c => c.toLowerCase().includes(lowerPattern)).forEach(c => selected.add(c));
+    }
+    return Array.from(selected);
+};
+
 export const executeInternalTool = (toolName: string, args: any, data: DatasetRow[]) => {
   if (toolName === 'DATA_INSPECT') {
+    const cols = resolveColumnSelection(data, args.columns, args.column_pattern);
+    
+    if (cols.length > 0) {
+        validateColumns(data, cols);
+        // Filter data to only include requested columns
+        const filteredData = data.map(row => {
+            const newRow: any = {};
+            cols.forEach((col: string) => newRow[col] = row[col]);
+            return newRow;
+        });
+        return { data: filteredData };
+    }
     return { data };
   }
 
   if (toolName === 'CORRELATION_ANALYSIS') {
     let x = args.x_column || args.target_column || args.column1 || args.x;
     let y = args.y_column || args.comparison_column || args.column2 || args.y;
+    const group = args.group_column || args.group;
     
     if (!x || !y) throw new Error(`Missing columns for correlation. Received parameters: ${JSON.stringify(args)}`);
     x = fuzzyMatchColumn(x, data);
     y = fuzzyMatchColumn(y, data);
-    return calculateCorrelation(data, x, y);
+    
+    const colsToCheck = [x, y];
+    if (group) colsToCheck.push(group);
+    validateColumns(data, colsToCheck);
+    
+    return calculateCorrelation(data, x, y, group);
   }
 
   if (toolName === 'GROUP_COMPARISON') {
@@ -146,6 +198,8 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
     if (!g || !t) throw new Error(`Missing columns for group comparison. Received parameters: ${JSON.stringify(args)}`);
     g = fuzzyMatchColumn(g, data);
     t = fuzzyMatchColumn(t, data);
+    validateColumns(data, [g, t]);
+    
     return getGroupStats(data, g, t);
   }
 
@@ -160,6 +214,8 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
     if (!mapping) throw new Error("Missing numeric mapping for transformation");
     col = fuzzyMatchColumn(col, data);
     
+    validateColumns(data, [col]);
+
     const newColName = `${col}_numeric`;
     const transformedData = data.map(row => ({
       ...row,
@@ -175,27 +231,28 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
   }
 
   if (toolName === 'AVERAGE_MULTIPLE_COLUMNS') {
-    let cols = args.columns;
-    if (!cols || !Array.isArray(cols) || cols.length === 0) {
-      throw new Error("Missing or invalid columns list for averaging.");
+    const condition = args.condition;
+    if (!condition || typeof condition !== 'string') {
+      throw new Error("Missing or invalid 'condition' parameter for averaging.");
     }
-    cols = cols.map((c: string) => fuzzyMatchColumn(c, data));
     
-    // Check for existence
-    const firstRow = data[0] || {};
-    const missing = cols.filter((c: string) => firstRow[c] === undefined);
-    if (missing.length > 0) {
-      throw new Error(`Columns not found in dataset: ${missing.join(', ')}`);
+    if (data.length === 0) return { data };
+    
+    const allCols = Object.keys(data[0]);
+    const matchedCols = allCols.filter(c => c.toLowerCase().includes(condition.toLowerCase()));
+
+    if (matchedCols.length === 0) {
+         throw new Error(`No columns found matching condition '${condition}'. Available: ${allCols.slice(0, 5).join(', ')}...`);
     }
 
     // Generate new column name
-    const suffix = cols.join('_');
-    const newColName = `avg_${cols.length}_cols_${Date.now().toString().slice(-4)}`;
+    const cleanCond = condition.replace(/[^a-zA-Z0-9]/g, '');
+    const newColName = `avg_${cleanCond}`;
 
     const transformedData = data.map(row => {
       let sum = 0;
       let count = 0;
-      cols.forEach(c => {
+      matchedCols.forEach(c => {
         const val = parseFloat(String(row[c]));
         if (!isNaN(val)) {
           sum += val;
@@ -212,20 +269,38 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
     return {
       success: true,
       transformedData,
-      newColumn: newColName
+      newColumn: newColName,
+      matchedColumns: matchedCols
     };
   }
 
   if (toolName === 'SPECTRAL_CLUSTERING') {
-    let features = args.feature_columns || args.features;
-    let target = args.target_column || args.target;
+    const features = resolveColumnSelection(data, [], args.feature_pattern);
+    const target = args.target_column || args.target; // Optional
     const k = args.ncluster || 5;
 
-    if (!features || !Array.isArray(features) || features.length === 0) throw new Error("Missing feature columns for clustering.");
-    if (!target) throw new Error("Missing target column for clustering analysis.");
-    features = features.map((f: string) => fuzzyMatchColumn(f, data));
-    target = fuzzyMatchColumn(target, data);
-    return performSpectralClustering(data, features, target, k);
+    if (features.length === 0) throw new Error("No feature columns found matching the pattern. Please provide a valid 'feature_pattern'.");
+    
+    const colsToValidate = [...features];
+    if (target) colsToValidate.push(target);
+    validateColumns(data, colsToValidate);
+
+    const result = performSpectralClustering(data, features, target, k);
+
+    // Inject 'colors' column
+    const transformedData = data.map((row, idx) => ({ ...row, colors: '' })); // Initialize
+    if (result.assignments) {
+        result.assignments.forEach(a => {
+            transformedData[a.originalIndex].colors = String(a.cluster); // Use string for consistency in DatasetRow
+        });
+    }
+
+    return {
+        success: true, 
+        transformedData,
+        newColumn: 'colors',
+        ...result 
+    };
   }
 
   if (toolName === 'STRATIFY_DATASET') {
@@ -236,7 +311,8 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
       if (group) group = fuzzyMatchColumn(group, data);
       
       if (!target || !group) throw new Error("Missing columns for stratification.");
-      
+      validateColumns(data, [target, group]);
+
       const { transformedData, result } = stratifyDataset(data, target, group, max);
       
       // Extract new column names for return info
@@ -248,6 +324,17 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
           result, // StratificationResult
           newColumns: newColNames // For App.tsx to update active cols
       };
+  }
+
+  if (toolName === 'SVM_CLASSIFICATION') {
+      const x = args.x_column;
+      const y = args.y_column;
+      const target = args.target_column;
+      
+      if (!x || !y || !target) throw new Error("Missing columns for SVM Classification.");
+      validateColumns(data, [x, y, target]);
+
+      return calculateLinearSVM(data, x, y, target);
   }
   
   throw new Error(`Tool ${toolName} not found internally.`);
