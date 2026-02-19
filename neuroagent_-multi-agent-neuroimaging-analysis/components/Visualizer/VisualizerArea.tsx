@@ -1,23 +1,20 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
-import { ToolVisualization, VisualizationType } from '../../types';
-import { ScatterPlot, StatsBarChart } from './Charts';
+import { ToolVisualization, VisualizationType, GroupComparisonResult } from '../../types';
+import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart } from './Charts';
 import { HtmlVisualizationRenderer } from './HtmlVisualizationRenderer';
-import { FileText, Database, BookOpen, Link, FileCheck2, Code2 } from 'lucide-react';
-
+import { FileText, Database, BookOpen, Link, FileCheck2, Code2, CheckCircle2, TrendingUp, Grid2X2, Layers } from 'lucide-react';
 
 interface VisualizerAreaProps {
   visualizations: ToolVisualization[];
   datasetName?: string;
-  onVizClick?: (messageId?: string) => void;
+  onVizClick?: (id?: string) => void;
   onHtmlChange?: (messageId: string, newHtml: string) => void;
+  activeDatasetIds?: string[];
 }
 
 const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => void }> = ({ data, onLinkClick }) => {
   const { report, stepIdToMessageId } = data;
-
-  // Pre-process the report to convert [[Step N]] into a unique markdown link scheme
-  // e.g. "See [[Step 1]]" -> "See [Step 1](urn:step:1)"
   const markdownContent = report.replace(/\[\[Step (\d+)\]\]/g, '[Step $1](urn:step:$1)');
 
   return (
@@ -25,7 +22,6 @@ const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => voi
       <div className="prose prose-invert max-w-none text-slate-300 leading-relaxed">
         <ReactMarkdown
           components={{
-            // Custom renderer for links to intercept step clicks
             a: ({ node, href, children, ...props }) => {
               if (href?.startsWith('urn:step:')) {
                 const stepId = parseInt(href.split(':')[2], 10);
@@ -39,7 +35,6 @@ const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => voi
                   </button>
                 );
               }
-              // Fallback for standard links
               return (
                 <a 
                   href={href} 
@@ -52,7 +47,6 @@ const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => voi
                 </a>
               );
             },
-            // Enhance headings
             h1: ({children}) => <h1 className="text-2xl font-bold text-slate-100 mb-4 pb-2 border-b border-slate-700">{children}</h1>,
             h2: ({children}) => <h2 className="text-xl font-semibold text-indigo-200 mt-6 mb-3">{children}</h2>,
             h3: ({children}) => <h3 className="text-lg font-medium text-slate-200 mt-4 mb-2">{children}</h3>,
@@ -68,75 +62,115 @@ const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => voi
   );
 };
 
-const VisualizationCard: React.FC<{ 
-  visualization: ToolVisualization, 
-  onClick?: () => void, 
-  onReportLinkClick?: (stepId: number) => void,
-  onHtmlChange?: (newHtml: string) => void 
-}> = ({ visualization, onClick, onReportLinkClick, onHtmlChange }) => {
-  
-  // Get icon based on visualization type
-  const getIcon = () => {
-    switch (visualization.type) {
-      case VisualizationType.SCATTER_PLOT:
-        return <Database className="w-4 h-4 text-sky-400" />;
-      case VisualizationType.BOX_PLOT:
-        return <Database className="w-4 h-4 text-purple-400" />;
-      case VisualizationType.LITERATURE_LIST:
-        return <BookOpen className="w-4 h-4 text-amber-400" />;
-      case VisualizationType.DATA_TABLE:
-        return <FileText className="w-4 h-4 text-emerald-400" />;
-      case VisualizationType.RESEARCH_REPORT:
-        return <FileCheck2 className="w-4 h-4 text-indigo-400" />;
-      case VisualizationType.VIS_HTML:
-        return <Code2 className="w-4 h-4 text-cyan-400" />;
-      default:
-        return <Database className="w-4 h-4 text-slate-400" />;
-    }
-  };
-
-  // Get badge color based on visualization type
-  const getBadgeColor = () => {
-    switch (visualization.type) {
-      case VisualizationType.VIS_HTML:
-        return 'bg-cyan-900/50 text-cyan-300 border-cyan-700';
-      default:
-        return 'bg-slate-800 text-slate-400 border-slate-600';
-    }
-  };
+const PairwiseTable: React.FC<{ data: GroupComparisonResult }> = ({ data }) => {
+  if (!data.pairwiseComparisons || data.pairwiseComparisons.length === 0) return null;
 
   return (
+    <div className="mt-4 overflow-x-auto">
+      <h4 className="text-xs font-semibold text-slate-400 uppercase mb-2">Pairwise Comparisons</h4>
+      <table className="w-full text-left text-xs text-slate-300 border-collapse">
+        <thead>
+          <tr className="bg-slate-900/50 border-b border-slate-700">
+            <th className="px-2 py-2">Groups</th>
+            <th className="px-2 py-2">Difference</th>
+            <th className="px-2 py-2">Effect Size (d)</th>
+            <th className="px-2 py-2">P-Value</th>
+            <th className="px-2 py-2">Interpretation</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-800">
+          {data.pairwiseComparisons.map((comp, idx) => (
+            <tr key={idx} className={comp.significant ? "bg-indigo-900/10" : ""}>
+              <td className="px-2 py-2 font-medium">{comp.groupA} vs {comp.groupB}</td>
+              <td className="px-2 py-2">{(comp.meanA - comp.meanB).toFixed(2)}</td>
+              <td className="px-2 py-2">{comp.cohensD.toFixed(2)} ({comp.effectSize})</td>
+              <td className="px-2 py-2 font-mono">{comp.pVal < 0.001 ? '<0.001' : comp.pVal.toFixed(3)}</td>
+              <td className="px-2 py-2 opacity-80 max-w-[200px] truncate" title={comp.explanation}>{comp.explanation}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const VisualizationCard: React.FC<{ 
+    visualization: ToolVisualization, 
+    onClick?: () => void, 
+    onReportLinkClick?: (stepId: number) => void,
+    onHtmlChange?: (newHtml: string) => void,
+    isActiveDataset?: boolean
+}> = ({ visualization, onClick, onReportLinkClick, onHtmlChange, isActiveDataset }) => {
+  const isClickable = visualization.messageId || visualization.datasetId;
+  
+  return (
     <div 
-      onClick={onClick}
-      className={`bg-slate-800 rounded-xl border border-slate-700 overflow-hidden shadow-xl flex-shrink-0 transition-all ${
-        visualization.messageId ? 'cursor-pointer hover:ring-2 hover:ring-indigo-500/50 hover:border-indigo-500' : ''
-      }`}
+        onClick={onClick}
+        className={`bg-slate-800 rounded-xl border overflow-hidden shadow-xl flex-shrink-0 transition-all 
+        ${isActiveDataset ? 'border-indigo-500/60 ring-1 ring-indigo-500/30' : 'border-slate-700'}
+        ${isClickable ? 'cursor-pointer hover:ring-2 hover:ring-indigo-500/50 hover:border-indigo-500' : ''}`}
     >
       {/* Header */}
       <div className="bg-slate-900 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          {getIcon()}
+          {visualization.type === VisualizationType.SCATTER_PLOT && <Database className="w-4 h-4 text-sky-400" />}
+          {visualization.type === VisualizationType.BOX_PLOT && <Database className="w-4 h-4 text-purple-400" />}
+          {visualization.type === VisualizationType.AGING_CURVE && <TrendingUp className="w-4 h-4 text-teal-400" />}
+          {visualization.type === VisualizationType.CLUSTERING_DASHBOARD && <Grid2X2 className="w-4 h-4 text-rose-400" />}
+          {visualization.type === VisualizationType.STRATIFICATION_RESULT && <Layers className="w-4 h-4 text-emerald-400" />}
+          {visualization.type === VisualizationType.LITERATURE_LIST && <BookOpen className="w-4 h-4 text-amber-400" />}
+          {visualization.type === VisualizationType.DATA_TABLE && <FileText className="w-4 h-4 text-emerald-400" />}
+          {visualization.type === VisualizationType.RESEARCH_REPORT && <FileCheck2 className="w-4 h-4 text-indigo-400" />}
+          {visualization.type === VisualizationType.VIS_HTML && <Code2 className="w-4 h-4 text-cyan-400" />}
           <span className="font-semibold text-slate-200">{visualization.title}</span>
         </div>
         <div className="flex items-center gap-2">
-          {visualization.messageId && <Link className="w-3 h-3 text-slate-500" />}
-          <span className={`text-xs px-2 py-1 rounded border ${getBadgeColor()}`}>
+            {isActiveDataset && (
+                <span title="Active Dataset" className="flex">
+                    <CheckCircle2 className="w-4 h-4 text-indigo-400" />
+                </span>
+            )}
+            {visualization.messageId && <Link className="w-3 h-3 text-slate-500" />}
+            <span className={`text-xs px-2 py-1 rounded border ${
+              visualization.type === VisualizationType.VIS_HTML 
+                ? 'bg-cyan-900/50 text-cyan-300 border-cyan-700' 
+                : 'bg-slate-800 text-slate-400 border-slate-600'
+            }`}>
             {visualization.type}
           </span>
         </div>
       </div>
 
       {/* Body */}
-      <div className="p-4 bg-slate-800/50 pointer-events-none">
-        
-        {/* Scatter Plot */}
+      <div className="p-4 bg-slate-800/50 pointer-events-none"> 
         {visualization.type === VisualizationType.SCATTER_PLOT && (
           <ScatterPlot data={visualization.data} config={visualization.config} />
         )}
 
         {/* Box Plot / Stats Bar Chart */}
         {visualization.type === VisualizationType.BOX_PLOT && (
-          <StatsBarChart data={visualization.data} config={visualization.config} />
+          <div className="pointer-events-auto">
+            <StatsBarChart data={visualization.data} config={visualization.config} />
+            <PairwiseTable data={visualization.data} />
+          </div>
+        )}
+
+        {visualization.type === VisualizationType.AGING_CURVE && (
+            <div className="pointer-events-auto">
+                <AgingCurveChart data={visualization.data} config={visualization.config} />
+            </div>
+        )}
+
+        {visualization.type === VisualizationType.CLUSTERING_DASHBOARD && (
+            <div className="pointer-events-auto">
+                <ClusteringDashboard data={visualization.data} config={visualization.config} />
+            </div>
+        )}
+
+        {visualization.type === VisualizationType.STRATIFICATION_RESULT && (
+            <div className="pointer-events-auto">
+                <StratificationChart data={visualization.data} config={visualization.config} />
+            </div>
         )}
 
         {/* Data Table */}
@@ -187,7 +221,7 @@ const VisualizationCard: React.FC<{
           </div>
         )}
 
-        {/* NEW: HTML Visualization */}
+        {/* HTML Visualization */}
         {visualization.type === VisualizationType.VIS_HTML && (
           <div className="pointer-events-auto">
             <HtmlVisualizationRenderer
@@ -202,9 +236,8 @@ const VisualizationCard: React.FC<{
   );
 };
 
-const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, datasetName, onVizClick, onHtmlChange }) => {
+const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, datasetName, onVizClick, onHtmlChange, activeDatasetIds }) => {
   const handleReportLinkClick = (stepId: number) => {
-    // Find the report visualization that holds the mapping
     const reportViz = visualizations.find(v => v.type === VisualizationType.RESEARCH_REPORT);
     if (reportViz && reportViz.data.stepIdToMessageId[stepId]) {
       const messageId = reportViz.data.stepIdToMessageId[stepId];
@@ -227,16 +260,17 @@ const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, dataset
     <div className="h-full flex flex-col bg-slate-950/30 rounded-xl border border-slate-800 overflow-hidden">
       <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
         {visualizations.map((viz, index) => (
-          <VisualizationCard 
-            key={viz.messageId || index} 
-            visualization={viz} 
-            onClick={() => onVizClick && onVizClick(viz.messageId)}
-            onReportLinkClick={handleReportLinkClick}
-            onHtmlChange={viz.messageId && onHtmlChange 
-              ? (newHtml: string) => onHtmlChange(viz.messageId!, newHtml) 
-              : undefined
-            }
-          />
+           <VisualizationCard 
+             key={viz.messageId || index} 
+             visualization={viz} 
+             onClick={() => onVizClick && onVizClick(viz.datasetId || viz.messageId)}
+             onReportLinkClick={handleReportLinkClick}
+             onHtmlChange={viz.messageId && onHtmlChange 
+               ? (newHtml: string) => onHtmlChange(viz.messageId!, newHtml) 
+               : undefined
+             }
+             isActiveDataset={viz.datasetId ? activeDatasetIds?.includes(viz.datasetId) : false}
+           />
         ))}
       </div>
     </div>

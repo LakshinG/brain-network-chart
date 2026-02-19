@@ -8,6 +8,7 @@ export enum AgentType {
   PREPROCESSOR = 'Preprocessor',
   EXECUTOR = 'Executor',
   RESEARCHER = 'Researcher',
+  PROPOSAL_REPORTER = 'Proposal Reporter',
   SYSTEM = 'System'
 }
 
@@ -25,9 +26,11 @@ export interface DatasetRow {
 }
 
 export interface Dataset {
+  id: string;
   name: string;
   columns: string[];
   data: DatasetRow[];
+  serverFilename?: string;
 }
 
 export enum VisualizationType {
@@ -35,10 +38,13 @@ export enum VisualizationType {
   DATA_TABLE = 'DATA_TABLE',
   SCATTER_PLOT = 'SCATTER_PLOT',
   BOX_PLOT = 'BOX_PLOT',
+  AGING_CURVE = 'AGING_CURVE',
   MARKDOWN_REPORT = 'MARKDOWN_REPORT',
   LITERATURE_LIST = 'LITERATURE_LIST',
   RESEARCH_REPORT = 'RESEARCH_REPORT',
   VIS_HTML = 'VIS_HTML',
+  CLUSTERING_DASHBOARD = 'CLUSTERING_DASHBOARD',
+  STRATIFICATION_RESULT = 'STRATIFICATION_RESULT'
 }
 
 export interface ToolVisualization {
@@ -47,6 +53,7 @@ export interface ToolVisualization {
   data: any;
   config?: any;
   messageId?: string; 
+  datasetId?: string;
 }
 
 // NEW: Type for VIS_HTML data
@@ -61,12 +68,34 @@ export interface AgentState {
   currentTask?: string;
 }
 
+export interface SuspendedState {
+  plan: any;
+  stepIndex: number;
+  data: any[];
+  columns: string[];
+  intent: 'RESEARCH' | 'GENERAL';
+  originalUserQuery?: string;
+}
+
 export interface GroupComparisonResult {
   groupCol: string;
   valueCol: string;
   groups: string[];
   pVal: number; 
   stats: { group: string; mean: number; median: number; min: number; max: number }[];
+  pairwiseComparisons?: {
+    groupA: string;
+    groupB: string;
+    testName: string;
+    statistic: number;
+    pVal: number;
+    significant: boolean;
+    cohensD: number;
+    effectSize: string;
+    meanA: number;
+    meanB: number;
+    explanation: string;
+  }[];
 }
 
 export interface CorrelationResult {
@@ -75,6 +104,27 @@ export interface CorrelationResult {
   r: number;
   p: number;
   dataPoints: { x: number; y: number; group?: string }[];
+}
+
+export interface GrowthCurveResult {
+  status: string;
+  phenotype: string;
+  data: { X: number[]; centiles: number[][]; age?: number[]; values?: number[] };
+  elapsed_seconds: number;
+}
+
+export interface ClusteringResult {
+  featureCols: string[];
+  targetCol: string;
+  nCluster: number;
+  pcPoints: { x: number; y: number; cluster: number; target: number; id?: string }[];
+  clusterCorrelation: CorrelationResult;
+}
+
+export interface StratificationResult {
+  targetCol: string;
+  groupCol: string;
+  newColumns: { name: string; count: number }[];
 }
 
 export interface McpTool {

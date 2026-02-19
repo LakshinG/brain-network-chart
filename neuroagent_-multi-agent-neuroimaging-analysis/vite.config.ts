@@ -11,5 +11,10 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/ollama-api/, '')
       }
     }
+  },
+  build: {
+    rollupOptions: {
+      external: ["cross-spawn", "which", "mcp-client"]
+    }
   }
 })

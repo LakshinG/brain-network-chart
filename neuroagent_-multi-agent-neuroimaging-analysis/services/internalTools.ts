@@ -1,6 +1,6 @@
 
 import { McpTool, DatasetRow } from '../types';
-import { calculateCorrelation, getGroupStats } from '../utils/stats';
+import { calculateCorrelation, getGroupStats, performSpectralClustering, stratifyDataset } from '../utils/stats';
 
 export const INTERNAL_TOOLS: McpTool[] = [
   {
@@ -27,7 +27,7 @@ export const INTERNAL_TOOLS: McpTool[] = [
   },
   {
     name: 'GROUP_COMPARISON',
-    description: 'Compare a numeric value across different groups in a categorical column (e.g. Diagnosis, Sex). Performs statistical comparison.',
+    description: 'Compare a numeric value across all groups in a categorical column. Performs pairwise T-tests and Cohen\'s d analysis for all unique pairs.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -58,6 +58,43 @@ export const INTERNAL_TOOLS: McpTool[] = [
         column: { type: 'string', description: 'The categorical column to convert (e.g., DX, Sex)' }
       },
       required: ['column']
+    }
+  },
+  {
+    name: 'AVERAGE_MULTIPLE_COLUMNS',
+    description: 'Calculate average values across multiple columns for each row, insert the result as a new column, and return the new column name. Use this to aggregate multiple metrics (e.g. regional brain volumes) into a single composite score.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        columns: { type: 'array', items: { type: 'string' }, description: 'List of column names to average' }
+      },
+      required: ['columns']
+    }
+  },
+  {
+    name: 'SPECTRAL_CLUSTERING',
+    description: 'Perform spectral clustering (PCA + K-Means) on a set of feature columns and analyze correlation of clusters with a target column. Plots PC1 vs PC2 colored by Cluster and Target, plus a correlation plot.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        feature_columns: { type: 'array', items: { type: 'string' }, description: 'List of numeric columns to use for clustering (e.g., regional thickness/volume)' },
+        target_column: { type: 'string', description: 'The numeric column to correlate with cluster IDs (e.g., IQ, MMSE)' },
+        ncluster: { type: 'number', description: 'Number of clusters (default 5)' }
+      },
+      required: ['feature_columns', 'target_column']
+    }
+  },
+  {
+    name: 'STRATIFY_DATASET',
+    description: 'Split a dataset into subsets based on unique values of a grouping column. Creates new sparse columns for each group (e.g. IQ -> IQ_Sex_F, IQ_Sex_M) and inserts them back into the dataset. Useful for visualizing distributions across groups.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target_column: { type: 'string', description: 'The value column to split (e.g. IQ)' },
+        group_column: { type: 'string', description: 'The categorical/numeric column to group by (e.g. Sex, Age)' },
+        max_group_num: { type: 'number', description: 'Max number of groups to create (default 10)' }
+      },
+      required: ['target_column', 'group_column']
     }
   }
 ];
@@ -106,6 +143,78 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
         mapping 
     };
   }
+
+  if (toolName === 'AVERAGE_MULTIPLE_COLUMNS') {
+    const cols = args.columns;
+    if (!cols || !Array.isArray(cols) || cols.length === 0) {
+      throw new Error("Missing or invalid columns list for averaging.");
+    }
+    
+    // Check for existence
+    const firstRow = data[0] || {};
+    const missing = cols.filter(c => firstRow[c] === undefined);
+    if (missing.length > 0) {
+      throw new Error(`Columns not found in dataset: ${missing.join(', ')}`);
+    }
+
+    // Generate new column name
+    const suffix = cols.join('_');
+    const newColName = `avg_${cols.length}_cols_${Date.now().toString().slice(-4)}`;
+
+    const transformedData = data.map(row => {
+      let sum = 0;
+      let count = 0;
+      cols.forEach(c => {
+        const val = parseFloat(String(row[c]));
+        if (!isNaN(val)) {
+          sum += val;
+          count++;
+        }
+      });
+      const avg = count > 0 ? parseFloat((sum / count).toFixed(4)) : 0;
+      return {
+        ...row,
+        [newColName]: avg
+      };
+    });
+
+    return {
+      success: true,
+      transformedData,
+      newColumn: newColName
+    };
+  }
+
+  if (toolName === 'SPECTRAL_CLUSTERING') {
+    const features = args.feature_columns || args.features;
+    const target = args.target_column || args.target;
+    const k = args.ncluster || 5;
+
+    if (!features || !Array.isArray(features) || features.length === 0) throw new Error("Missing feature columns for clustering.");
+    if (!target) throw new Error("Missing target column for clustering analysis.");
+
+    return performSpectralClustering(data, features, target, k);
+  }
+
+  if (toolName === 'STRATIFY_DATASET') {
+      const target = args.target_column || args.target;
+      const group = args.group_column || args.group;
+      const max = args.max_group_num || 10;
+      
+      if (!target || !group) throw new Error("Missing columns for stratification.");
+      
+      const { transformedData, result } = stratifyDataset(data, target, group, max);
+      
+      // Extract new column names for return info
+      const newColNames = result.newColumns.map(c => c.name);
+      
+      return {
+          success: true,
+          transformedData,
+          result, // StratificationResult
+          newColumns: newColNames // For App.tsx to update active cols
+      };
+  }
   
   throw new Error(`Tool ${toolName} not found internally.`);
 };
@@ -132,11 +241,16 @@ export const validatePlanColumns = (plan: any, initialColumns: string[], columns
         });
     }
 
-    // Always track column creation for subsequent steps (e.g. TRANSFORM_DATA creates new columns)
+    // Always track column creation for subsequent steps
     const params = step.parameters || {};
     if (step.tool === 'TRANSFORM_DATA' && params.column) {
       knownColumns.add(`${params.column}_numeric`);
     }
+    // Track new columns from averaging, though we don't know the name deterministically here without the timestamp/randomness. 
+    // In a rigorous validator, we might need to predict the name or use a fixed naming schema.
+    // For now, we won't strictly validate the *existence* of the future averaged column name in subsequent steps 
+    // because the exact name is generated at runtime (avg_N_cols_timestamp).
+    // The planner should ideally instruct to use "the new averaged column".
   });
 
   return { valid: errors.length === 0, errors };

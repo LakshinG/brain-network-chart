@@ -1,25 +1,55 @@
 
 import { McpTool, McpToolCallResult } from '../types';
-
-// Connection to Python FastAPI MCP Server
-// Endpoints: GET /health, GET /api/schema, POST /api/tools/{name}
-const MCP_API_URL = 'http://127.0.0.1:8010';
-
+const BACKEND_BASE_URL = 'http://localhost:8787';
+const BACKEND_WS_URL = BACKEND_BASE_URL.replace(/^http/, 'ws');
+const MCP_API_URL = 'http://localhost:8010';
 export class McpService {
   public isConnected = false;
+  private ws: WebSocket | null = null;
 
   constructor() {}
 
-  async connect(): Promise<void> {
-    console.log(`MCP: Connecting to REST API at ${MCP_API_URL}...`);
-    try {
-      const response = await fetch(`${MCP_API_URL}/health`);
-      if (response.ok) {
-        this.isConnected = true;
-        console.log('MCP: Connected to FastAPI server');
-      } else {
-        throw new Error(`Health check failed: ${response.statusText}`);
+  private async parseJsonResponse(response: Response): Promise<any> {
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || `Request failed (${response.status})`);
+    }
+    return payload;
+  }
+
+  private openStatusSocket() {
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    this.ws = new WebSocket(`${BACKEND_WS_URL}/ws`);
+
+    this.ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message?.type === 'mcp_status') {
+          this.isConnected = !!message.connected;
+        }
+      } catch {
       }
+    };
+
+    this.ws.onclose = () => {
+      this.ws = null;
+    };
+  }
+
+  async connect(): Promise<void> {
+    try {
+      const response = await fetch(`${BACKEND_BASE_URL}/api/mcp/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const payload = await this.parseJsonResponse(response);
+      this.isConnected = !!payload.connected;
+      this.openStatusSocket();
+      console.log('MCP: Connected to MCP server');
     } catch (error) {
       console.warn('MCP: Connection Failed', error);
       this.isConnected = false;
@@ -29,50 +59,16 @@ export class McpService {
 
   async listTools(): Promise<McpTool[]> {
     if (!this.isConnected) return [];
-    
+
     try {
-      const response = await fetch(`${MCP_API_URL}/api/schema`);
-      if (!response.ok) throw new Error('Failed to fetch tool schema');
-      
-      const data = await response.json();
-      
-      // Handle "endpoints" dictionary format (New Python Server Schema)
-      if (data.endpoints && typeof data.endpoints === 'object') {
-        return Object.entries(data.endpoints).map(([key, value]: [string, any]) => {
-          // Normalize input schema:
-          // Some endpoints return standard JSON schema ({ type: 'object', properties: {...} })
-          // Others might return a direct map of arguments.
-          let schema = value.parameters || { type: 'object', properties: {} };
+      const response = await fetch(`${BACKEND_BASE_URL}/api/mcp/tools`);
+      const payload = await this.parseJsonResponse(response);
+      const tools = Array.isArray(payload?.tools) ? payload.tools : [];
 
-          // If it lacks 'properties' and 'type' isn't explicitly defined as object, 
-          // assume it's a simplified key-value map of parameters and wrap it.
-          if (!schema.properties && schema.type !== 'object') {
-             schema = {
-                type: 'object',
-                properties: schema
-             };
-          }
-
-          return {
-            name: key,
-            description: value.description || '',
-            inputSchema: schema
-          };
-        });
-      }
-
-      // Fallback: Handle legacy/array format if structure differs
-      let toolsRaw: any[] = [];
-      if (Array.isArray(data)) {
-        toolsRaw = data;
-      } else if (data.tools && Array.isArray(data.tools)) {
-        toolsRaw = data.tools;
-      }
-
-      return toolsRaw.map(t => ({
-        name: t.name || t.title,
-        description: t.description || '',
-        inputSchema: t.inputSchema || t.parameters || t.args_schema || { type: 'object', properties: {} }
+      return tools.map((tool: any) => ({
+        name: tool.name,
+        description: tool.description || '',
+        inputSchema: tool.inputSchema || { type: 'object', properties: {} },
       }));
 
     } catch (e) {
@@ -85,40 +81,29 @@ export class McpService {
     if (!this.isConnected) {
       return { content: [{ type: 'text', text: "Error: MCP Server not connected." }], isError: true };
     }
-    
+
     try {
-      // Assuming convention: POST /{tool_name}
-      const response = await fetch(`${MCP_API_URL}/${name}`, {
+      const response = await fetch(`${BACKEND_BASE_URL}/api/mcp/call`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(args)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          args,
+        })
       });
-      
-      const text = await response.text();
-      
-      if (!response.ok) {
+
+      const payload = await this.parseJsonResponse(response);
+      const result: any = payload?.result;
+
+      if (result && typeof result === 'object' && Array.isArray(result.content)) {
         return {
-          content: [{ type: 'text', text: `Tool Error: ${text}` }],
-          isError: true
+          content: result.content,
+          isError: !!result.isError,
         };
       }
 
-      // Ensure the output is treated as text (JSON string) for the visualizer to parse
-      // If the response is already JSON, we stringify it so the visualizer's parse logic works consistently
-      let outputText = text;
-      try {
-        const json = JSON.parse(text);
-        if (typeof json === 'object') {
-            outputText = JSON.stringify(json);
-        }
-      } catch (e) {
-        // content is plain text
-      }
-
       return {
-        content: [{ type: 'text', text: outputText }],
+        content: [{ type: 'text', text: JSON.stringify(result) }],
         isError: false
       };
     } catch (e: any) {
@@ -130,9 +115,49 @@ export class McpService {
     }
   }
   
-  disconnect() {
+  async disconnect(): Promise<void> {
+    try {
+      await fetch(`${BACKEND_BASE_URL}/api/mcp/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.warn('MCP: Disconnect warning', error);
+    }
+
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+
     this.isConnected = false;
   }
+
+  async uploadFile(file: File): Promise<{ status: string, file_info: any } | null> {
+    if (!this.isConnected) {
+        return null;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(`${MCP_API_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.statusText}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error("MCP: File upload failed", error);
+      throw error;
+    }
+  }
+  
 }
 
 export const mcpClient = new McpService();
