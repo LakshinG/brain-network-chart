@@ -11,6 +11,60 @@ let neuroModel = 'llama3';
 
 const ollama = new Ollama({ host: OLLAMA_HOST });
 
+/**
+ * Attempt to parse JSON from an LLM response, with repair heuristics
+ * for common issues small models produce (trailing commas, markdown
+ * fences, embedded think tags, etc.).
+ */
+function robustJsonParse(raw: string): any {
+  // 1. Strip <think>…</think> blocks (deepseek-r1 emits these)
+  let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // 2. Strip markdown code fences
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // 3. Extract first { … } or [ … ] block if there is surrounding text
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+  let start = -1;
+  let open: string | null = null;
+  let close: string | null = null;
+
+  if (firstBrace >= 0 && (firstBracket < 0 || firstBrace <= firstBracket)) {
+    start = firstBrace; open = '{'; close = '}';
+  } else if (firstBracket >= 0) {
+    start = firstBracket; open = '['; close = ']';
+  }
+
+  if (start > 0) {
+    // Find matching closing bracket
+    let depth = 0;
+    let end = start;
+    for (let i = start; i < cleaned.length; i++) {
+      if (cleaned[i] === open) depth++;
+      else if (cleaned[i] === close) depth--;
+      if (depth === 0) { end = i; break; }
+    }
+    cleaned = cleaned.substring(start, end + 1);
+  }
+
+  // 4. Try raw parse first
+  try { return JSON.parse(cleaned); } catch (_) { /* continue */ }
+
+  // 5. Fix trailing commas before } or ]
+  let repaired = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+  // 6. Fix single-quoted strings → double-quoted
+  repaired = repaired.replace(/(?<=[:,\[{]\s*)'([^']*?)'/g, '"$1"');
+
+  // 7. Try again
+  try { return JSON.parse(repaired); } catch (_) { /* continue */ }
+
+  // 8. Last resort: strip control chars and retry
+  repaired = repaired.replace(/[\x00-\x1f]+/g, ' ');
+  return JSON.parse(repaired); // let this throw if still broken
+}
+
 export const checkApiKey = () => true; 
 
 export const checkOllamaConnection = async (): Promise<boolean> => {
@@ -47,7 +101,7 @@ export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERA
       format: 'json',
       stream: false
     });
-    const json = JSON.parse(response.response);
+    const json = robustJsonParse(response.response);
     return (json.category === 'RESEARCH' || json.category === 'GENERAL') ? json.category : 'RESEARCH';
   } catch (e) {
     console.error("Orchestrator Error:", e);
@@ -69,7 +123,7 @@ export const generateGeneralPlan = async (query: string, availableTools: McpTool
       format: 'json',
       stream: false
     });
-    return JSON.parse(response.response);
+    return robustJsonParse(response.response);
   } catch (e) {
     console.error("General Planner Error:", e);
     return {
@@ -102,7 +156,7 @@ export const generateNeuroPlan = async (query: string, dataContext: string, avai
       format: 'json',
       stream: false
     });
-    return JSON.parse(response.response);
+    return robustJsonParse(response.response);
   } catch (e) {
     console.error("Neuro Planner Error:", e);
     return {
@@ -132,7 +186,7 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
       stream: false
     });
     
-    const result = JSON.parse(response.response);
+    const result = robustJsonParse(response.response);
 
     // 2. If LLM response requests column validation, execute the internal tool
     if (result.check_columns && Array.isArray(result.check_columns)) {
@@ -168,12 +222,16 @@ export const runExecutorAgent = async (instruction: string, columns: string[], a
       format: 'json',
       stream: false
     });
-    return JSON.parse(response.response);
+    return robustJsonParse(response.response);
   } catch (e) {
     console.error("Executor Agent Error:", e);
     throw new Error("Executor Agent failed to generate tool calls.");
   }
 };
+
+function stripThinkTags(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+}
 
 export const interpretToolResult = async (instruction: string, toolName: string, toolOutput: any) => {
   // Truncate output if too large to avoid context limit (e.g. data points)
@@ -187,7 +245,7 @@ export const interpretToolResult = async (instruction: string, toolName: string,
       prompt: PROMPTS.EXECUTOR_INTERPRET(instruction, toolName, outputStr),
       stream: false
     });
-    return response.response;
+    return stripThinkTags(response.response);
   } catch (e) {
     console.error("Executor Interpretation Error:", e);
     return "Analysis complete (could not generate detailed interpretation).";
@@ -203,7 +261,7 @@ export const generatePreprocessingMapping = async (column: string, values: strin
       format: 'json',
       stream: false
     });
-    return JSON.parse(response.response);
+    return robustJsonParse(response.response);
   } catch (e) {
     console.error("Preprocessor Error:", e);
     const fallback: Record<string, number> = {};
@@ -222,7 +280,7 @@ export const generateResearchInsights = async (results: string, availableTools: 
       format: 'json',
       stream: false
     });
-    return JSON.parse(response.response);
+    return robustJsonParse(response.response);
   } catch (e) {
     console.error("Researcher Error:", e);
     // Fallback if JSON parsing fails or model errors
@@ -241,7 +299,7 @@ export const generateProposalReport = async (userQuery: string, analysisResults:
       prompt: PROMPTS.PROPOSAL_REPORTER(userQuery, analysisResults, researcherNotes),
       stream: false
     });
-    return response.response;
+    return stripThinkTags(response.response);
   } catch (e) {
     console.error("Proposal Reporter Error:", e);
     return "Failed to generate report.";

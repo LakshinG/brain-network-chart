@@ -52,7 +52,8 @@ export interface ToolVisualization {
   title: string;
   data: any;
   config?: any;
-  messageId?: string; 
+  vizId?: string;       // unique per visualization (for selection/keying) — auto-generated if omitted
+  messageId?: string;   // links back to the chat message that created it
   datasetId?: string;
 }
 

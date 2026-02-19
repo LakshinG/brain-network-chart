@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { Code, Maximize2, Minimize2, RefreshCw } from 'lucide-react';
+import { Code, Maximize2, Minimize2, RefreshCw, Download } from 'lucide-react';
 import CodeEditorModal from './CodeEditorModal';
 
 interface HtmlVisualizationRendererProps {
@@ -271,6 +271,57 @@ export const HtmlVisualizationRenderer: React.FC<HtmlVisualizationRendererProps>
     setTimeout(() => setIframeKey(k => k + 1), 50);
   }, [onHtmlChange]);
 
+  const handleDownload = useCallback(() => {
+    const iframeWindow = iframeRef.current?.contentWindow as any;
+    const doc = iframeRef.current?.contentDocument;
+    if (!iframeWindow || !doc) return;
+
+    // Try Plotly SVG export first
+    const plotlyDiv = doc.querySelector('.js-plotly-plot');
+    if (plotlyDiv && iframeWindow.Plotly) {
+      iframeWindow.Plotly.toImage(plotlyDiv, { format: 'svg', width: 1200, height: 800 })
+        .then((dataUrl: string) => {
+          const a = document.createElement('a');
+          a.href = dataUrl;
+          a.download = 'visualization.svg';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        });
+      return;
+    }
+
+    // Try Canvas (Chart.js) — download as PNG
+    const canvas = doc.querySelector('canvas') as HTMLCanvasElement | null;
+    if (canvas) {
+      const dataUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = 'visualization.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
+
+    // Fallback: any SVG element
+    const svg = doc.querySelector('svg');
+    if (svg) {
+      const clone = svg.cloneNode(true) as SVGSVGElement;
+      clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      const svgData = new XMLSerializer().serializeToString(clone);
+      const blob = new Blob([svgData], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'visualization.svg';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  }, []);
+
   const effectiveHeight = isExpanded ? EXPANDED_HEIGHT : (autoHeight || heightPx);
 
   return (
@@ -291,6 +342,15 @@ export const HtmlVisualizationRenderer: React.FC<HtmlVisualizationRendererProps>
             <Code className="w-4 h-4" />
           </button>
         )}
+
+        {/* Download Button */}
+        <button
+          onClick={handleDownload}
+          className="p-1.5 rounded bg-slate-800/90 text-slate-300 hover:bg-emerald-600 hover:text-white transition-colors"
+          title="Download SVG / PNG"
+        >
+          <Download className="w-4 h-4" />
+        </button>
 
         {/* Refresh Button */}
         <button

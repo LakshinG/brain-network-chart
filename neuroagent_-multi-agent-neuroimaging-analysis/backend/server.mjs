@@ -4,7 +4,7 @@ import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { MCPClient } from 'mcp-client';
 
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 8788);
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'http://localhost:8010/mcp';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
 

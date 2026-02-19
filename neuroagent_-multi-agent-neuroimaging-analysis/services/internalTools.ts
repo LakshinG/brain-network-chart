@@ -99,24 +99,53 @@ export const INTERNAL_TOOLS: McpTool[] = [
   }
 ];
 
+
+const fuzzyMatchColumn = (candidate: string, data: DatasetRow[]): string => {
+  if (!candidate || !data.length) return candidate;
+  const actualCols = Object.keys(data[0]);
+
+  // Exact match
+  if (actualCols.includes(candidate)) return candidate;
+
+  // Normalize: lowercase, strip underscores/spaces/hyphens
+  const normalize = (s: string) => s.toLowerCase().replace(/[_\s-]/g, '');
+  const normCandidate = normalize(candidate);
+
+  for (const col of actualCols) {
+    if (normalize(col) === normCandidate) return col;
+  }
+
+  // Partial containment: if candidate is a substring or vice versa
+  for (const col of actualCols) {
+    const normCol = normalize(col);
+    if (normCol.includes(normCandidate) || normCandidate.includes(normCol)) return col;
+  }
+
+  return candidate; // fallback to original
+};
+
 export const executeInternalTool = (toolName: string, args: any, data: DatasetRow[]) => {
   if (toolName === 'DATA_INSPECT') {
     return { data };
   }
 
   if (toolName === 'CORRELATION_ANALYSIS') {
-    const x = args.x_column || args.target_column || args.column1 || args.x;
-    const y = args.y_column || args.comparison_column || args.column2 || args.y;
+    let x = args.x_column || args.target_column || args.column1 || args.x;
+    let y = args.y_column || args.comparison_column || args.column2 || args.y;
     
     if (!x || !y) throw new Error(`Missing columns for correlation. Received parameters: ${JSON.stringify(args)}`);
+    x = fuzzyMatchColumn(x, data);
+    y = fuzzyMatchColumn(y, data);
     return calculateCorrelation(data, x, y);
   }
 
   if (toolName === 'GROUP_COMPARISON') {
-    const g = args.group_column || args.group || args.groupCol;
-    const t = args.target_column || args.target || args.valueCol;
+    let g = args.group_column || args.group || args.groupCol;
+    let t = args.target_column || args.target || args.valueCol;
     
     if (!g || !t) throw new Error(`Missing columns for group comparison. Received parameters: ${JSON.stringify(args)}`);
+    g = fuzzyMatchColumn(g, data);
+    t = fuzzyMatchColumn(t, data);
     return getGroupStats(data, g, t);
   }
 
@@ -125,10 +154,11 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
   }
 
   if (toolName === 'TRANSFORM_DATA') {
-    const col = args.column;
+    let col = args.column;
     const mapping = args.mapping;
     if (!col) throw new Error("Missing column for transformation");
     if (!mapping) throw new Error("Missing numeric mapping for transformation");
+    col = fuzzyMatchColumn(col, data);
     
     const newColName = `${col}_numeric`;
     const transformedData = data.map(row => ({
@@ -145,14 +175,15 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
   }
 
   if (toolName === 'AVERAGE_MULTIPLE_COLUMNS') {
-    const cols = args.columns;
+    let cols = args.columns;
     if (!cols || !Array.isArray(cols) || cols.length === 0) {
       throw new Error("Missing or invalid columns list for averaging.");
     }
+    cols = cols.map((c: string) => fuzzyMatchColumn(c, data));
     
     // Check for existence
     const firstRow = data[0] || {};
-    const missing = cols.filter(c => firstRow[c] === undefined);
+    const missing = cols.filter((c: string) => firstRow[c] === undefined);
     if (missing.length > 0) {
       throw new Error(`Columns not found in dataset: ${missing.join(', ')}`);
     }
@@ -186,20 +217,23 @@ export const executeInternalTool = (toolName: string, args: any, data: DatasetRo
   }
 
   if (toolName === 'SPECTRAL_CLUSTERING') {
-    const features = args.feature_columns || args.features;
-    const target = args.target_column || args.target;
+    let features = args.feature_columns || args.features;
+    let target = args.target_column || args.target;
     const k = args.ncluster || 5;
 
     if (!features || !Array.isArray(features) || features.length === 0) throw new Error("Missing feature columns for clustering.");
     if (!target) throw new Error("Missing target column for clustering analysis.");
-
+    features = features.map((f: string) => fuzzyMatchColumn(f, data));
+    target = fuzzyMatchColumn(target, data);
     return performSpectralClustering(data, features, target, k);
   }
 
   if (toolName === 'STRATIFY_DATASET') {
-      const target = args.target_column || args.target;
-      const group = args.group_column || args.group;
+      let target = args.target_column || args.target;
+      let group = args.group_column || args.group;
       const max = args.max_group_num || 10;
+      if (target) target = fuzzyMatchColumn(target, data);
+      if (group) group = fuzzyMatchColumn(group, data);
       
       if (!target || !group) throw new Error("Missing columns for stratification.");
       

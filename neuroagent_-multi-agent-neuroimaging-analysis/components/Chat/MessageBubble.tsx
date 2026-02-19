@@ -61,8 +61,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
   };
 
   return (
-    <div className={`flex w-full mb-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-[85%] flex flex-col ${isUser ? 'items-end' : 'items-start'} transition-all duration-300 ${isHighlighted ? 'scale-105' : ''}`}>
+    <div className={`flex w-full mb-4 ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in`}>
+      <div className={`max-w-[85%] flex flex-col ${isUser ? 'items-end' : 'items-start'} transition-all duration-300 ${isHighlighted ? 'ring-2 ring-indigo-400 rounded-2xl ring-offset-2 ring-offset-slate-900' : ''}`}>
         <div className={`flex items-center gap-2 mb-1 px-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
           <div className={`p-1 rounded-full ${isUser ? 'bg-slate-600' : 'bg-slate-700'} text-slate-200`}>
              {getIcon(message.role)}
@@ -84,7 +84,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
             px-4 py-3 rounded-2xl text-sm leading-relaxed border shadow-sm whitespace-pre-wrap 
             ${colorClass} 
             ${isUser ? 'rounded-tr-none' : 'rounded-tl-none'}
-            ${isHighlighted ? 'ring-2 ring-indigo-500 shadow-indigo-500/20' : ''}
+            ${isHighlighted ? 'shadow-indigo-500/20' : ''}
         `}>
           {message.content}
 
@@ -131,4 +131,4 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
   );
 };
 
-export default MessageBubble;
+export default React.memo(MessageBubble);

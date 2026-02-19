@@ -22,15 +22,13 @@ import {
 import { mcpClient } from './services/mcpService';
 import { INTERNAL_TOOLS, executeInternalTool } from './services/internalTools';
 import { 
-  editVisualizationHtmlDirect,
-  editVisualizationHtmlWithStreaming,
-  isVisualizationEditRequest,
-  getActiveHtmlVisualization 
+  editVisualizationHtmlWithStreaming
 } from './services/visualizerService';
+import { chartDataToHtml } from './utils/chartToHtml';
 import ChatArea from './components/Chat/ChatArea';
 import VisualizerArea from './components/Visualizer/VisualizerArea';
 import ResizablePanels from './components/ResizablePanels';
-import { X, Pencil, Database, Palette, ChevronRight } from 'lucide-react';
+import { X, Pencil, Database } from 'lucide-react';
 import { getMockVisualization, getAllMockVisualizations } from './mockVisualizations';
 
 const VISUALIZER_AGENT = AgentType.EXECUTOR;
@@ -57,10 +55,7 @@ const App: React.FC = () => {
   const [selectedVisualizationId, setSelectedVisualizationId] = useState<string | null>(null);
   const [visualizerModel, setVisualizerModel] = useState<string>('qwen2.5-coder:32b');
 
-  // NEW: Visualization Mode - when enabled, ALL queries go to viz editor only
-  const [visualizationMode, setVisualizationMode] = useState(false);
-  // Store viz mode messages separately
-  const [vizModeMessages, setVizModeMessages] = useState<ChatMessage[]>([]);
+
 
   // Plan Validator Toggle
   const [isPlanValidationEnabled, setIsPlanValidationEnabled] = useState<boolean>(true);
@@ -160,18 +155,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Initialize viz mode welcome message
-  useEffect(() => {
-    if (visualizationMode && vizModeMessages.length === 0) {
-      const welcomeMsg: ChatMessage = {
-        id: 'viz-welcome-' + Date.now(),
-        role: AgentType.SYSTEM,
-        content: "🎨 **Visualization Mode Active**\n\nAll messages will be processed as visualization edits. You can:\n\n• Create charts with Plotly.js or Chart.js\n• Add bars, lines, scatter plots\n• Modify colors, titles, labels\n• Add insights and annotations\n\nClick a visualization on the left to select it, or type to create a new one.",
-        timestamp: Date.now()
-      };
-      setVizModeMessages([welcomeMsg]);
-    }
-  }, [visualizationMode]);
+
 
   const addMessage = (role: AgentType, content: string, metadata?: any): ChatMessage => {
     let usedModel: string | undefined;
@@ -190,42 +174,40 @@ const App: React.FC = () => {
       metadata: { ...metadata, model: usedModel }
     };
     
-    // Add to appropriate message list based on mode
-    if (visualizationMode) {
-      setVizModeMessages(prev => [...prev, msg]);
-    } else {
-      setMessages(prev => [...prev, msg]);
-    }
+    setMessages(prev => [...prev, msg]);
     return msg;
   };
 
-  // Add message specifically to viz mode
-  const addVizModeMessage = (role: AgentType, content: string, metadata?: any): ChatMessage => {
-    const msg: ChatMessage = {
-      id: Date.now().toString() + Math.random(),
-      role,
-      content,
-      timestamp: Date.now(),
-      metadata: { ...metadata, model: visualizerModel }
-    };
-    setVizModeMessages(prev => [...prev, msg]);
-    return msg;
-  };
+
+
+  // Generate a unique vizId
+  const genVizId = () => `viz-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   const addVisualization = (viz: ToolVisualization) => {
-    setVisualizations(prev => [viz, ...prev]);
+    // Ensure every visualization has a unique vizId
+    const withId = viz.vizId ? viz : { ...viz, vizId: genVizId() };
+    setVisualizations(prev => [withId, ...prev]);
   };
 
-  const updateVisualization = (messageId: string, newData: any) => {
+  const updateVisualization = (vizId: string, newData: any) => {
     setVisualizations(prev => prev.map(viz => 
-      viz.messageId === messageId 
+      viz.vizId === vizId 
         ? { ...viz, data: newData }
         : viz
     ));
   };
 
-  const handleHtmlChange = (messageId: string, newHtml: string) => {
-    updateVisualization(messageId, { html: newHtml });
+  const handleHtmlChange = (vizId: string, newHtml: string) => {
+    updateVisualization(vizId, { html: newHtml });
+  };
+
+  // Convert a non-VIS_HTML chart to VIS_HTML using edited Plotly.js HTML from the code editor
+  const handleConvertToHtml = (vizId: string, newHtml: string) => {
+    setVisualizations(prev => prev.map(viz =>
+      viz.vizId === vizId 
+        ? { ...viz, type: VisualizationType.VIS_HTML, data: { html: newHtml, heightPx: 400 } }
+        : viz
+    ));
   };
 
   const loadData = (csvText: string, name: string, serverFilename?: string) => {
@@ -252,6 +234,7 @@ const App: React.FC = () => {
         type: VisualizationType.DATA_TABLE,
         title: `Data Inspection: ${name}`,
         data: data,
+        vizId: genVizId(),
         datasetId: newDataset.id
     }, ...prevViz]);
   };
@@ -577,7 +560,7 @@ const App: React.FC = () => {
                setMessages(prev => prev.map(m => 
                   m.id === executorThinkingMsg.id ? { 
                       ...m, 
-                      content: `${m.content}\n\n⚠️ **Low Confidence (${executorResult.confidence || '?'})**\n${executorResult.thought || ''}\n\n**Question:** ${question}` 
+                      content: `${m.content}\n\n⚠️ **Low Confidence (${executorResult.confidence || '?'})**\n${(executorResult.thought || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()}\n\n**Question:** ${question}` 
                   } : m
                ));
 
@@ -597,7 +580,7 @@ const App: React.FC = () => {
             setMessages(prev => prev.map(m => 
               m.id === executorThinkingMsg.id ? { 
                   ...m, 
-                  content: `${m.content}\n\nDecision: ${executorResult.thought || "Tools selected."}` 
+                  content: `${m.content}\n\nDecision: ${(executorResult.thought || "Tools selected.").replace(/<think>[\s\S]*?<\/think>/gi, '').trim()}` 
               } : m
             ));
 
@@ -814,16 +797,131 @@ const App: React.FC = () => {
     }
   };
 
-  // Handle visualization editing (used by both modes)
-  const handleVisualizationEdit = async (query: string, useVizModeMessages: boolean = false): Promise<boolean> => {
-    const activeViz = getActiveHtmlVisualization(visualizations, selectedVisualizationId || undefined);
-    
-    const addMsg = useVizModeMessages ? addVizModeMessage : addMessage;
-    const setMsgs = useVizModeMessages ? setVizModeMessages : setMessages;
-    
-    if (!activeViz) {
-      // Create new visualization
-      const starterHtml = `<div class="visualizationCard bg-slate-900 rounded-xl border border-slate-700 p-4">
+  // Helper: summarize chart data as a compact text description for the LLM
+  const describeChartData = (viz: ToolVisualization): string => {
+    const d = viz.data;
+    switch (viz.type) {
+      case VisualizationType.SCATTER_PLOT:
+        return `Scatter plot: X="${d.xCol}", Y="${d.yCol}", r=${d.r?.toFixed(3)}, p=${d.pVal}, n=${d.dataPoints?.length} points.\nSample points: ${JSON.stringify((d.dataPoints || []).slice(0, 8))}`;
+      case VisualizationType.BOX_PLOT:
+        return `Group comparison bar chart: value="${d.valueCol}", group="${d.groupCol}", p=${d.pVal}.\nGroup stats: ${JSON.stringify(d.stats)}`;
+      case VisualizationType.AGING_CURVE:
+        return `Aging/growth curve: phenotype="${d.phenotype}", elapsed=${d.elapsed_seconds?.toFixed(2)}s.\nCentile data length: ${d.data?.X?.length || 0}, overlay points: ${d.data?.age?.length || 0}`;
+      case VisualizationType.CLUSTERING_DASHBOARD:
+        return `Clustering dashboard: target="${d.targetCol}", nClusters=${d.nClusters}, silhouette=${d.silhouetteScore?.toFixed(3)}.\nPC points (first 8): ${JSON.stringify((d.pcPoints || []).slice(0, 8))}`;
+      case VisualizationType.STRATIFICATION_RESULT:
+        return `Stratification: target="${d.targetCol}", group="${d.groupCol}".\nGroups: ${JSON.stringify(d.newColumns)}`;
+      default:
+        return JSON.stringify(d).substring(0, 2000);
+    }
+  };
+
+  // Handle visualization editing
+  const handleVisualizationEdit = async (query: string): Promise<boolean> => {
+    // Find the exact selected visualization by vizId
+    const selectedViz = selectedVisualizationId
+      ? visualizations.find(v => v.vizId === selectedVisualizationId)
+      : null;
+
+    // ─── Case 1: Selected VIS_HTML → edit its HTML in place ───
+    if (selectedViz && selectedViz.type === VisualizationType.VIS_HTML) {
+      const currentHtml = selectedViz.data?.html;
+      if (!currentHtml) {
+        addMessage(AgentType.SYSTEM, "Error: Selected visualization has no HTML content.");
+        return false;
+      }
+
+      const editMsg = addMessage(VISUALIZER_AGENT, `🔄 Editing visualization...`, {
+        tool: 'visualizer_edit_html',
+        isVisualizerEdit: true,
+        targetVizId: selectedViz.vizId
+      });
+
+      const result = await editVisualizationHtmlWithStreaming(
+        query,
+        currentHtml,
+        visualizerModel,
+        (progressText) => {
+          setMessages(prev => prev.map(m =>
+            m.id === editMsg.id ? { ...m, content: progressText } : m
+          ));
+        }
+      );
+
+      if (result.status === 'success' && result.html) {
+        updateVisualization(selectedViz.vizId, {
+          html: result.html,
+          heightPx: selectedViz.data?.heightPx || 400
+        });
+
+        setMessages(prev => prev.map(m =>
+          m.id === editMsg.id
+            ? { ...m, content: `✅ Updated!\n\nApplied: "${query}"${result.warnings ? `\n\n⚠️ ${result.warnings.join(', ')}` : ''}` }
+            : m
+        ));
+
+        setHighlightedMessageId(selectedViz.messageId || null);
+        setTimeout(() => setHighlightedMessageId(null), 2000);
+        return true;
+      } else {
+        setMessages(prev => prev.map(m =>
+          m.id === editMsg.id ? { ...m, content: `❌ Failed: ${result.message}` } : m
+        ));
+        return false;
+      }
+    }
+
+    // ─── Case 2: Selected non-HTML chart → convert to Plotly HTML, then apply edit ───
+    if (selectedViz) {
+      // Generate actual Plotly.js HTML from the chart's data
+      const convertedHtml = chartDataToHtml(selectedViz);
+      const currentHtml = convertedHtml || `<div class="visualizationCard"><div class="vc-header"><h3 class="vc-title">${selectedViz.title}</h3></div><div class="vc-body"><div id="chart"></div></div></div>`;
+      const conversionPrompt = `Here is the EXACT current Plotly.js HTML of the chart titled "${selectedViz.title}". Modify it to satisfy the user's request. Only change what is needed, keep everything else intact.\n\nUser's change request: "${query}"`;
+
+      const editMsg = addMessage(VISUALIZER_AGENT, `🔄 Converting & editing "${selectedViz.title}"...`, {
+        tool: 'visualizer_edit_html',
+        isVisualizerEdit: true,
+        targetVizId: selectedViz.vizId
+      });
+
+      const result = await editVisualizationHtmlWithStreaming(
+        conversionPrompt,
+        currentHtml,
+        visualizerModel,
+        (progressText) => {
+          setMessages(prev => prev.map(m =>
+            m.id === editMsg.id ? { ...m, content: progressText } : m
+          ));
+        }
+      );
+
+      if (result.status === 'success' && result.html) {
+        // Replace ONLY this specific chart with the new VIS_HTML version
+        setVisualizations(prev => prev.map(viz =>
+          viz.vizId === selectedViz.vizId
+            ? { ...viz, type: VisualizationType.VIS_HTML, data: { html: result.html, heightPx: 400 } }
+            : viz
+        ));
+
+        setMessages(prev => prev.map(m =>
+          m.id === editMsg.id
+            ? { ...m, content: `✅ Updated "${selectedViz.title}"!\n\nApplied: "${query}"` }
+            : m
+        ));
+
+        setHighlightedMessageId(selectedViz.messageId || null);
+        setTimeout(() => setHighlightedMessageId(null), 2000);
+        return true;
+      } else {
+        setMessages(prev => prev.map(m =>
+          m.id === editMsg.id ? { ...m, content: `❌ Failed: ${result.message}` } : m
+        ));
+        return false;
+      }
+    }
+
+    // ─── Case 3: No viz selected → create from scratch ───
+    const starterHtml = `<div class="visualizationCard bg-slate-900 rounded-xl border border-slate-700 p-4">
   <div class="vc-header">
     <h3 class="vc-title text-slate-100 font-semibold text-base text-center">New Visualization</h3>
     <p class="vc-subtitle text-slate-400 text-xs text-center mt-1">Created by VisualizerAgent</p>
@@ -833,158 +931,56 @@ const App: React.FC = () => {
   </div>
 </div>`;
 
-      const vizMsg = addMsg(VISUALIZER_AGENT, `🔄 Creating visualization...`, {
-        tool: 'visualizer_edit_html',
-        isVisualizerEdit: true
-      });
-
-      const result = await editVisualizationHtmlWithStreaming(
-        query, 
-        starterHtml, 
-        visualizerModel,
-        (progressText, isDone) => {
-          setMsgs(prev => prev.map(m => 
-            m.id === vizMsg.id 
-              ? { ...m, content: progressText }
-              : m
-          ));
-        }
-      );
-      
-      if (result.status === 'success' && result.html) {
-        const newViz: ToolVisualization = {
-          type: VisualizationType.VIS_HTML,
-          title: 'Custom Visualization',
-          data: { html: result.html, heightPx: 400 },
-          messageId: vizMsg.id
-        };
-        addVisualization(newViz);
-        setSelectedVisualizationId(vizMsg.id);
-        
-        setMsgs(prev => prev.map(m => 
-          m.id === vizMsg.id 
-            ? { ...m, content: `✅ Visualization created!\n\nApplied: "${query}"` }
-            : m
-        ));
-        return true;
-      } else {
-        setMsgs(prev => prev.map(m => 
-          m.id === vizMsg.id 
-            ? { ...m, content: `❌ Failed: ${result.message}` }
-            : m
-        ));
-        return false;
-      }
-    }
-
-    // Edit existing visualization
-    const currentHtml = activeViz.data?.html;
-    if (!currentHtml) {
-      addMsg(AgentType.SYSTEM, "Error: Selected visualization has no HTML content.");
-      return false;
-    }
-    
-    const editMsg = addMsg(VISUALIZER_AGENT, `🔄 Editing visualization...`, {
+    const vizMsg = addMessage(VISUALIZER_AGENT, `🔄 Creating visualization...`, {
       tool: 'visualizer_edit_html',
-      isVisualizerEdit: true,
-      targetVizId: activeViz.messageId
+      isVisualizerEdit: true
     });
 
     const result = await editVisualizationHtmlWithStreaming(
-      query, 
-      currentHtml, 
+      query,
+      starterHtml,
       visualizerModel,
-      (progressText, isDone) => {
-        setMsgs(prev => prev.map(m => 
-          m.id === editMsg.id 
-            ? { ...m, content: progressText }
-            : m
+      (progressText) => {
+        setMessages(prev => prev.map(m =>
+          m.id === vizMsg.id ? { ...m, content: progressText } : m
         ));
       }
     );
 
     if (result.status === 'success' && result.html) {
-      updateVisualization(activeViz.messageId!, { 
-        html: result.html, 
-        heightPx: activeViz.data?.heightPx || 400 
-      });
-      
-      setMsgs(prev => prev.map(m => 
-        m.id === editMsg.id 
-          ? { ...m, content: `✅ Updated!\n\nApplied: "${query}"${result.warnings ? `\n\n⚠️ ${result.warnings.join(', ')}` : ''}` }
+      const newVizId = genVizId();
+      const newViz: ToolVisualization = {
+        type: VisualizationType.VIS_HTML,
+        title: 'Custom Visualization',
+        data: { html: result.html, heightPx: 400 },
+        vizId: newVizId,
+        messageId: vizMsg.id
+      };
+      addVisualization(newViz);
+      setSelectedVisualizationId(newVizId);
+
+      setMessages(prev => prev.map(m =>
+        m.id === vizMsg.id
+          ? { ...m, content: `✅ Visualization created!\n\nApplied: "${query}"` }
           : m
       ));
-      
-      setHighlightedMessageId(activeViz.messageId || null);
-      setTimeout(() => setHighlightedMessageId(null), 2000);
-      
       return true;
     } else {
-      setMsgs(prev => prev.map(m => 
-        m.id === editMsg.id 
-          ? { ...m, content: `❌ Failed: ${result.message}` }
-          : m
+      setMessages(prev => prev.map(m =>
+        m.id === vizMsg.id ? { ...m, content: `❌ Failed: ${result.message}` } : m
       ));
       return false;
     }
   };
 
-  // NEW: Handle queries in Visualization Mode - ALWAYS goes to viz editor
-  const handleVisualizationModeQuery = async (query: string) => {
-    // Add user message to viz mode messages
-    const userMsg: ChatMessage = {
-      id: Date.now().toString() + Math.random(),
-      role: AgentType.USER,
-      content: query,
-      timestamp: Date.now()
-    };
-    setVizModeMessages(prev => [...prev, userMsg]);
-    
-    setIsProcessing(true);
-    try {
-      await handleVisualizationEdit(query, true);
-    } catch (error) {
-      console.error('Visualization edit error:', error);
-      addVizModeMessage(AgentType.SYSTEM, `Error: ${error}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Original query handler for normal mode
+  // Original query handler
   const handleUserQuery = async (query: string) => {
-    // If in visualization mode, route to viz handler
-    if (visualizationMode) {
-      await handleVisualizationModeQuery(query);
-      return;
-    }
-
-    // Normal mode: check for viz edit requests
-    const hasSelectedVizHtml = selectedVisualizationId !== null && 
-      visualizations.some(v => v.messageId === selectedVisualizationId && v.type === VisualizationType.VIS_HTML);
-    
-    const isVizEdit = isVisualizationEditRequest(query, hasSelectedVizHtml);
-    
-    if (isVizEdit && hasSelectedVizHtml) {
+    // If a visualization is selected, route ALL queries to viz editor
+    if (selectedVisualizationId) {
       setIsProcessing(true);
       try {
         addMessage(AgentType.USER, query);
-        await handleVisualizationEdit(query, false);
-      } catch (error) {
-        console.error('Visualization edit error:', error);
-        addMessage(AgentType.SYSTEM, `Error editing visualization: ${error}`);
-      } finally {
-        setIsProcessing(false);
-      }
-      return;
-    }
-    
-    const hasVizHtml = visualizations.some(v => v.type === VisualizationType.VIS_HTML);
-    if (isVizEdit && !activeDataset && (hasVizHtml || query.toLowerCase().includes('create') || query.toLowerCase().includes('new visualization'))) {
-      setIsProcessing(true);
-      try {
-        addMessage(AgentType.USER, query);
-        await handleVisualizationEdit(query, false);
+        await handleVisualizationEdit(query);
       } catch (error) {
         console.error('Visualization edit error:', error);
         addMessage(AgentType.SYSTEM, `Error editing visualization: ${error}`);
@@ -1042,10 +1038,20 @@ const App: React.FC = () => {
         if (intent === 'RESEARCH') {
           addMessage(AgentType.NEURO_PLANNER, planningRetries === 0 ? "Formulating research analysis plan..." : "Refining research plan based on feedback...");
           plan = await generateNeuroPlan(query, activeDataset.columns.join(', '), allTools, currentFeedback);
+          // Guard: ensure analysis_steps is an array
+          if (!Array.isArray(plan?.analysis_steps)) {
+            console.warn('Planner returned invalid plan shape:', plan);
+            plan = { analysis_steps: [], rationale: plan?.rationale || 'Planner returned an invalid response.' };
+          }
           addMessage(AgentType.NEURO_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}\n   Instruction: ${s.instruction}`).join('\n')}\n\nRationale: ${plan.rationale}`, { plan });
         } else {
           addMessage(AgentType.GENERAL_PLANNER, planningRetries === 0 ? "Formulating general task plan..." : "Refining general plan based on feedback...");
           plan = await generateGeneralPlan(query, allTools, currentFeedback);
+          // Guard: ensure analysis_steps is an array
+          if (!Array.isArray(plan?.analysis_steps)) {
+            console.warn('Planner returned invalid plan shape:', plan);
+            plan = { analysis_steps: [], rationale: plan?.rationale || 'Planner returned an invalid response.' };
+          }
           addMessage(AgentType.GENERAL_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n')}`, { plan });
         }
 
@@ -1058,8 +1064,9 @@ const App: React.FC = () => {
             addMessage(AgentType.PLAN_VALIDATOR, "Plan verified. Proceeding to execution.");
           } else {
             planningRetries++;
-            currentFeedback = `Validation errors: ${validation.errors.join(', ')}. Suggestions: ${validation.suggestions}`;
-            addMessage(AgentType.PLAN_VALIDATOR, `Plan rejected (Attempt ${planningRetries}/${MAX_PLANNING_RETRIES}):\n${validation.errors.map((e: string) => `- ${e}`).join('\n')}\n\nProviding feedback to Planner for correction...`);
+            const errors = validation.errors || [];
+            currentFeedback = `Validation errors: ${errors.join(', ')}. Suggestions: ${validation.suggestions || 'None'}`;
+            addMessage(AgentType.PLAN_VALIDATOR, `Plan rejected (Attempt ${planningRetries}/${MAX_PLANNING_RETRIES}):\n${errors.map((e: string) => `- ${e}`).join('\n')}\n\nProviding feedback to Planner for correction...`);
             
             if (planningRetries >= MAX_PLANNING_RETRIES) {
               addMessage(AgentType.SYSTEM, "Critical: Planning failed to stabilize after multiple validation cycles. Stopping execution.");
@@ -1083,32 +1090,37 @@ const App: React.FC = () => {
     }
   };
 
-  const handleVizClick = (id?: string) => {
-    // Check if ID corresponds to a dataset ID for toggling selection
-    if (id && datasets.some(d => d.id === id)) {
-        toggleDataset(id);
+  const handleVizClick = (vizId?: string) => {
+    if (!vizId) return;
+    // Check if it's a dataset ID for toggling
+    if (datasets.some(d => d.id === vizId)) {
+        toggleDataset(vizId);
+        return;
     }
-    // Otherwise check if it's a message ID
-    else if (id) {
-        setHighlightedMessageId(id);
-        const clickedViz = visualizations.find(v => v.messageId === id);
-        if (clickedViz?.type === VisualizationType.VIS_HTML) {
-          setSelectedVisualizationId(id);
-        }
+    // Find the viz by vizId, fallback to messageId for report link clicks
+    const viz = visualizations.find(v => v.vizId === vizId) 
+             || visualizations.find(v => v.messageId === vizId);
+    if (!viz) return;
+
+    const resolvedVizId = viz.vizId!;
+
+    // Highlight the associated chat message
+    if (viz.messageId) setHighlightedMessageId(viz.messageId);
+
+    // Toggle: if already selected, deselect; otherwise select
+    if (selectedVisualizationId === resolvedVizId) {
+      setSelectedVisualizationId(null);
+    } else {
+      setSelectedVisualizationId(resolvedVizId);
+      addMessage(AgentType.SYSTEM, `🎨 Editing: **${viz.title || 'Visualization'}**. Type your changes in the chat. Click the chart again or press ✕ to stop editing.`);
     }
   };
 
-  // Toggle visualization mode
-  const toggleVisualizationMode = () => {
-    setVisualizationMode(prev => !prev);
-    // Auto-select first VIS_HTML if entering viz mode
-    if (!visualizationMode) {
-      const firstVizHtml = visualizations.find(v => v.type === VisualizationType.VIS_HTML);
-      if (firstVizHtml?.messageId) {
-        setSelectedVisualizationId(firstVizHtml.messageId);
-      }
-    }
-  };
+  // Get the currently selected visualization info for the chat indicator
+  const selectedVisualization = selectedVisualizationId 
+    ? visualizations.find(v => v.vizId === selectedVisualizationId) 
+    : null;
+
 
   // Header component
   const Header = () => (
@@ -1138,15 +1150,12 @@ const App: React.FC = () => {
 </div>`,
                   heightPx: 380
                 },
-                messageId: 'test-viz-' + Date.now()
+                vizId: 'test-viz-' + Date.now(),
+                messageId: 'test-viz-msg-' + Date.now()
               };
               addVisualization(testViz);
-              setSelectedVisualizationId(testViz.messageId!);
-              if (!visualizationMode) {
-                addMessage(AgentType.SYSTEM, "Created a test visualization. Click on it and type edit commands in the chat!");
-              } else {
-                addVizModeMessage(AgentType.SYSTEM, "Created a new visualization. Type your edit commands below!");
-              }
+              setSelectedVisualizationId(testViz.vizId);
+              addMessage(AgentType.SYSTEM, "Created a test visualization. Click on it and type edit commands in the chat!");
             }}
             className="flex items-center gap-1 px-2 py-1 text-xs bg-emerald-900/50 hover:bg-emerald-800/50 border border-emerald-700 rounded text-emerald-300 transition-colors"
             title="Create a test VIS_HTML visualization"
@@ -1158,16 +1167,16 @@ const App: React.FC = () => {
           <button
             onClick={() => {
               const mockVizs = getAllMockVisualizations();
+              const ts = Date.now();
+              let firstVizId = '';
               mockVizs.forEach((viz, index) => {
-                const newViz = { ...viz, messageId: `mock-viz-${Date.now()}-${index}` };
+                const vizId = `mock-viz-${ts}-${index}`;
+                const newViz = { ...viz, vizId, messageId: `mock-msg-${ts}-${index}` };
+                if (index === 0) firstVizId = vizId;
                 addVisualization(newViz);
               });
-              setSelectedVisualizationId(`mock-viz-${Date.now()}-0`);
-              if (!visualizationMode) {
-                addMessage(AgentType.SYSTEM, `Loaded ${mockVizs.length} mock visualizations. Click any visualization and edit it via chat!`);
-              } else {
-                addVizModeMessage(AgentType.SYSTEM, `Loaded ${mockVizs.length} mock visualizations. Select one and start editing!`);
-              }
+              if (firstVizId) setSelectedVisualizationId(firstVizId);
+              addMessage(AgentType.SYSTEM, `Loaded ${mockVizs.length} mock visualizations. Click any visualization and edit it via chat!`);
             }}
             className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-900/50 hover:bg-violet-800/50 border border-violet-700 rounded text-violet-300 transition-colors"
             title="Load mock neuroimaging visualizations"
@@ -1187,7 +1196,7 @@ const App: React.FC = () => {
         </div>
       </div>
       
-      {availableModels.length > 0 && !visualizationMode && (
+      {availableModels.length > 0 && (
         <div className="flex gap-2 text-xs">
           <div className="flex flex-col gap-1 w-1/3">
             <label className="text-slate-500">General Model</label>
@@ -1230,30 +1239,13 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Visualizer model selector in viz mode */}
-      {visualizationMode && availableModels.length > 0 && (
-        <div className="flex gap-2 text-xs">
-          <div className="flex flex-col gap-1 flex-1">
-            <label className="text-slate-500 flex items-center gap-1">
-              <Palette className="w-3 h-3" /> Visualizer Model
-            </label>
-            <select 
-              value={visualizerModel} 
-              onChange={(e) => setVisualizerModel(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-pink-500"
-            >
-              {availableModels.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
       
-      {selectedVisualizationId && !visualizationMode && (
+      {selectedVisualizationId && (
         <div className="flex items-center gap-2 text-xs bg-cyan-900/30 border border-cyan-800 rounded px-3 py-1.5">
           <Pencil className="w-3 h-3 text-cyan-400" />
-          <span className="text-cyan-300">Editing visualization - type changes in chat</span>
+          <span className="text-cyan-300">
+            Editing: <strong>{selectedVisualization?.title || 'Visualization'}</strong> ({selectedVisualization?.type || ''})
+          </span>
           <button 
             onClick={() => setSelectedVisualizationId(null)}
             className="ml-auto text-cyan-500 hover:text-cyan-300"
@@ -1275,34 +1267,40 @@ const App: React.FC = () => {
           datasetName={activeDataset?.name} 
           onVizClick={handleVizClick}
           onHtmlChange={handleHtmlChange}
+          onConvertToHtml={handleConvertToHtml}
           activeDatasetIds={activeDatasetIds}
+          selectedVisualizationId={selectedVisualizationId}
         />
       </div>
     </div>
   );
 
-  // Right panel (Chat) - shows different content based on mode
+  // Right panel (Chat)
   const RightPanel = () => (
     <div className="h-full flex flex-col relative">
-      {/* Visualization Mode Banner */}
-      {visualizationMode && (
-        <div className="flex-none bg-gradient-to-r from-pink-900/50 via-purple-900/50 to-indigo-900/50 border-b border-pink-700/50 px-4 py-3">
+      {/* Editing Banner - shows when a visualization is selected */}
+      {selectedVisualizationId && selectedVisualization && (
+        <div className="flex-none bg-gradient-to-r from-cyan-900/40 via-indigo-900/40 to-slate-900/40 border-b border-cyan-700/50 px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-pink-600 rounded-lg">
-                <Palette className="w-5 h-5 text-white" />
+              <div className="p-2 bg-cyan-600 rounded-lg">
+                <Pencil className="w-4 h-4 text-white" />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-white">Visualization Mode</h3>
-                <p className="text-xs text-pink-200/70">All messages go to visualization editor only</p>
+                <h3 className="text-sm font-semibold text-white">
+                  Editing: {selectedVisualization.title}
+                </h3>
+                <p className="text-xs text-cyan-200/70">
+                  Type your changes below &bull; {selectedVisualization.type}
+                </p>
               </div>
             </div>
             <button
-              onClick={toggleVisualizationMode}
+              onClick={() => setSelectedVisualizationId(null)}
               className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-200 transition-colors"
             >
               <X className="w-4 h-4" />
-              Exit Mode
+              Stop Editing
             </button>
           </div>
         </div>
@@ -1310,14 +1308,15 @@ const App: React.FC = () => {
 
       <div className="flex-1 min-h-0">
         <ChatArea 
-          messages={visualizationMode ? vizModeMessages : messages} 
+          messages={messages} 
           onSendMessage={handleUserQuery} 
-          onFileUpload={visualizationMode ? undefined : (file: File) => handleFileUpload(createFileList(file))}
-          onLoadDemo={visualizationMode ? undefined : handleLoadDemo}
+          onFileUpload={(file: File) => handleFileUpload(createFileList(file))}
+          onLoadDemo={handleLoadDemo}
           isProcessing={isProcessing}
-          hasData={visualizationMode ? true : !!activeDataset}
+          hasData={!!activeDataset}
           highlightedMessageId={highlightedMessageId}
-          onRestartStep={visualizationMode ? undefined : handleRestartFromStep}
+          onRestartStep={handleRestartFromStep}
+          placeholder={selectedVisualizationId ? `Describe changes to "${selectedVisualization?.title || 'visualization'}"...` : undefined}
           datasets={datasets}
           activeDatasetIds={activeDatasetIds}
           onDatasetToggle={toggleDataset}
@@ -1325,19 +1324,6 @@ const App: React.FC = () => {
           onMultiFileUpload={handleFileUpload}
         />
       </div>
-
-      {/* Floating Visualization Mode Button - only show when NOT in viz mode */}
-      {!visualizationMode && (
-        <button
-          onClick={toggleVisualizationMode}
-          className="absolute bottom-20 right-4 flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 rounded-full text-white shadow-lg shadow-pink-900/50 transition-all hover:scale-105 hover:shadow-xl hover:shadow-pink-900/50"
-          title="Enter Visualization Mode - all queries go to viz editor"
-        >
-          <Palette className="w-5 h-5" />
-          <span className="font-medium">Visualization & Edits</span>
-          <ChevronRight className="w-4 h-4" />
-        </button>
-      )}
     </div>
   );
 
