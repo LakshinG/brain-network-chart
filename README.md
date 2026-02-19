@@ -12,7 +12,7 @@
 3. Run UI:
    `npm run dev`
 4. Run backend at 8787: `node backend/server.mjs`
-5. Go to validator branch, run MCP server: `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`
+5. Go to validator branch, run MCP server: `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010` 
 6. Build SSH tunnel for above ports.
 
 ## Runtime Architecture

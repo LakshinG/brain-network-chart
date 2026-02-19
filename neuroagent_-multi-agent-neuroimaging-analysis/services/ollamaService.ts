@@ -39,11 +39,13 @@ export const getGeneralModel = () => generalModel;
 export const getNeuroModel = () => neuroModel;
 
 // Helper to build summarized history
-export const buildConversationContext = (messages: ChatMessage[]): string => {
-  // Take last 8 messages to maintain context window, excluding system noise
+export const buildConversationContext = (messages: ChatMessage[], limit: number = 8): string => {
+  if (limit <= 0) return "";
+
+  // Take last 'limit' messages to maintain context window, excluding system noise
   const recentMessages = messages
     .filter(m => m.role !== AgentType.SYSTEM && m.role !== AgentType.PLAN_VALIDATOR && m.role !== AgentType.PREPROCESSOR)
-    .slice(-8);
+    .slice(-limit);
 
   if (recentMessages.length === 0) return "";
 

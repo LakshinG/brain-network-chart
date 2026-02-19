@@ -49,6 +49,8 @@ const App: React.FC = () => {
   const [isPlanValidationEnabled, setIsPlanValidationEnabled] = useState<boolean>(true);
   // Researcher & Reporter Toggle
   const [isResearchReportEnabled, setIsResearchReportEnabled] = useState<boolean>(true);
+  // Context Memory Toggle
+  const [isContextMemoryEnabled, setIsContextMemoryEnabled] = useState<boolean>(true);
 
   const [suspendedState, setSuspendedState] = useState<SuspendedState | null>(null);
 
@@ -57,6 +59,41 @@ const App: React.FC = () => {
     const selected = datasets.filter(d => activeDatasetIds.includes(d.id));
     return mergeDatasets(selected);
   }, [datasets, activeDatasetIds]);
+
+  // Sync active dataset to visualizations (Dynamic Data Context)
+  useEffect(() => {
+    setVisualizations(prev => {
+        // Find existing Data Context card
+        const index = prev.findIndex(v => v.type === VisualizationType.DATA_TABLE && v.title.startsWith('Data Context:'));
+
+        if (!activeDataset) {
+            // If no active dataset, remove the context card if it exists
+            if (index !== -1) {
+                const newVizs = [...prev];
+                newVizs.splice(index, 1);
+                return newVizs;
+            }
+            return prev;
+        }
+
+        const newViz: ToolVisualization = {
+            type: VisualizationType.DATA_TABLE,
+            title: `Data Context: ${activeDataset.name}`,
+            data: activeDataset.data,
+            datasetId: activeDataset.id
+        };
+
+        if (index !== -1) {
+             // Update existing context card in place to avoid shifting history
+             const newVizs = [...prev];
+             newVizs[index] = newViz;
+             return newVizs;
+        } else {
+            // Add to top if it doesn't exist
+            return [newViz, ...prev];
+        }
+    });
+  }, [activeDataset]);
 
   const uploadActiveDataset = useCallback(async (manual: boolean = false) => {
       if (!activeDataset || !mcpConnected) {
@@ -172,7 +209,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (messages.length === 0) {
-      addMessage(AgentType.SYSTEM, "Welcome to the NeuroAgent Multi-Agent System. Please upload neuroimaging datasets (CSV) to the File System to begin.");
+      addMessage(AgentType.SYSTEM, "Welcome to the CyberNeuro Multi-Agent System. Please upload neuroimaging datasets (CSV) to the File System to begin.");
     }
   }, []);
 
@@ -218,14 +255,8 @@ const App: React.FC = () => {
 
     // Automatically select the new dataset
     setActiveDatasetIds(prev => [...prev, newDataset.id]);
-
-    // Show initial viz linked to this dataset
-    setVisualizations(prevViz => [{
-        type: VisualizationType.DATA_TABLE,
-        title: `Data Inspection: ${name}`,
-        data: data,
-        datasetId: newDataset.id
-    }, ...prevViz]);
+    
+    // Dynamic visualization is handled by useEffect watching activeDataset
   };
 
   const handleFileUpload = async (files: FileList | null) => {
@@ -514,8 +545,14 @@ const App: React.FC = () => {
          // Try to detect error in JSON response even if HTTP was 200 (Application Level Error)
          try {
             const parsed = JSON.parse(textContent);
+            
+            // Use parsed data as rawResult for better summarization later if it's a valid object
+            if (typeof parsed === 'object' && parsed !== null) {
+                rawResult = parsed;
+            }
+
             if (parsed && parsed.status === 'error') {
-                rawResult.isError = true;
+                if (typeof rawResult === 'object') rawResult.isError = true;
                 const errMsg = parsed.error || parsed.message || textContent;
                 stepResult = `Error: ${errMsg}`;
             }
@@ -680,6 +717,14 @@ const App: React.FC = () => {
                     const summaryRaw = { ...rawResult };
                     if (summaryRaw.dataPoints && Array.isArray(summaryRaw.dataPoints)) summaryRaw.dataPoints = `[${summaryRaw.dataPoints.length} points]`;
                     if (summaryRaw.data && Array.isArray(summaryRaw.data)) summaryRaw.data = `[${summaryRaw.data.length} rows]`; 
+                    
+                    // Handle GrowthCurveResult (Aging Curve) specifically to avoid dumping massive centile arrays
+                    if (summaryRaw.data && summaryRaw.data.centiles && summaryRaw.data.X) {
+                         const count = summaryRaw.data.values ? summaryRaw.data.values.length : 0;
+                         const xRange = summaryRaw.data.X.length > 0 ? `${Math.min(...summaryRaw.data.X).toFixed(1)}-${Math.max(...summaryRaw.data.X).toFixed(1)}` : 'N/A';
+                         summaryRaw.data = `[Aging Curve: X range ${xRange}, ${count} overlay points plotted]`;
+                    }
+
                     if (summaryRaw.subjectData) summaryRaw.subjectData = "payload";
                     if (summaryRaw.curveData) summaryRaw.curveData = "payload";
                     
@@ -932,7 +977,7 @@ const App: React.FC = () => {
       let currentFeedback = "";
       
       // Build conversation context
-      const chatHistory = buildConversationContext(messages);
+      const chatHistory = buildConversationContext(messages, isContextMemoryEnabled ? 3 : 0);
 
       while (!planIsValid && planningRetries < MAX_PLANNING_RETRIES) {
         if (intent === 'RESEARCH') {
@@ -997,7 +1042,7 @@ const App: React.FC = () => {
            <div className="flex justify-between items-center">
             <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
               <span className="bg-indigo-600 p-1 rounded-lg">NA</span>
-              NeuroAgent <span className="text-slate-500 font-normal">Platform</span>
+              CyberNeuro <span className="text-slate-500 font-normal">Platform</span>
             </h1>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
@@ -1061,6 +1106,17 @@ const App: React.FC = () => {
                   />
                   <div className="w-8 h-4 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                   <span className="ml-2 text-xs text-slate-400">Enable Researcher & Reporter</span>
+                </label>
+
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={isContextMemoryEnabled} 
+                    onChange={(e) => setIsContextMemoryEnabled(e.target.checked)} 
+                    className="sr-only peer" 
+                  />
+                  <div className="w-8 h-4 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  <span className="ml-2 text-xs text-slate-400">Context Memory (3 msgs)</span>
                 </label>
               </div>
             </div>
