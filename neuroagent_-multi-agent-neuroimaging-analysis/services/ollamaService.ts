@@ -1,6 +1,6 @@
 
 import { Ollama } from 'ollama';
-import { McpTool } from "../types";
+import { McpTool, ChatMessage, AgentType } from "../types";
 import { PROMPTS } from "../constants";
 import { validatePlanColumns } from './internalTools';
 
@@ -38,6 +38,23 @@ export const setNeuroModel = (model: string) => { neuroModel = model; };
 export const getGeneralModel = () => generalModel;
 export const getNeuroModel = () => neuroModel;
 
+// Helper to build summarized history
+export const buildConversationContext = (messages: ChatMessage[]): string => {
+  // Take last 8 messages to maintain context window, excluding system noise
+  const recentMessages = messages
+    .filter(m => m.role !== AgentType.SYSTEM && m.role !== AgentType.PLAN_VALIDATOR && m.role !== AgentType.PREPROCESSOR)
+    .slice(-8);
+
+  if (recentMessages.length === 0) return "";
+
+  return recentMessages.map(m => {
+    // Clean up content: remove thinking process if it's too verbose
+    let content = m.content;
+    if (content.length > 500) content = content.substring(0, 500) + "...(truncated)";
+    return `[${m.role}]: ${content}`;
+  }).join('\n\n');
+};
+
 export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERAL'> => {
   console.log('[Orchestrator Agent] Input:', PROMPTS.ORCHESTRATOR_CLASSIFY(query));
   try {
@@ -55,17 +72,17 @@ export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERA
   }
 };
 
-export const generateGeneralPlan = async (query: string, availableTools: McpTool[], feedback?: string) => {
+export const generateGeneralPlan = async (query: string, availableTools: McpTool[], feedback?: string, chatHistory: string = "") => {
   // Only include name and description for high-level planning
   const toolDescriptions = availableTools.map(t => 
     `- ${t.name}: ${t.description || 'No description'}`
   ).join('\n    ');
 
-  console.log('[General Planner Agent] Input:', PROMPTS.GENERAL_PLANNER(query, toolDescriptions, feedback || ""));
+  console.log('[General Planner Agent] Input:', PROMPTS.GENERAL_PLANNER(query, toolDescriptions, feedback || "", chatHistory));
   try {
     const response = await ollama.generate({
       model: generalModel,
-      prompt: PROMPTS.GENERAL_PLANNER(query, toolDescriptions, feedback || ""),
+      prompt: PROMPTS.GENERAL_PLANNER(query, toolDescriptions, feedback || "", chatHistory),
       format: 'json',
       stream: false
     });
@@ -79,7 +96,7 @@ export const generateGeneralPlan = async (query: string, availableTools: McpTool
   }
 };
 
-export const generateNeuroPlan = async (query: string, dataContext: string, availableTools: McpTool[], feedback?: string) => {
+export const generateNeuroPlan = async (query: string, dataContext: string, availableTools: McpTool[], feedback?: string, chatHistory: string = "") => {
   // Only include name and description for high-level planning
   const toolDescriptions = availableTools.map(t => 
     `- ${t.name}: ${t.description || 'No description'}`
@@ -87,18 +104,18 @@ export const generateNeuroPlan = async (query: string, dataContext: string, avai
 
   const allToolDescs = `
     [Core Data Tools]
-    - DATA_INSPECT: Inspect data distribution and get a glimpse of rows.
+    - DATA_INSPECT: Display data rows to the user (Visualization). Use this when the user wants to see the table or when you need to check value formats (e.g. string vs number).
     - TRANSFORM_DATA: Convert categorical columns (e.g. DX, Sex) to numeric (creates {col}_numeric). Use this before Correlation if input is categorical.
     
     [Advanced/MCP Tools]
     ${toolDescriptions ? toolDescriptions : 'No external tools available.'}
   `;
 
-  console.log('[Neuro Planner Agent] Input:', PROMPTS.NEURO_PLANNER(query, dataContext, allToolDescs, feedback || ""));
+  console.log('[Neuro Planner Agent] Input:', PROMPTS.NEURO_PLANNER(query, dataContext, allToolDescs, feedback || "", chatHistory));
   try {
     const response = await ollama.generate({
       model: neuroModel,
-      prompt: PROMPTS.NEURO_PLANNER(query, dataContext, allToolDescs, feedback || ""),
+      prompt: PROMPTS.NEURO_PLANNER(query, dataContext, allToolDescs, feedback || "", chatHistory),
       format: 'json',
       stream: false
     });
@@ -151,20 +168,29 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
   }
 };
 
-export const runExecutorAgent = async (instruction: string, columns: string[], availableTools: McpTool[], clarification: string = "", previousResults: string = "", delegator: string = "Planner", serverFilename: string | null = null) => {
+export const runExecutorAgent = async (
+  instruction: string, 
+  columns: string[], 
+  availableTools: McpTool[], 
+  clarification: string = "", 
+  previousResults: string = "", 
+  delegator: string = "Planner", 
+  serverFilename: string | null = null,
+  retryError: string = ""
+) => {
   const toolDefinitions = availableTools.map(t => 
     `Tool: ${t.name}
      Description: ${t.description}
      Parameters Schema: ${JSON.stringify(t.inputSchema.properties || {})}`
   ).join('\n\n');
 
-  console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || ''));
+  console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || '', retryError));
   
   try {
     // Executor uses the GENERAL model for precise instruction following
     const response = await ollama.generate({
       model: generalModel,
-      prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || ''),
+      prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || '', retryError),
       format: 'json',
       stream: false
     });

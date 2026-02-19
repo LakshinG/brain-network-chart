@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
-  AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool, SuspendedState 
+  AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool, SuspendedState, CorrelationResult, DatasetRow
 } from './types';
 import { MOCK_CSV_DATA } from './constants';
 import { parseCSV, mergeDatasets, datasetToCSV } from './utils/stats';
@@ -19,6 +19,7 @@ import {
   getAvailableModels, 
   setGeneralModel, 
   setNeuroModel,
+  buildConversationContext
 } from './services/ollamaService';
 import { mcpClient } from './services/mcpService';
 import { INTERNAL_TOOLS, executeInternalTool } from './services/internalTools';
@@ -46,6 +47,8 @@ const App: React.FC = () => {
 
   // Plan Validator Toggle
   const [isPlanValidationEnabled, setIsPlanValidationEnabled] = useState<boolean>(true);
+  // Researcher & Reporter Toggle
+  const [isResearchReportEnabled, setIsResearchReportEnabled] = useState<boolean>(true);
 
   const [suspendedState, setSuspendedState] = useState<SuspendedState | null>(null);
 
@@ -55,9 +58,7 @@ const App: React.FC = () => {
     return mergeDatasets(selected);
   }, [datasets, activeDatasetIds]);
 
-  // Sync active merged dataset to server
-  useEffect(() => {
-    const syncDatasetToServer = async () => {
+  const uploadActiveDataset = useCallback(async (manual: boolean = false) => {
       if (!activeDataset || !mcpConnected) {
          if (!activeDataset) setActiveServerFilename(null);
          return;
@@ -69,6 +70,9 @@ const App: React.FC = () => {
          if (ds && ds.serverFilename) {
              if (activeServerFilename !== ds.serverFilename) {
                  setActiveServerFilename(ds.serverFilename);
+                 if (manual) addMessage(AgentType.SYSTEM, `Context set to existing server file: ${ds.serverFilename}`);
+             } else {
+                 if (manual) addMessage(AgentType.SYSTEM, `Dataset is already up-to-date on server (${ds.serverFilename}).`);
              }
              return;
          }
@@ -81,19 +85,54 @@ const App: React.FC = () => {
           const safeName = activeDataset.name.replace(/[^a-zA-Z0-9._-]/g, '_');
           const file = new File([csv], `ctx_${timestamp}_${safeName}.csv`, { type: 'text/csv' });
           
-          console.log("Uploading active context to server...");
+          if (manual) addMessage(AgentType.SYSTEM, "Uploading active context to server...");
+          else console.log("Uploading active context to server...");
+
           const response = await mcpClient.uploadFile(file);
           if (response && response.file_info && response.file_info.saved_filename) {
               setActiveServerFilename(response.file_info.saved_filename);
-              console.log("Context synced:", response.file_info.saved_filename);
+              if (manual) {
+                  addMessage(AgentType.SYSTEM, `Sync complete. Active context: ${response.file_info.saved_filename}`);
+              } else {
+                  console.log("Context synced:", response.file_info.saved_filename);
+              }
           }
       } catch (e) {
           console.error("Context sync failed", e);
+          if (manual) addMessage(AgentType.SYSTEM, "Manual sync failed. Check console for errors.");
       }
-    };
+  }, [activeDataset, activeDatasetIds, datasets, mcpConnected, activeServerFilename]);
 
-    syncDatasetToServer();
-  }, [activeDataset, mcpConnected]);
+  // Sync active merged dataset to server automatically
+  useEffect(() => {
+    uploadActiveDataset(false);
+  }, [uploadActiveDataset]);
+
+  const handleManualSync = () => {
+      uploadActiveDataset(true);
+  };
+
+  const handleManualMerge = () => {
+      if (activeDatasetIds.length < 2) {
+          addMessage(AgentType.SYSTEM, "Please select 2 or more datasets to merge.");
+          return;
+      }
+      if (!activeDataset) return;
+
+      const newId = `merged-${Date.now()}`;
+      // Create a persistent copy of the currently computed 'activeDataset'
+      const newDataset: Dataset = {
+          ...activeDataset,
+          id: newId,
+          name: `Merged (${activeDatasetIds.length} files)`,
+          serverFilename: undefined // Explicitly undefined so it gets uploaded on selection
+      };
+
+      setDatasets(prev => [...prev, newDataset]);
+      // Switch selection to the new merged dataset
+      setActiveDatasetIds([newId]);
+      addMessage(AgentType.SYSTEM, `Merged ${activeDatasetIds.length} datasets into "${newDataset.name}" and added to file list.`);
+  };
 
   useEffect(() => {
     const initSystem = async () => {
@@ -255,12 +294,20 @@ const App: React.FC = () => {
     addMessage(AgentType.SYSTEM, `Neuro Model switched to: ${newModel}`);
   };
 
-  const parseMcpResultToVisualization = (toolName: string, content: string): ToolVisualization | null => {
+  const parseMcpResultToVisualization = (toolName: string, content: string, currentData: DatasetRow[] = []): ToolVisualization | null => {
     try {
       const json = JSON.parse(content);
       // Check for GrowthCurveResult structure
       if (json.phenotype && json.data && json.data.centiles && Array.isArray(json.data.centiles)) {
-          return { type: VisualizationType.AGING_CURVE, title: `Aging Curve: ${json.phenotype}`, data: json };
+          const vizData = { ...json };
+          // Check if there is a 'colors' column in the dataset to use for overlayDot_color
+          if (currentData.length > 0 && 'colors' in currentData[0]) {
+              vizData.overlayDot_color = currentData.map(r => {
+                  const val = parseFloat(String(r.colors));
+                  return isNaN(val) ? 0 : val;
+              });
+          }
+          return { type: VisualizationType.AGING_CURVE, title: `Aging Curve: ${json.phenotype}`, data: vizData };
       }
       
       if (json.r !== undefined && json.p !== undefined && Array.isArray(json.dataPoints)) {
@@ -344,7 +391,12 @@ const App: React.FC = () => {
               
               if (!newCols.includes(newColName)) newCols.push(newColName);
               
-              stepResult = `Created new column '${newColName}' by averaging: ${params.columns.join(', ')}.`;
+              const matchedCount = aggResult.matchedColumns ? aggResult.matchedColumns.length : 0;
+              const colsSnippet = aggResult.matchedColumns && aggResult.matchedColumns.length > 5 
+                  ? aggResult.matchedColumns.slice(0, 5).join(', ') + '...' 
+                  : aggResult.matchedColumns.join(', ');
+
+              stepResult = `Created new column '${newColName}' by averaging ${matchedCount} columns matching '${params.condition}' (${colsSnippet}).`;
               viz = {
                    type: VisualizationType.DATA_TABLE,
                    title: `Aggregation: ${newColName}`,
@@ -378,15 +430,39 @@ const App: React.FC = () => {
               const result = executeInternalTool(toolName, params, newData);
               rawResult = result;
               
+              // Generic handler for tools returning data mutation
+              if ((result as any).transformedData) {
+                  newData = (result as any).transformedData;
+                  const nc = (result as any).newColumn;
+                  if (nc && !newCols.includes(nc)) newCols.push(nc);
+                  
+                  if (toolName === 'SPECTRAL_CLUSTERING' && nc === 'colors') {
+                     // Explicit context update message not strictly needed in UI, but useful for logs
+                  }
+              }
+
               if (toolName === 'CORRELATION_ANALYSIS') {
-                  const corrResult = result as any;
+                  const corrResult = result as CorrelationResult;
+                  const series = corrResult.series || [];
+                  const primarySeries = series.length > 0 ? series[0] : { r: 0, p: 1, name: 'No Data' };
+                  
                   const vizData = {
                     ...corrResult,
-                    xCol: params.x_column || params.x || 'X',
-                    yCol: params.y_column || params.y || 'Y'
+                    xCol: corrResult.xCol || params.x_column || params.x || 'X',
+                    yCol: corrResult.yCol || params.y_column || params.y || 'Y'
                   };
-                  viz = { type: VisualizationType.SCATTER_PLOT, title: `Correlation: ${corrResult.r.toFixed(2)}`, data: vizData };
-                  stepResult = `Correlation Analysis complete. R=${corrResult.r.toFixed(3)}, p-value=${corrResult.p.toExponential(3)}.`;
+                  
+                  const displayTitle = corrResult.groupCol 
+                    ? `Grouped Correlation: ${vizData.xCol} vs ${vizData.yCol}`
+                    : `Correlation: ${primarySeries.r.toFixed(2)}`;
+
+                  viz = { type: VisualizationType.SCATTER_PLOT, title: displayTitle, data: vizData };
+                  
+                  if (corrResult.groupCol) {
+                     stepResult = `Correlation Analysis grouped by ${corrResult.groupCol} complete. Found ${series.length} groups.`;
+                  } else {
+                     stepResult = `Correlation Analysis complete. R=${primarySeries.r.toFixed(3)}, p-value=${primarySeries.p.toExponential(3)}.`;
+                  }
               } else if (toolName === 'GROUP_COMPARISON') {
                    const groupResult = result as any;
                    viz = { type: VisualizationType.BOX_PLOT, title: `Group Comparison`, data: groupResult };
@@ -394,7 +470,13 @@ const App: React.FC = () => {
               } else if (toolName === 'SPECTRAL_CLUSTERING') {
                    const clusterResult = result as any;
                    viz = { type: VisualizationType.CLUSTERING_DASHBOARD, title: `Spectral Clustering (k=${clusterResult.nCluster})`, data: clusterResult };
-                   stepResult = `Spectral Clustering complete with ${clusterResult.nCluster} clusters. Cluster correlation with target: r=${clusterResult.clusterCorrelation.r.toFixed(3)}.`;
+                   stepResult = `Spectral Clustering complete with ${clusterResult.nCluster} clusters.`;
+                   if (clusterResult.newColumn) {
+                       stepResult += ` Inserted cluster IDs into new column '${clusterResult.newColumn}'.`;
+                   }
+                   if (clusterResult.clusterCorrelation && clusterResult.clusterCorrelation.series && clusterResult.clusterCorrelation.series.length > 0) {
+                        stepResult += ` Cluster correlation with target: r=${clusterResult.clusterCorrelation.series[0]?.r.toFixed(3)}.`;
+                   }
               } else if (toolName === 'STRATIFY_DATASET') {
                    const stratResult = result as any;
                    newData = stratResult.transformedData;
@@ -410,6 +492,10 @@ const App: React.FC = () => {
                    };
                    
                    stepResult = `Stratified ${params.target_column} by ${params.group_column}. Created ${stratResult.newColumns.length} new columns: ${stratResult.newColumns.join(', ')}.`;
+              } else if (toolName === 'SVM_CLASSIFICATION') {
+                   const svmResult = result as any;
+                   viz = { type: VisualizationType.SVM_BOUNDARY, title: `SVM Classification (${(svmResult.accuracy*100).toFixed(1)}% Acc)`, data: svmResult };
+                   stepResult = `SVM Classification complete. Accuracy: ${(svmResult.accuracy * 100).toFixed(2)}%.`;
               }
           }
       }
@@ -419,12 +505,30 @@ const App: React.FC = () => {
             args.data = newData;
          }
          const result = await mcpClient.callTool(toolName, args);
-         rawResult = result;
+         // Clone result to allow modifying isError if we detect application-level error
+         rawResult = { ...result }; 
+
          const textContent = result.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
          stepResult = textContent || "Tool executed successfully.";
-         viz = parseMcpResultToVisualization(toolName, textContent);
-         if (viz?.type === VisualizationType.AGING_CURVE) stepResult = 'Aging curve successfully loaded';
-         if (result.isError) stepResult = `Error executing tool: ${stepResult}`;
+         
+         // Try to detect error in JSON response even if HTTP was 200 (Application Level Error)
+         try {
+            const parsed = JSON.parse(textContent);
+            if (parsed && parsed.status === 'error') {
+                rawResult.isError = true;
+                const errMsg = parsed.error || parsed.message || textContent;
+                stepResult = `Error: ${errMsg}`;
+            }
+         } catch(e) { /* ignore json parse error */ }
+
+         viz = parseMcpResultToVisualization(toolName, textContent, newData);
+         if (viz?.type === VisualizationType.AGING_CURVE && !rawResult.isError) stepResult = 'Aging curve successfully loaded';
+         
+         if (rawResult.isError) {
+             if (!stepResult.startsWith("Error")) {
+                  stepResult = `Error executing tool: ${stepResult}`;
+             }
+         }
       } 
       else {
          stepResult = `Unknown tool: ${toolName}. Skipping.`;
@@ -482,8 +586,6 @@ const App: React.FC = () => {
             let previousResultsContext = resultsSummary.join('\n\n');
             
             if (executionError) {
-                previousResultsContext += `\n\n[SYSTEM MESSAGE]: The previous attempt to execute this step failed with error: "${executionError}". Please adjust your tool parameters or choice to fix this.`;
-                
                 setMessages(prev => prev.map(m => 
                   m.id === executorThinkingMsg.id ? { 
                       ...m, 
@@ -500,7 +602,8 @@ const App: React.FC = () => {
               context, 
               previousResultsContext,
               "Planner",
-              activeServerFilename 
+              activeServerFilename,
+              executionError || ""
             );
             
             if (executorResult.needs_clarification) {
@@ -592,6 +695,36 @@ const App: React.FC = () => {
             activeCols = attemptCols;
             stepSuccess = true;
 
+            // Sync changes to global state so UI and subsequent steps use updated data
+            if (activeDataset) {
+                setDatasets(prev => {
+                    const targetId = activeDataset.id;
+                    const exists = prev.some(d => d.id === targetId);
+                    
+                    // Create updated dataset object
+                    // We clear serverFilename to force a re-sync/upload since data has changed
+                    const updatedDataset: Dataset = {
+                        ...activeDataset,
+                        data: activeData,
+                        columns: activeCols,
+                        serverFilename: undefined 
+                    };
+
+                    if (exists) {
+                        return prev.map(d => d.id === targetId ? updatedDataset : d);
+                    } else {
+                        // Persist transient merge
+                        return [...prev, updatedDataset];
+                    }
+                });
+
+                // If we started with a multi-file selection (transient merge), 
+                // switch selection to the now-persisted merged dataset to maintain continuity
+                if (activeDatasetIds.length > 1) {
+                     setActiveDatasetIds([activeDataset.id]);
+                }
+            }
+
             setMessages(prev => prev.map(m => 
               m.id === executorThinkingMsg.id ? { ...m, content: `${m.content}\n\n✅ Execution Complete:${stepAggregateResult}` } : m
             ));
@@ -611,95 +744,103 @@ const App: React.FC = () => {
         }
       }
 
+      if (!stepSuccess) {
+          addMessage(AgentType.SYSTEM, `⛔ Workflow Halted: Step ${step.step_id} failed to execute after ${MAX_RETRIES} attempts.\n\nPlease click "Edit & Restart Step" on the failed message to correct the parameters or logic, then try again.`);
+          return;
+      }
+
       await new Promise(r => setTimeout(r, 1000));
     }
 
     if (intent === 'RESEARCH') {
-      let researcherActive = true;
-      let loopCount = 0;
-      const MAX_LOOPS = 3;
-      let aggregatedResearcherNotes = "";
+      if (!isResearchReportEnabled) {
+          addMessage(AgentType.SYSTEM, "Research Report generation skipped (disabled by user).");
+      } else {
+          let researcherActive = true;
+          let loopCount = 0;
+          const MAX_LOOPS = 3;
+          let aggregatedResearcherNotes = "";
 
-      addMessage(AgentType.RESEARCHER, "Analyzing findings and searching for external context...");
+          addMessage(AgentType.RESEARCHER, "Analyzing findings and searching for external context...");
 
-      while (researcherActive && loopCount < MAX_LOOPS) {
-          const context = resultsSummary.join('\n');
-          const researchTools = allTools.filter(t => {
-             const name = t.name.toLowerCase();
-             return name.includes('search') || name.includes('query') || name.includes('literature') || name.includes('pubmed') || name.includes('web') || name.includes('internet') || name.includes('google');
-          });
+          while (researcherActive && loopCount < MAX_LOOPS) {
+              const context = resultsSummary.join('\n');
+              const researchTools = allTools.filter(t => {
+                const name = t.name.toLowerCase();
+                return name.includes('search') || name.includes('query') || name.includes('literature') || name.includes('pubmed') || name.includes('web') || name.includes('internet') || name.includes('google');
+              });
 
-          const decision = await generateResearchInsights(context, researchTools);
-          
-          if (decision.decision === 'TOOL_CALL') {
-             const instruction = decision.instruction;
-             if (instruction) {
-                 loopCount++;
-                 addMessage(AgentType.RESEARCHER, `Gathering info: "${instruction}"`, {
-                     thought: decision.thought
-                 });
-                 try {
-                     const previousResultsContext = resultsSummary.join('\n\n');
-                     const executorResult = await runExecutorAgent(
-                         instruction, 
-                         activeCols, 
-                         allTools, 
-                         undefined, 
-                         previousResultsContext,
-                         AgentType.RESEARCHER, // Delegated by Researcher
-                         activeServerFilename
-                     );
-                     const toolCalls = executorResult.toolCalls;
-                     if (toolCalls && toolCalls.length > 0) {
-                         for (const call of toolCalls) {
-                             const toolName = call.tool;
-                             const params = call.parameters;
-                             const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
-                                 toolName, params, activeData, activeCols
-                             );
-                             activeData = updatedData;
-                             activeCols = updatedColumns;
-                             if (viz) {
-                                 addVisualization({ ...viz, title: `Researcher: ${viz.title}` });
-                             }
-                             const note = `[Researcher Tool] ${toolName}: ${resultText}`;
-                             addMessage(AgentType.RESEARCHER, `Found: ${resultText.substring(0, 150)}...`);
-                             resultsSummary.push(note);
-                             aggregatedResearcherNotes += "\n" + note;
-                         }
-                     } else {
-                         addMessage(AgentType.RESEARCHER, "Executor found no applicable tools for research step.");
-                     }
-                 } catch (e: any) {
-                     addMessage(AgentType.RESEARCHER, `Error executing researcher instruction: ${e.message}`);
-                     researcherActive = false;
-                 }
-             } else {
-                 researcherActive = false;
-             }
-          } else {
-             // Researcher is done gathering info
-             aggregatedResearcherNotes += `\n[Researcher Conclusions]: ${decision.report}`;
-             researcherActive = false;
+              const decision = await generateResearchInsights(context, researchTools);
+              
+              if (decision.decision === 'TOOL_CALL') {
+                const instruction = decision.instruction;
+                if (instruction) {
+                    loopCount++;
+                    addMessage(AgentType.RESEARCHER, `Gathering info: "${instruction}"`, {
+                        thought: decision.thought
+                    });
+                    try {
+                        const previousResultsContext = resultsSummary.join('\n\n');
+                        const executorResult = await runExecutorAgent(
+                            instruction, 
+                            activeCols, 
+                            allTools, 
+                            undefined, 
+                            previousResultsContext,
+                            AgentType.RESEARCHER, // Delegated by Researcher
+                            activeServerFilename
+                        );
+                        const toolCalls = executorResult.toolCalls;
+                        if (toolCalls && toolCalls.length > 0) {
+                            for (const call of toolCalls) {
+                                const toolName = call.tool;
+                                const params = call.parameters;
+                                const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
+                                    toolName, params, activeData, activeCols
+                                );
+                                activeData = updatedData;
+                                activeCols = updatedColumns;
+                                if (viz) {
+                                    addVisualization({ ...viz, title: `Researcher: ${viz.title}` });
+                                }
+                                const note = `[Researcher Tool] ${toolName}: ${resultText}`;
+                                addMessage(AgentType.RESEARCHER, `Found: ${resultText.substring(0, 150)}...`);
+                                resultsSummary.push(note);
+                                aggregatedResearcherNotes += "\n" + note;
+                            }
+                        } else {
+                            addMessage(AgentType.RESEARCHER, "Executor found no applicable tools for research step.");
+                        }
+                    } catch (e: any) {
+                        addMessage(AgentType.RESEARCHER, `Error executing researcher instruction: ${e.message}`);
+                        researcherActive = false;
+                    }
+                } else {
+                    researcherActive = false;
+                }
+              } else {
+                // Researcher is done gathering info
+                aggregatedResearcherNotes += `\n[Researcher Conclusions]: ${decision.report}`;
+                researcherActive = false;
+              }
           }
+          
+          // --- PROPOSAL REPORTER AGENT ---
+          addMessage(AgentType.PROPOSAL_REPORTER, "Synthesizing analysis and research into a final proposal...");
+          
+          const finalReport = await generateProposalReport(originalUserQuery || "Research Analysis", resultsSummary.join('\n'), aggregatedResearcherNotes);
+          
+          const reporterMsg = addMessage(AgentType.PROPOSAL_REPORTER, "Final Proposal generated.");
+          
+          setMessages(prev => prev.map(m => m.id === reporterMsg.id ? { ...m, content: "Final Report Generated (See Visualizer)" } : m));
+          
+          addVisualization({
+            type: VisualizationType.RESEARCH_REPORT,
+            title: "Proposal Report",
+            data: { report: finalReport, stepIdToMessageId },
+            messageId: reporterMsg.id
+          });
       }
-      
-      // --- PROPOSAL REPORTER AGENT ---
-      addMessage(AgentType.PROPOSAL_REPORTER, "Synthesizing analysis and research into a final proposal...");
-      
-      const finalReport = await generateProposalReport(originalUserQuery || "Research Analysis", resultsSummary.join('\n'), aggregatedResearcherNotes);
-      
-      const reporterMsg = addMessage(AgentType.PROPOSAL_REPORTER, "Final Proposal generated.");
-      
-      setMessages(prev => prev.map(m => m.id === reporterMsg.id ? { ...m, content: "Final Report Generated (See Visualizer)" } : m));
-      
-      addVisualization({
-        type: VisualizationType.RESEARCH_REPORT,
-        title: "Proposal Report",
-        data: { report: finalReport, stepIdToMessageId },
-        messageId: reporterMsg.id
-      });
-      
     } else {
       addMessage(AgentType.SYSTEM, "Task complete.");
     }
@@ -789,15 +930,18 @@ const App: React.FC = () => {
       let planningRetries = 0;
       const MAX_PLANNING_RETRIES = 3;
       let currentFeedback = "";
+      
+      // Build conversation context
+      const chatHistory = buildConversationContext(messages);
 
       while (!planIsValid && planningRetries < MAX_PLANNING_RETRIES) {
         if (intent === 'RESEARCH') {
           addMessage(AgentType.NEURO_PLANNER, planningRetries === 0 ? "Formulating research analysis plan..." : "Refining research plan based on feedback...");
-          plan = await generateNeuroPlan(query, activeDataset.columns.join(', '), allTools, currentFeedback);
+          plan = await generateNeuroPlan(query, activeDataset.columns.join(', '), allTools, currentFeedback, chatHistory);
           addMessage(AgentType.NEURO_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}\n   Instruction: ${s.instruction}`).join('\n')}\n\nRationale: ${plan.rationale}`, { plan });
         } else {
           addMessage(AgentType.GENERAL_PLANNER, planningRetries === 0 ? "Formulating general task plan..." : "Refining general plan based on feedback...");
-          plan = await generateGeneralPlan(query, allTools, currentFeedback);
+          plan = await generateGeneralPlan(query, allTools, currentFeedback, chatHistory);
           addMessage(AgentType.GENERAL_PLANNER, `Plan created:\n${plan.analysis_steps.map((s: any) => `${s.step_id}. ${s.tool}: ${s.description}`).join('\n')}`, { plan });
         }
 
@@ -896,7 +1040,7 @@ const App: React.FC = () => {
                   </div>
               </div>
               
-              <div className="flex items-center pt-2">
+              <div className="flex items-center pt-2 gap-4">
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input 
                     type="checkbox" 
@@ -906,6 +1050,17 @@ const App: React.FC = () => {
                   />
                   <div className="w-8 h-4 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                   <span className="ml-2 text-xs text-slate-400">Enable Plan Validator</span>
+                </label>
+
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={isResearchReportEnabled} 
+                    onChange={(e) => setIsResearchReportEnabled(e.target.checked)} 
+                    className="sr-only peer" 
+                  />
+                  <div className="w-8 h-4 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[0px] after:left-[0px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  <span className="ml-2 text-xs text-slate-400">Enable Researcher & Reporter</span>
                 </label>
               </div>
             </div>
@@ -936,6 +1091,8 @@ const App: React.FC = () => {
           onDatasetToggle={toggleDataset}
           onDatasetRemove={removeDataset}
           onMultiFileUpload={handleFileUpload}
+          onMergeDatasets={handleManualMerge}
+          onSyncDataset={handleManualSync}
         />
       </div>
     </div>

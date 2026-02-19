@@ -2,8 +2,8 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ToolVisualization, VisualizationType, GroupComparisonResult } from '../../types';
-import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart } from './Charts';
-import { FileText, Database, BookOpen, Link, FileCheck2, CheckCircle2, TrendingUp, Grid2X2, Layers } from 'lucide-react';
+import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart, SVMBoundaryChart } from './Charts';
+import { FileText, Database, BookOpen, Link, FileCheck2, CheckCircle2, TrendingUp, Grid2X2, Layers, Binary } from 'lucide-react';
 
 interface VisualizerAreaProps {
   visualizations: ToolVisualization[];
@@ -103,10 +103,9 @@ const VisualizationCard: React.FC<{
   
   return (
     <div 
-        onClick={onClick}
         className={`bg-slate-800 rounded-xl border overflow-hidden shadow-xl flex-shrink-0 transition-all 
         ${isActiveDataset ? 'border-indigo-500/60 ring-1 ring-indigo-500/30' : 'border-slate-700'}
-        ${isClickable ? 'cursor-pointer hover:ring-2 hover:ring-indigo-500/50 hover:border-indigo-500' : ''}`}
+        `}
     >
       <div className="bg-slate-900 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
         <div className="flex items-center space-x-2">
@@ -115,6 +114,7 @@ const VisualizationCard: React.FC<{
           {visualization.type === VisualizationType.AGING_CURVE && <TrendingUp className="w-4 h-4 text-teal-400" />}
           {visualization.type === VisualizationType.CLUSTERING_DASHBOARD && <Grid2X2 className="w-4 h-4 text-rose-400" />}
           {visualization.type === VisualizationType.STRATIFICATION_RESULT && <Layers className="w-4 h-4 text-emerald-400" />}
+          {visualization.type === VisualizationType.SVM_BOUNDARY && <Binary className="w-4 h-4 text-blue-500" />}
           {visualization.type === VisualizationType.LITERATURE_LIST && <BookOpen className="w-4 h-4 text-amber-400" />}
           {visualization.type === VisualizationType.DATA_TABLE && <FileText className="w-4 h-4 text-emerald-400" />}
           {visualization.type === VisualizationType.RESEARCH_REPORT && <FileCheck2 className="w-4 h-4 text-indigo-400" />}
@@ -126,45 +126,62 @@ const VisualizationCard: React.FC<{
                     <CheckCircle2 className="w-4 h-4 text-indigo-400" />
                 </span>
             )}
-            {visualization.messageId && <Link className="w-3 h-3 text-slate-500" />}
-            <span className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400 border border-slate-600">
-            {visualization.type}
-            </span>
+            
+            <button
+                onClick={() => isClickable && onClick && onClick()}
+                disabled={!isClickable}
+                className={`
+                    text-xs px-2 py-1 rounded border flex items-center gap-2 transition-all
+                    ${isClickable 
+                        ? 'bg-slate-800 text-indigo-300 border-indigo-500/30 hover:bg-indigo-900/30 hover:border-indigo-400 cursor-pointer' 
+                        : 'bg-slate-800 text-slate-400 border-slate-600 cursor-default'}
+                `}
+                title={isClickable ? "Jump to source message" : "No source link"}
+            >
+                {visualization.type}
+                {isClickable && <Link className="w-3 h-3" />}
+            </button>
         </div>
       </div>
 
-      <div className="p-4 bg-slate-800/50 pointer-events-none"> 
+      <div className="p-4 bg-slate-800/50"> 
         {visualization.type === VisualizationType.SCATTER_PLOT && (
           <ScatterPlot data={visualization.data} config={visualization.config} />
         )}
 
         {visualization.type === VisualizationType.BOX_PLOT && (
-          <div className="pointer-events-auto">
+          <div>
             <StatsBarChart data={visualization.data} config={visualization.config} />
             <PairwiseTable data={visualization.data} />
           </div>
         )}
 
         {visualization.type === VisualizationType.AGING_CURVE && (
-            <div className="pointer-events-auto">
+            <div>
                 <AgingCurveChart data={visualization.data} config={visualization.config} />
             </div>
         )}
 
         {visualization.type === VisualizationType.CLUSTERING_DASHBOARD && (
-            <div className="pointer-events-auto">
+            <div>
                 <ClusteringDashboard data={visualization.data} config={visualization.config} />
             </div>
         )}
 
         {visualization.type === VisualizationType.STRATIFICATION_RESULT && (
-            <div className="pointer-events-auto">
+            <div>
                 <StratificationChart data={visualization.data} config={visualization.config} />
             </div>
         )}
 
+        {visualization.type === VisualizationType.SVM_BOUNDARY && (
+            <div>
+                <SVMBoundaryChart data={visualization.data} config={visualization.config} />
+            </div>
+        )}
+
         {visualization.type === VisualizationType.DATA_TABLE && (
-          <div className="overflow-x-auto max-h-80 custom-scrollbar pointer-events-auto">
+          <div className="overflow-x-auto custom-scrollbar">
             <table className="w-full text-left text-sm text-slate-300">
               <thead className="bg-slate-700/50 uppercase text-xs font-semibold text-slate-400 sticky top-0">
                 <tr>
@@ -188,7 +205,7 @@ const VisualizationCard: React.FC<{
         )}
 
         {visualization.type === VisualizationType.LITERATURE_LIST && (
-           <div className="space-y-4 pointer-events-auto">
+           <div className="space-y-4">
              {visualization.data.map((paper: any, idx: number) => (
                <div key={idx} className="p-4 bg-slate-900 rounded-lg border border-slate-700 transition-colors">
                  <h4 className="text-md font-bold text-amber-100 mb-1">{paper.title}</h4>
@@ -200,7 +217,7 @@ const VisualizationCard: React.FC<{
         )}
 
         {visualization.type === VisualizationType.RESEARCH_REPORT && (
-          <div className="pointer-events-auto">
+          <div>
             <ResearchReport 
               data={visualization.data} 
               onLinkClick={(stepId) => onReportLinkClick && onReportLinkClick(stepId)} 
