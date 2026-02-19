@@ -33,6 +33,7 @@ from tools import (
     list_uploaded_files,
     delete_uploaded_file,
     get_file_path,
+    list_available_phenotypes
 )
 
 from fastapi import FastAPI
@@ -1002,14 +1003,14 @@ def _openneuro_try_queries(
 
 
 
-@server.tool(name="run_cfc_wavelet_analysis")
-@validate_parameters(
-    window_size={'min': 10, 'max': 1000, 'type': int},
-    step_size={'min': 30, 'max': 500, 'type': int},
-    ratio={'min': 0.0, 'max': 1.0, 'type': float},
-    wavelets_num={'min': 1, 'max': 100, 'type': int},
-    max_iter={'min': 1, 'max': 1000, 'type': int},
-)
+# @server.tool(name="run_cfc_wavelet_analysis")
+# @validate_parameters(
+#     window_size={'min': 10, 'max': 1000, 'type': int},
+#     step_size={'min': 30, 'max': 500, 'type': int},
+#     ratio={'min': 0.0, 'max': 1.0, 'type': float},
+#     wavelets_num={'min': 1, 'max': 100, 'type': int},
+#     max_iter={'min': 1, 'max': 1000, 'type': int},
+# )
 def run_cfc_wavelet_analysis(
     data_path: str = "data_example_BOLD.csv",
     window_size: int = 100,
@@ -1128,14 +1129,14 @@ def run_cfc_wavelet_analysis(
         }
 
 
-@server.tool(name="run_hub_detection")
-@validate_parameters(
-    window_size={'min': 10, 'max': 1000, 'type': int},
-    step_size={'min': 1, 'max': 500, 'type': int},
-    ratio={'min': 0.0, 'max': 1.0, 'type': float},
-    k={'min': 1, 'max': 100, 'type': int},
-    hub_num={'min': 1, 'type': int},
-)
+# @server.tool(name="run_hub_detection")
+# @validate_parameters(
+#     window_size={'min': 10, 'max': 1000, 'type': int},
+#     step_size={'min': 1, 'max': 500, 'type': int},
+#     ratio={'min': 0.0, 'max': 1.0, 'type': float},
+#     k={'min': 1, 'max': 100, 'type': int},
+#     hub_num={'min': 1, 'type': int},
+# )
 def run_hub_detection(
     data_path: str = "data_example_BOLD.csv",
     window_size: int = 100,
@@ -1251,68 +1252,78 @@ def run_hub_detection(
         }
 
 
-@server.tool(name="get_aging_curve")
-def get_aging_curve(phenotype: str) -> dict:
-    """
-    Load large scale aging curve database for a given phenotype.
+# @server.tool(name="get_aging_curve")
+# def get_aging_curve(phenotype: str) -> dict:
+#     """
+#     Load large scale aging curve database for a given phenotype.
     
-    Available phenotypes:
-    - Global mean of FC
-    - Global system segregation
-    - Visual system segregation (VIS)
-    - Somatomotor system segregation (SM)
-    - Dorsal attention system segregation (DA)
-    - Ventral attention system segregation (VA)
-    - Limbic system segregation (LIM)
-    - Frontoparietal system segregation (FP)
-    - Default mode system segregation (DM)
-    """
-    start_time = time.time()
-    try:
-        logger.info(f"Loading growth curve for phenotype: {phenotype}")
-        data = load_curve_data(phenotype)
-        elapsed = time.time() - start_time
-        logger.info(f"Growth curve loaded in {elapsed:.2f}s")
+#     Available phenotypes:
+#     - Global mean of FC
+#     - Global system segregation
+#     - Visual system segregation (VIS)
+#     - Somatomotor system segregation (SM)
+#     - Dorsal attention system segregation (DA)
+#     - Ventral attention system segregation (VA)
+#     - Limbic system segregation (LIM)
+#     - Frontoparietal system segregation (FP)
+#     - Default mode system segregation (DM)
+#     """
+#     start_time = time.time()
+#     try:
+#         logger.info(f"Loading growth curve for phenotype: {phenotype}")
+#         data = load_curve_data(phenotype)
+#         elapsed = time.time() - start_time
+#         logger.info(f"Growth curve loaded in {elapsed:.2f}s")
         
-        return {
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "phenotype": phenotype,
-            "data": data,
-            "elapsed_seconds": elapsed,
-        }
-    except KeyError as e:
-        logger.error(f"Phenotype not found: {phenotype}")
-        return {
-            "status": "error",
-            "timestamp": datetime.now().isoformat(),
-            "error_type": "KeyError",
-            "phenotype": phenotype,
-            "error": f"Phenotype not found: {phenotype}. Available: Global mean of FC, Visual system segregation (VIS), etc.",
-        }
-    except Exception as e:
-        logger.error(f"Error loading growth curve: {str(e)}", exc_info=True)
-        return {
-            "status": "error",
-            "timestamp": datetime.now().isoformat(),
-            "error_type": type(e).__name__,
-            "phenotype": phenotype,
-            "error": str(e),
-        }
+#         return {
+#             "status": "success",
+#             "timestamp": datetime.now().isoformat(),
+#             "phenotype": phenotype,
+#             "data": data,
+#             "elapsed_seconds": elapsed,
+#         }
+#     except KeyError as e:
+#         logger.error(f"Phenotype not found: {phenotype}")
+#         return {
+#             "status": "error",
+#             "timestamp": datetime.now().isoformat(),
+#             "error_type": "KeyError",
+#             "phenotype": phenotype,
+#             "error": f"Phenotype not found: {phenotype}. Available: Global mean of FC, Visual system segregation (VIS), etc.",
+#         }
+#     except Exception as e:
+#         logger.error(f"Error loading growth curve: {str(e)}", exc_info=True)
+#         return {
+#             "status": "error",
+#             "timestamp": datetime.now().isoformat(),
+#             "error_type": type(e).__name__,
+#             "phenotype": phenotype,
+#             "error": str(e),
+#         }
 
 
-@server.tool(name="compare_with_aging_curve")
-def compare_with_aging_curve(
+@server.tool(name="overlay_with_aging_curve", description=f"""
+To see the difference with normative model, overlay the uploaded data on top of aging curves for a specific phenotype.
+
+Parameters:
+- x_phenotype: Name of phenotype in the database to compare, select from {list_available_phenotypes()}
+- y_path: Path to uploaded CSV file with overlay data
+- age_col: Column name for age values in the CSV file
+- val_col: Column name for overlay values in the CSV file
+
+Returns: Combined x and y data for normative modeling
+             """)
+def overlay_with_aging_curve(
     x_phenotype: str,
     y_path: str,
     age_col: str,
     val_col: str,
 ) -> dict:
-    """
-    Compare with aging curves given overlay data.
+    f"""
+    To see the difference with normative model, overlay the uploaded data on top of aging curves for a specific phenotype.
     
     Parameters:
-    - x_phenotype: Name of phenotype in the database to compare, select from ['Global mean of FC', 'Global system segregation', 'Visual system segregation (VIS)', 'Somatomotor system segregation (SM)', 'Dorsal attention system segregation (DA)', 'Ventral attention system segregation (VA)', 'Limbic system segregation (LIM)', 'Frontoparietal system segregation (FP)', 'Default mode system segregation (DM)']
+    - x_phenotype: Name of phenotype in the database to compare, select from {list_available_phenotypes()}
     - y_path: Path to uploaded CSV file with overlay data
     - age_col: Column name for age values in the CSV file
     - val_col: Column name for overlay values in the CSV file
@@ -1901,27 +1912,39 @@ async def api_schema(request: Request) -> JSONResponse:
         "title": "Brain Network Analysis API",
         "description": "MCP server for brain network analysis",
         "endpoints": {
-            "run_cfc_wavelet_analysis": {
+            # "run_cfc_wavelet_analysis": {
+            #     "method": "POST",
+            #     "description": "Cross-frequency coupling wavelet analysis",
+            #     "parameters": CFCWaveletRequest.model_json_schema(),
+            # },
+            # "run_hub_detection": {
+            #     "method": "POST",
+            #     "description": "Hub detection in brain networks",
+            #     "parameters": HubDetectionRequest.model_json_schema(),
+            # },
+            # "get_aging_curve": {
+            #     "method": "POST",
+            #     "description": "Load age-vs-phenotype data from the database of a large-scale lifespan cohort",
+            #     "parameters": {
+            #         "phenotype": {"type": "string", "description": "One phenotype name among all available phenotypes."}
+            #     }
+            # },
+            "overlay_with_aging_curve": {
                 "method": "POST",
-                "description": "Cross-frequency coupling wavelet analysis",
-                "parameters": CFCWaveletRequest.model_json_schema(),
-            },
-            "run_hub_detection": {
-                "method": "POST",
-                "description": "Hub detection in brain networks",
-                "parameters": HubDetectionRequest.model_json_schema(),
-            },
-            "get_aging_curve": {
-                "method": "POST",
-                "description": "Load age-vs-phenotype data from the database of a large-scale lifespan cohort",
-                "parameters": {
-                    "phenotype": {"type": "string", "description": "One phenotype name among all available phenotypes."}
-                }
-            },
-            "compare_with_aging_curve": {
-                "method": "POST",
-                "description": "Compare with aging curves given overlay data.",
-                "parameters": NormativeAnalysisRequest.model_json_schema(),
+                "description": f"""To see the difference with normative model, overlay the uploaded data on top of aging curves for a specific phenotype.
+Parameters:
+- x_phenotype: Name of phenotype in the database to compare, select from {list_available_phenotypes()}
+- y_path: Path to uploaded CSV file with overlay data
+- age_col: Column name for age values in the CSV file
+- val_col: Column name for overlay values in the CSV file
+Returns: Combined x and y data for normative modeling""",
+                "parameters": f"""To see the difference with normative model, overlay the uploaded data on top of aging curves for a specific phenotype.
+Parameters:
+- x_phenotype: Name of phenotype in the database to compare, select from {list_available_phenotypes()}
+- y_path: Path to uploaded CSV file with overlay data
+- age_col: Column name for age values in the CSV file
+- val_col: Column name for overlay values in the CSV file
+Returns: Combined x and y data for normative modeling""",
             },
             "search_pubmed": {
                 "method": "POST",
@@ -2100,34 +2123,34 @@ async def http_run_hub_detection(request: Request) -> JSONResponse:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@server.custom_route("/get_aging_curve", methods=["POST"])
-@rate_limit
-async def http_get_aging_curve(request: Request) -> JSONResponse:
-    """HTTP endpoint for large scale aging curve database."""
-    try:
-        data = await request.json()
-        phenotype = data.get("phenotype", "Global mean of FC")
+# @server.custom_route("/get_aging_curve", methods=["POST"])
+# @rate_limit
+# async def http_get_aging_curve(request: Request) -> JSONResponse:
+#     """HTTP endpoint for large scale aging curve database."""
+#     try:
+#         data = await request.json()
+#         phenotype = data.get("phenotype", "Global mean of FC")
         
-        if not phenotype:
-            raise HTTPException(status_code=400, detail="phenotype parameter required")
+#         if not phenotype:
+#             raise HTTPException(status_code=400, detail="phenotype parameter required")
         
-        result = get_aging_curve(phenotype=phenotype)
-        return JSONResponse(result)
-    except Exception as e:
-        logger.error(f"Request error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+#         result = get_aging_curve(phenotype=phenotype)
+#         return JSONResponse(result)
+#     except Exception as e:
+#         logger.error(f"Request error: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@server.custom_route("/compare_with_aging_curve", methods=["POST"])
+@server.custom_route("/overlay_with_aging_curve", methods=["POST"])
 @rate_limit
-async def http_compare_with_aging_curve(request: Request) -> JSONResponse:
+async def http_overlay_with_aging_curve(request: Request) -> JSONResponse:
     """HTTP endpoint for normative analysis."""
     try:
         data = await request.json()
         # Validate using Pydantic model
         validated_data = NormativeAnalysisRequest(**data)
         
-        result = compare_with_aging_curve(
+        result = overlay_with_aging_curve(
             x_phenotype=validated_data.x_phenotype,
             y_path=validated_data.y_path,
             age_col=validated_data.age_col,
@@ -2206,14 +2229,14 @@ async def http_internet_search(request: Request) -> JSONResponse:
 #     result = StatsToolkit.compare_groups(data_source, group_col, metric_col, group_a, group_b, method)
 #     return json.dumps(result)
 
-@server.tool(name="apply_fdr_correction")
-def apply_fdr_correction(p_values: list[float]) -> str:
-    """
-    Applies False Discovery Rate (Benjamini-Hochberg) correction.
-    MANDATORY when testing multiple brain regions to prevent false positives.
-    """
-    result = StatsToolkit.correct_p_values(p_values)
-    return json.dumps(result)
+# @server.tool(name="apply_fdr_correction")
+# def apply_fdr_correction(p_values: list[float]) -> str:
+#     """
+#     Applies False Discovery Rate (Benjamini-Hochberg) correction.
+#     MANDATORY when testing multiple brain regions to prevent false positives.
+#     """
+#     result = StatsToolkit.correct_p_values(p_values)
+#     return json.dumps(result)
 
 @server.tool(name="detect_outliers")
 def detect_outliers(data_source: str, column: str) -> str:
@@ -2281,7 +2304,7 @@ if __name__ == "__main__":
     logger.info("  POST /run_cfc_wavelet_analysis   - CFC analysis")
     logger.info("  POST /run_hub_detection          - Hub detection")
     logger.info("  POST /get_aging_curve           - large scale aging curve database")
-    logger.info("  POST /compare_with_aging_curve     - Normative analysis")
+    logger.info("  POST /overlay_with_aging_curve     - Normative analysis")
     logger.info("  POST /search_pubmed             - PubMed literature search")
     logger.info("  POST /upload                     - Upload file for analysis")
     logger.info("  GET  /list_files                 - List uploaded files")

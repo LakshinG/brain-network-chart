@@ -12,6 +12,7 @@ import os
 import shutil
 from pathlib import Path
 from typing import Optional, Tuple
+import glob as glob_module
 
 # Upload configuration
 UPLOAD_DIR = '/ram/USERS/ziquanw/brain-network-chart/uploaded_files'
@@ -343,25 +344,55 @@ def load_mat_v73(path: str) -> dict:
         "centiles": centiles.tolist(),
     }
 
+_LIFESPAN_MAT_DIR = "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat"
 
-def load_curve_data(phenotype: str, 
-    PHENOTYPES = {
-        "Global mean of FC": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_global_mean_of_FC.mat",
-        "Global system segregation": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_global_system_segregation.mat",
-        "Visual system segregation (VIS)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_VIS_system_segregation.mat",
-        "Somatomotor system segregation (SM)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_SM_system_segregation.mat",
-        "Dorsal attention system segregation (DA)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_DA_system_segregation.mat",
-        "Ventral attention system segregation (VA)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_VA_system_segregation.mat",
-        "Limbic system segregation (LIM)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_LIM_system_segregation.mat",
-        "Frontoparietal system segregation (FP)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_FP_system_segregation.mat",
-        "Default mode system segregation (DM)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_DM_system_segregation.mat",
-    }) -> dict:
-    """Load growth curve data for a phenotype."""
-    
-    if phenotype not in PHENOTYPES:
-        raise ValueError(f"Phenotype not found. Available: {list(PHENOTYPES.keys())}")
-    mat_path = PHENOTYPES[phenotype]
-    return load_mat_v73(mat_path)
+_FC_PHENOTYPES = {
+    "Global mean of FC": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_global_mean_of_FC.mat",
+    "Global system segregation of FC": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_global_system_segregation.mat",
+    "Visual system segregation (VIS)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_VIS_system_segregation.mat",
+    "Somatomotor system segregation (SM)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_SM_system_segregation.mat",
+    "Dorsal attention system segregation (DA)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_DA_system_segregation.mat",
+    "Ventral attention system segregation (VA)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_VA_system_segregation.mat",
+    "Limbic system segregation (LIM)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_LIM_system_segregation.mat",
+    "Frontoparietal system segregation (FP)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_FP_system_segregation.mat",
+    "Default mode system segregation (DM)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_DM_system_segregation.mat",
+    "Grey matter volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/GMV.mat",
+    "White matter volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/WMV.mat",
+    "Subcortical grey matter volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/sGMV.mat",
+    "Ventricular volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/Ventricles.mat",
+    "Total cerebrum volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/TCV.mat",
+    "Total surface area": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/SA.mat",
+    "Mean cortical thickness": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/CT_0_20.mat",
+}
+
+
+def _get_lifespan_phenotypes() -> dict:
+    """Discover Lifespan .mat files not already in _FC_PHENOTYPES. Returns {name: path}."""
+    known_paths = set(_FC_PHENOTYPES.values())
+    result = {}
+    if os.path.isdir(_LIFESPAN_MAT_DIR):
+        for fpath in sorted(glob_module.glob(os.path.join(_LIFESPAN_MAT_DIR, '*.mat'))):
+            if fpath not in known_paths:
+                name = os.path.basename(fpath)[:-4]
+                result[name] = fpath
+    return result
+
+
+
+def list_available_phenotypes() -> list:
+    """Return all available phenotype names (FC + Lifespan)."""
+    return list(_FC_PHENOTYPES.keys()) #+ list(_get_lifespan_phenotypes().keys())
+
+
+def load_curve_data(phenotype: str) -> dict:
+    """Load growth curve data for a phenotype (FC .mat or Lifespan .mat)."""
+    if phenotype in _FC_PHENOTYPES:
+        return load_mat_v73(_FC_PHENOTYPES[phenotype])
+    lifespan = _get_lifespan_phenotypes()
+    if phenotype in lifespan:
+        return load_mat_v73(lifespan[phenotype])
+    all_keys = list(_FC_PHENOTYPES.keys()) + list(lifespan.keys())
+    raise ValueError(f"Phenotype not found. Available: {all_keys}")
 
 
 def _read_table(contents: bytes) -> pd.DataFrame:
@@ -406,7 +437,7 @@ def overlay_data_from_bytes(contents: bytes, age_col: str, val_col: str) -> dict
     y_raw = df[val_col].to_numpy(dtype=float)
 
     valid_mask = ~(np.isnan(age_raw) | np.isnan(y_raw))
-    age = age_raw[valid_mask] / 12
+    age = age_raw[valid_mask] #/ 12
     y = y_raw[valid_mask]
 
     return {
