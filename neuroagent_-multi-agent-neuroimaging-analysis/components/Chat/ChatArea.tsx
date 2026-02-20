@@ -33,32 +33,16 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
   const prevMessageCountRef = useRef(messages.length);
-  const isUserNearBottomRef = useRef(true);
-
-  // Track if user is near the bottom of the scroll container
-  const handleScroll = useCallback(() => {
+  const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const threshold = 120;
-    isUserNearBottomRef.current = 
-      container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-  }, []);
-
-  const scrollToBottom = useCallback(() => {
-    if (!messagesEndRef.current) return;
-    // Use requestAnimationFrame for smoother scroll
     requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      container.scrollTop = container.scrollHeight;
     });
   }, []);
 
   useEffect(() => {
-    const newCount = messages.length;
-    const didAdd = newCount > prevMessageCountRef.current;
-    prevMessageCountRef.current = newCount;
-
-    // Only auto-scroll when a new message is added AND user is near the bottom
-    if (didAdd && isUserNearBottomRef.current && !highlightedMessageId) {
+    if (!highlightedMessageId) {
       scrollToBottom();
     }
   }, [messages, highlightedMessageId, scrollToBottom]);
@@ -105,7 +89,6 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
 
       <div 
         ref={scrollContainerRef}
-        onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar scroll-smooth"
       >
         {messages.map((msg) => (
