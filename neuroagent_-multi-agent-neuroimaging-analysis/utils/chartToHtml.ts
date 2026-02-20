@@ -31,47 +31,67 @@ export function chartDataToHtml(viz: ToolVisualization): string | null {
 // ────────────────────────────────────────────────────────────────────────────
 function scatterToHtml(viz: ToolVisualization): string {
   const d = viz.data;
-  const xs = JSON.stringify((d.dataPoints || []).map((p: any) => p.x));
-  const ys = JSON.stringify((d.dataPoints || []).map((p: any) => p.y));
   const fill = viz.config?.color || '#38bdf8';
+  const DEFAULT_COLORS = ['#38bdf8', '#f87171', '#4ade80', '#facc15', '#c084fc', '#fb923c', '#2dd4bf', '#f472b6'];
 
-  // Compute simple linear regression for trend line
-  let trendTrace = '';
-  if (d.dataPoints && d.dataPoints.length >= 2) {
-    const pts = d.dataPoints as { x: number; y: number }[];
-    const n = pts.length;
-    let sx = 0, sy = 0, sxy = 0, sx2 = 0, minX = Infinity, maxX = -Infinity;
-    pts.forEach(p => { sx += p.x; sy += p.y; sxy += p.x * p.y; sx2 += p.x * p.x; if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; });
-    const denom = n * sx2 - sx * sx;
-    if (denom !== 0) {
-      const slope = (n * sxy - sx * sy) / denom;
-      const intercept = (sy - slope * sx) / n;
-      trendTrace = `, {
+  // CorrelationResult stores data in series[].dataPoints, not top-level dataPoints
+  const series: any[] = d.series || [];
+
+  // Build traces for each series
+  const traces: string[] = [];
+  const allPoints: { x: number; y: number }[] = [];
+
+  series.forEach((s: any, idx: number) => {
+    const pts = s.dataPoints || [];
+    const xs = pts.map((p: any) => p.x);
+    const ys = pts.map((p: any) => p.y);
+    allPoints.push(...pts);
+    const color = DEFAULT_COLORS[idx % DEFAULT_COLORS.length];
+
+    traces.push(`{
+      x: ${JSON.stringify(xs)},
+      y: ${JSON.stringify(ys)},
+      mode: 'markers',
+      type: 'scatter',
+      name: '${(s.name || 'Series ' + idx).replace(/'/g, "\\'")} (r=${(s.r ?? 0).toFixed(3)})',
+      marker: { color: '${color}', size: 8, opacity: 0.7 }
+    }`);
+
+    // Add trend line per series
+    if (pts.length >= 2) {
+      const n = pts.length;
+      let sx = 0, sy = 0, sxy = 0, sx2 = 0, minX = Infinity, maxX = -Infinity;
+      pts.forEach((p: any) => { sx += p.x; sy += p.y; sxy += p.x * p.y; sx2 += p.x * p.x; if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; });
+      const denom = n * sx2 - sx * sx;
+      if (denom !== 0) {
+        const slope = (n * sxy - sx * sy) / denom;
+        const intercept = (sy - slope * sx) / n;
+        traces.push(`{
       x: [${minX}, ${maxX}],
       y: [${(slope * minX + intercept).toFixed(4)}, ${(slope * maxX + intercept).toFixed(4)}],
       mode: 'lines',
-      name: 'Trend',
-      line: { color: '#fca5a5', width: 2, dash: 'dash' }
-    }`;
+      name: '${(s.name || 'Trend').replace(/'/g, "\\'")} trend',
+      line: { color: '${color}', width: 2, dash: 'dash' },
+      showlegend: false
+    }`);
+      }
     }
-  }
+  });
+
+  // Fallback: use top-level r if only one series
+  const rValue = series.length === 1 ? (series[0].r ?? 0) : (d.r ?? 0);
+  const titleSuffix = series.length === 1 ? ` (r=${rValue.toFixed(3)})` : '';
+  const groupInfo = d.groupCol ? ` by ${d.groupCol}` : '';
 
   return `<div class="visualizationCard">
   <div class="vc-header">
-    <h3 class="vc-title">Correlation: ${d.xCol} vs ${d.yCol} (r=${(d.r ?? 0).toFixed(3)})</h3>
+    <h3 class="vc-title">Correlation: ${d.xCol} vs ${d.yCol}${groupInfo}${titleSuffix}</h3>
   </div>
   <div class="vc-body">
     <div id="chart"></div>
   </div>
   <script>
-    Plotly.newPlot('chart', [{
-      x: ${xs},
-      y: ${ys},
-      mode: 'markers',
-      type: 'scatter',
-      name: 'Subjects',
-      marker: { color: '${fill}', size: 8, opacity: 0.7 }
-    }${trendTrace}], {
+    Plotly.newPlot('chart', [${traces.join(',\n    ')}], {
       ...window.PLOTLY_DARK,
       xaxis: { ...window.PLOTLY_DARK.xaxis, title: '${d.xCol}' },
       yaxis: { ...window.PLOTLY_DARK.yaxis, title: '${d.yCol}' },

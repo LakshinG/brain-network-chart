@@ -22,7 +22,7 @@ interface ChatAreaProps {
   onSyncDataset: () => void;
 }
 
-const ChatArea: React.FC<ChatAreaProps> = ({ 
+const ChatArea: React.FC<ChatAreaProps> = React.memo(({ 
   messages, onSendMessage, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep,
   placeholder,
   datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload, onMergeDatasets, onSyncDataset
@@ -97,7 +97,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     <div className="flex flex-col h-full bg-slate-900 border-l border-slate-800">
       <div className="flex-none p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur">
         <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+          <span className="w-2 h-2 rounded-full bg-green-500"></span>
           Research Assistant
         </h2>
         <p className="text-xs text-slate-400">Multi-Agent System Active</p>
@@ -118,8 +118,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         ))}
         {isProcessing && (
-           <div className="flex justify-start animate-pulse ml-2">
-             <span className="text-xs text-slate-500 bg-slate-800 px-3 py-1 rounded-full">Agents are working...</span>
+           <div className="flex items-center gap-2 ml-2 py-1">
+             <svg className="animate-spin h-4 w-4 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+             </svg>
+             <span className="text-xs text-slate-400">Agents are working...</span>
            </div>
         )}
         <div ref={messagesEndRef} />
@@ -233,6 +237,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export default ChatArea;

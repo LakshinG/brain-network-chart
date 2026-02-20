@@ -1,11 +1,11 @@
-import React, { useRef, useCallback, useState } from 'react';
+import React, { useRef, useCallback, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ToolVisualization, VisualizationType, GroupComparisonResult } from '../../types';
-import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart, SVMBoundaryChart } from './Charts';
+import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart, SVMBoundaryChart, ChartConfig } from './Charts';
 import { HtmlVisualizationRenderer } from './HtmlVisualizationRenderer';
 import CodeEditorModal from './CodeEditorModal';
 import { chartDataToHtml } from '../../utils/chartToHtml';
-import { FileText, Database, BookOpen, Link, FileCheck2, Code2, CheckCircle2, TrendingUp, Grid2X2, Layers, Download, Code, Binary } from 'lucide-react';
+import { FileText, Database, BookOpen, Link, FileCheck2, Code2, CheckCircle2, TrendingUp, Grid2X2, Layers, Download, Code, Binary, Pencil } from 'lucide-react';
 
 interface VisualizerAreaProps {
   visualizations: ToolVisualization[];
@@ -13,8 +13,10 @@ interface VisualizerAreaProps {
   onVizClick?: (id?: string) => void;
   onHtmlChange?: (messageId: string, newHtml: string) => void;
   onConvertToHtml?: (messageId: string, newHtml: string) => void;
+  onConfigChange?: (vizId: string, config: ChartConfig) => void;
   activeDatasetIds?: string[];
   selectedVisualizationId?: string | null;
+  isProcessing?: boolean;
 }
 
 const ResearchReport: React.FC<{ data: any, onLinkClick: (stepId: number) => void }> = ({ data, onLinkClick }) => {
@@ -104,12 +106,78 @@ const VisualizationCard: React.FC<{
     onReportLinkClick?: (stepId: number) => void,
     onHtmlChange?: (newHtml: string) => void,
     onConvertToHtml?: (messageId: string, html: string) => void,
+    onConfigChange?: (config: ChartConfig) => void,
     isActiveDataset?: boolean,
     isSelected?: boolean
-}> = ({ visualization, onClick, onReportLinkClick, onHtmlChange, onConvertToHtml, isActiveDataset, isSelected }) => {
+}> = ({ visualization, onClick, onReportLinkClick, onHtmlChange, onConvertToHtml, onConfigChange, isActiveDataset, isSelected }) => {
   const isClickable = true; // All cards are clickable for editing
   const bodyRef = useRef<HTMLDivElement>(null);
   const [showCodeEditor, setShowCodeEditor] = useState(false);
+  const [showPropertyEditor, setShowPropertyEditor] = useState(false);
+
+  // Local editable state for chart properties
+  const currentConfig = visualization.config || {};
+  const [editTitle, setEditTitle] = useState(currentConfig.title || '');
+  const [editXLabel, setEditXLabel] = useState(currentConfig.xAxisLabel || '');
+  const [editYLabel, setEditYLabel] = useState(currentConfig.yAxisLabel || '');
+
+  // Sync local state when visualization config changes externally
+  useEffect(() => {
+    const cfg = visualization.config || {};
+    setEditTitle(cfg.title || '');
+    setEditXLabel(cfg.xAxisLabel || '');
+    setEditYLabel(cfg.yAxisLabel || '');
+  }, [visualization.config]);
+
+  // Get defaults based on chart type
+  const getDefaults = () => {
+    const d = visualization.data;
+    switch (visualization.type) {
+      case VisualizationType.SCATTER_PLOT:
+        return {
+          title: d.groupCol ? `Grouped Correlation: ${d.xCol} vs ${d.yCol} by ${d.groupCol}` : `Correlation: ${d.xCol} vs ${d.yCol}`,
+          xLabel: d.xCol || 'X Axis',
+          yLabel: d.yCol || 'Y Axis'
+        };
+      case VisualizationType.BOX_PLOT:
+        return {
+          title: `Group Comparison: ${d.valueCol} by ${d.groupCol}`,
+          xLabel: d.groupCol || 'Group',
+          yLabel: d.valueCol || 'Value'
+        };
+      case VisualizationType.AGING_CURVE:
+        return {
+          title: d.phenotype || 'Growth Curve',
+          xLabel: 'Age (yr)',
+          yLabel: 'Value'
+        };
+      case VisualizationType.STRATIFICATION_RESULT:
+        return {
+          title: `Stratification: ${d.targetCol} by ${d.groupCol}`,
+          xLabel: 'Group',
+          yLabel: 'Row Count'
+        };
+      case VisualizationType.SVM_BOUNDARY:
+        return {
+          title: `SVM Classification: ${d.targetCol}`,
+          xLabel: d.xCol || 'X',
+          yLabel: d.yCol || 'Y'
+        };
+      default:
+        return { title: visualization.title, xLabel: 'X Axis', yLabel: 'Y Axis' };
+    }
+  };
+  const defaults = getDefaults();
+
+  const handlePropertySave = (field: 'title' | 'xAxisLabel' | 'yAxisLabel', value: string) => {
+    if (!onConfigChange) return;
+    const newConfig: ChartConfig = { ...currentConfig, [field]: value || undefined };
+    // Remove empty string entries to fall back to defaults
+    if (!newConfig.title) delete newConfig.title;
+    if (!newConfig.xAxisLabel) delete newConfig.xAxisLabel;
+    if (!newConfig.yAxisLabel) delete newConfig.yAxisLabel;
+    onConfigChange(newConfig);
+  };
 
   const hasChart = [
     VisualizationType.SCATTER_PLOT,
@@ -126,19 +194,72 @@ const VisualizationCard: React.FC<{
     if (!svgElement) return;
 
     const clone = svgElement.cloneNode(true) as SVGSVGElement;
-    const bbox = svgElement.getBoundingClientRect();
-    clone.setAttribute('width', String(bbox.width));
-    clone.setAttribute('height', String(bbox.height));
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    const chartW = svgElement.getBoundingClientRect().width;
+    const chartH = svgElement.getBoundingClientRect().height;
 
-    // Add dark background
-    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    bg.setAttribute('width', '100%');
-    bg.setAttribute('height', '100%');
-    bg.setAttribute('fill', '#0f172a');
-    clone.insertBefore(bg, clone.firstChild);
+    // Extra space for title (top), x-label (bottom), y-label (left)
+    const titleH = 30;
+    const xLabelH = 24;
+    const yLabelW = 24;
+    const totalW = chartW + yLabelW;
+    const totalH = chartH + titleH + xLabelH;
 
-    const svgData = new XMLSerializer().serializeToString(clone);
+    // Build a wrapper SVG that includes labels + chart
+    const wrapper = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    wrapper.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    wrapper.setAttribute('width', String(totalW));
+    wrapper.setAttribute('height', String(totalH));
+    wrapper.setAttribute('viewBox', `0 0 ${totalW} ${totalH}`);
+
+    // Resolve label text from config or defaults
+    const cfg = visualization.config || {};
+    const titleText = cfg.title || defaults.title;
+    const xLabelText = cfg.xAxisLabel || defaults.xLabel;
+    const yLabelText = cfg.yAxisLabel || defaults.yLabel;
+
+    // Title text (top center)
+    const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    titleEl.setAttribute('x', String(totalW / 2));
+    titleEl.setAttribute('y', String(titleH * 0.7));
+    titleEl.setAttribute('text-anchor', 'middle');
+    titleEl.setAttribute('fill', '#e2e8f0');
+    titleEl.setAttribute('font-size', '14');
+    titleEl.setAttribute('font-family', 'sans-serif');
+    titleEl.setAttribute('font-weight', '600');
+    titleEl.textContent = titleText;
+    wrapper.appendChild(titleEl);
+
+    // Position the chart SVG offset by yLabelW (left) and titleH (top)
+    clone.setAttribute('x', String(yLabelW));
+    clone.setAttribute('y', String(titleH));
+    clone.setAttribute('width', String(chartW));
+    clone.setAttribute('height', String(chartH));
+    wrapper.appendChild(clone);
+
+    // X-axis label (bottom center)
+    const xLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    xLabel.setAttribute('x', String(yLabelW + chartW / 2));
+    xLabel.setAttribute('y', String(titleH + chartH + xLabelH * 0.7));
+    xLabel.setAttribute('text-anchor', 'middle');
+    xLabel.setAttribute('fill', '#94a3b8');
+    xLabel.setAttribute('font-size', '12');
+    xLabel.setAttribute('font-family', 'sans-serif');
+    xLabel.textContent = xLabelText;
+    wrapper.appendChild(xLabel);
+
+    // Y-axis label (left center, rotated)
+    const yLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    yLabel.setAttribute('x', String(yLabelW * 0.6));
+    yLabel.setAttribute('y', String(titleH + chartH / 2));
+    yLabel.setAttribute('text-anchor', 'middle');
+    yLabel.setAttribute('fill', '#94a3b8');
+    yLabel.setAttribute('font-size', '12');
+    yLabel.setAttribute('font-family', 'sans-serif');
+    yLabel.setAttribute('transform', `rotate(-90, ${yLabelW * 0.6}, ${titleH + chartH / 2})`);
+    yLabel.textContent = yLabelText;
+    wrapper.appendChild(yLabel);
+
+    const svgData = new XMLSerializer().serializeToString(wrapper);
     const blob = new Blob([svgData], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -148,13 +269,14 @@ const VisualizationCard: React.FC<{
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [visualization.title]);
+  }, [visualization.title, visualization.config, defaults]);
   
   return (
     <div 
         className={`bg-slate-800 rounded-xl border overflow-hidden shadow-xl flex-shrink-0 transition-all 
         ${isSelected ? 'border-cyan-400 ring-2 ring-cyan-400/50 shadow-cyan-900/30' : isActiveDataset ? 'border-indigo-500/60 ring-1 ring-indigo-500/30' : 'border-slate-700'}
         ${isClickable ? 'cursor-pointer hover:ring-2 hover:ring-cyan-500/40 hover:border-cyan-500/60' : ''}`}
+        onClick={onClick}
     >
       {/* Header */}
       <div className="bg-slate-900 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
@@ -173,7 +295,7 @@ const VisualizationCard: React.FC<{
         </div>
         <div className="flex items-center gap-2">
             {isSelected && (
-                <span className="text-xs px-2 py-0.5 rounded bg-cyan-600 text-white font-medium animate-pulse">
+                <span className="text-xs px-2 py-0.5 rounded bg-cyan-600 text-white font-medium">
                   Editing
                 </span>
             )}
@@ -181,6 +303,15 @@ const VisualizationCard: React.FC<{
                 <span title="Active Dataset" className="flex">
                     <CheckCircle2 className="w-4 h-4 text-indigo-400" />
                 </span>
+            )}
+            {hasChart && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); setShowPropertyEditor(!showPropertyEditor); }}
+                    className={`p-1 rounded hover:bg-slate-700 transition-colors ${showPropertyEditor ? 'text-cyan-400 bg-slate-700' : 'text-slate-400 hover:text-cyan-400'}`}
+                    title="Edit Chart Properties"
+                >
+                    <Pencil className="w-3.5 h-3.5" />
+                </button>
             )}
             {hasChart && (
                 <button
@@ -211,23 +342,70 @@ const VisualizationCard: React.FC<{
         </div>
       </div>
 
+      {/* Inline Property Editor Panel */}
+      {hasChart && showPropertyEditor && (
+        <div className="bg-slate-900/80 border-b border-slate-700 px-4 py-3 pointer-events-auto" onClick={e => e.stopPropagation()}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1">Title</label>
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                onBlur={() => handlePropertySave('title', editTitle)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handlePropertySave('title', editTitle); }}
+                placeholder={defaults.title}
+                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1">X-Axis Label</label>
+              <input
+                type="text"
+                value={editXLabel}
+                onChange={(e) => setEditXLabel(e.target.value)}
+                onBlur={() => handlePropertySave('xAxisLabel', editXLabel)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handlePropertySave('xAxisLabel', editXLabel); }}
+                placeholder={defaults.xLabel}
+                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 transition-colors"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wider text-slate-500 mb-1">Y-Axis Label</label>
+              <input
+                type="text"
+                value={editYLabel}
+                onChange={(e) => setEditYLabel(e.target.value)}
+                onBlur={() => handlePropertySave('yAxisLabel', editYLabel)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handlePropertySave('yAxisLabel', editYLabel); }}
+                placeholder={defaults.yLabel}
+                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 transition-colors"
+              />
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-600 mt-2">Press Enter or click away to apply. Clear field to reset to default.</p>
+        </div>
+      )}
+
       {/* Body */}
-      <div ref={bodyRef} className="p-4 bg-slate-800/50 pointer-events-none"> 
+      <div ref={bodyRef} className="p-4 bg-slate-800/50"> 
         {visualization.type === VisualizationType.SCATTER_PLOT && (
-          <ScatterPlot data={visualization.data} config={visualization.config} />
+          <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
+            <ScatterPlot data={visualization.data} config={visualization.config} onConfigChange={onConfigChange} />
+          </div>
         )}
 
         {/* Box Plot / Stats Bar Chart */}
         {visualization.type === VisualizationType.BOX_PLOT && (
           <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
-            <StatsBarChart data={visualization.data} config={visualization.config} />
+            <StatsBarChart data={visualization.data} config={visualization.config} onConfigChange={onConfigChange} />
             <PairwiseTable data={visualization.data} />
           </div>
         )}
 
         {visualization.type === VisualizationType.AGING_CURVE && (
             <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
-                <AgingCurveChart data={visualization.data} config={visualization.config} />
+                <AgingCurveChart data={visualization.data} config={visualization.config} onConfigChange={onConfigChange} />
             </div>
         )}
 
@@ -239,13 +417,13 @@ const VisualizationCard: React.FC<{
 
         {visualization.type === VisualizationType.STRATIFICATION_RESULT && (
             <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
-                <StratificationChart data={visualization.data} config={visualization.config} />
+                <StratificationChart data={visualization.data} config={visualization.config} onConfigChange={onConfigChange} />
             </div>
         )}
 
         {visualization.type === VisualizationType.SVM_BOUNDARY && (
             <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
-                <SVMBoundaryChart data={visualization.data} config={visualization.config} />
+                <SVMBoundaryChart data={visualization.data} config={visualization.config} onConfigChange={onConfigChange} />
             </div>
         )}
 
@@ -328,7 +506,7 @@ const VisualizationCard: React.FC<{
   );
 };
 
-const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, datasetName, onVizClick, onHtmlChange, onConvertToHtml, activeDatasetIds, selectedVisualizationId }) => {
+const VisualizerArea: React.FC<VisualizerAreaProps> = React.memo(({ visualizations, datasetName, onVizClick, onHtmlChange, onConvertToHtml, onConfigChange, activeDatasetIds, selectedVisualizationId, isProcessing }) => {
   const handleReportLinkClick = (stepId: number) => {
     const reportViz = visualizations.find(v => v.type === VisualizationType.RESEARCH_REPORT);
     if (reportViz && reportViz.data.stepIdToMessageId[stepId]) {
@@ -362,13 +540,26 @@ const VisualizerArea: React.FC<VisualizerAreaProps> = ({ visualizations, dataset
                : undefined
              }
              onConvertToHtml={onConvertToHtml}
+             onConfigChange={onConfigChange 
+               ? (config: ChartConfig) => onConfigChange(viz.vizId!, config) 
+               : undefined
+             }
              isActiveDataset={viz.datasetId ? activeDatasetIds?.includes(viz.datasetId) : false}
              isSelected={viz.vizId === selectedVisualizationId}
            />
         ))}
+        {isProcessing && (
+          <div className="flex items-center justify-center gap-3 py-6">
+            <svg className="animate-spin h-5 w-5 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span className="text-sm text-slate-400">Generating visualization...</span>
+          </div>
+        )}
       </div>
     </div>
   );
-};
+});
 
 export default VisualizerArea;

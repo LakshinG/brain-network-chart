@@ -14,55 +14,128 @@ const ollama = new Ollama({ host: OLLAMA_HOST });
 /**
  * Attempt to parse JSON from an LLM response, with repair heuristics
  * for common issues small models produce (trailing commas, markdown
- * fences, embedded think tags, etc.).
+ * fences, embedded think tags, truncated output, etc.).
  */
 function robustJsonParse(raw: string): any {
   // 1. Strip <think>…</think> blocks (deepseek-r1 emits these)
   let cleaned = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-  // 2. Strip markdown code fences
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  // 2. Strip markdown code fences (including mid-text ones)
+  cleaned = cleaned.replace(/```(?:json)?\s*/gi, '').replace(/\s*```/gi, '').trim();
 
-  // 3. Extract first { … } or [ … ] block if there is surrounding text
-  const firstBrace = cleaned.indexOf('{');
-  const firstBracket = cleaned.indexOf('[');
-  let start = -1;
-  let open: string | null = null;
-  let close: string | null = null;
+  // 3. Extract the outermost { … } or [ … ] block using bracket matching
+  function extractJsonBlock(text: string): string {
+    const firstBrace = text.indexOf('{');
+    const firstBracket = text.indexOf('[');
+    let start = -1;
+    let open = '{', close = '}';
 
-  if (firstBrace >= 0 && (firstBracket < 0 || firstBrace <= firstBracket)) {
-    start = firstBrace; open = '{'; close = '}';
-  } else if (firstBracket >= 0) {
-    start = firstBracket; open = '['; close = ']';
-  }
+    if (firstBrace >= 0 && (firstBracket < 0 || firstBrace <= firstBracket)) {
+      start = firstBrace; open = '{'; close = '}';
+    } else if (firstBracket >= 0) {
+      start = firstBracket; open = '['; close = ']';
+    }
 
-  if (start > 0) {
-    // Find matching closing bracket
+    if (start < 0) return text;
+
     let depth = 0;
-    let end = start;
-    for (let i = start; i < cleaned.length; i++) {
-      if (cleaned[i] === open) depth++;
-      else if (cleaned[i] === close) depth--;
+    let inString = false;
+    let escape = false;
+    let end = text.length - 1;
+
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (escape) { escape = false; continue; }
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === open) depth++;
+      else if (ch === close) depth--;
       if (depth === 0) { end = i; break; }
     }
-    cleaned = cleaned.substring(start, end + 1);
+
+    let block = text.substring(start, end + 1);
+
+    // If brackets are still unbalanced (truncated output), close them
+    if (depth > 0) {
+      // Remove any trailing incomplete key-value pair
+      block = block.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"{}[\]]*$/, '');
+      block = block.replace(/,\s*$/, '');
+      for (let d = 0; d < depth; d++) {
+        block += close;
+      }
+    }
+    return block;
   }
+
+  cleaned = extractJsonBlock(cleaned);
 
   // 4. Try raw parse first
   try { return JSON.parse(cleaned); } catch (_) { /* continue */ }
 
-  // 5. Fix trailing commas before } or ]
-  let repaired = cleaned.replace(/,\s*([}\]])/g, '$1');
+  // 5. Apply repair pipeline
+  let repaired = cleaned;
 
-  // 6. Fix single-quoted strings → double-quoted
-  repaired = repaired.replace(/(?<=[:,\[{]\s*)'([^']*?)'/g, '"$1"');
+  // 5a. Fix trailing commas before } or ]
+  repaired = repaired.replace(/,\s*([}\]])/g, '$1');
 
-  // 7. Try again
+  // 5b. Fix single-quoted strings → double-quoted
+  repaired = repaired.replace(/'/g, '"');
+
+  // 5c. Strip control chars (newlines inside strings cause parse failures)
+  repaired = repaired.replace(/[\x00-\x1f]+/g, ' ');
+
+  // 5d. Fix unquoted keys:  { key: "value" } → { "key": "value" }
+  repaired = repaired.replace(/([{,]\s*)([a-zA-Z_]\w*)\s*:/g, '$1"$2":');
+
+  // 5e. Fix missing commas between key-value pairs: }" " → }," "
+  repaired = repaired.replace(/}\s*"/g, '}, "');
+  repaired = repaired.replace(/"\s+"/g, '", "');
+
   try { return JSON.parse(repaired); } catch (_) { /* continue */ }
 
-  // 8. Last resort: strip control chars and retry
-  repaired = repaired.replace(/[\x00-\x1f]+/g, ' ');
-  return JSON.parse(repaired); // let this throw if still broken
+  // 6. More aggressive: try to extract just toolCalls array for executor responses
+  const toolCallsMatch = repaired.match(/"toolCalls"\s*:\s*(\[[\s\S]*?\])\s*[,}]/);
+  if (toolCallsMatch) {
+    try {
+      const toolCalls = JSON.parse(toolCallsMatch[1]);
+      // Reconstruct a minimal valid response
+      return {
+        confidence: 0.7,
+        needs_clarification: false,
+        clarification_question: null,
+        toolCalls,
+        thought: "Recovered from malformed JSON"
+      };
+    } catch (_) { /* continue */ }
+  }
+
+  // 7. Nuclear option: regex-extract tool name and parameters
+  const toolMatch = repaired.match(/"tool"\s*:\s*"([^"]+)"/);
+  const paramsMatch = repaired.match(/"parameters"\s*:\s*({[^}]*})/);
+  if (toolMatch) {
+    let params = {};
+    if (paramsMatch) {
+      try { params = JSON.parse(paramsMatch[1]); } catch (_) {
+        // Extract individual key-value pairs
+        const kvPairs = paramsMatch[1].matchAll(/"([^"]+)"\s*:\s*"([^"]+)"/g);
+        for (const kv of kvPairs) {
+          (params as any)[kv[1]] = kv[2];
+        }
+      }
+    }
+    console.warn('[robustJsonParse] Recovered via regex extraction:', toolMatch[1], params);
+    return {
+      confidence: 0.6,
+      needs_clarification: false,
+      clarification_question: null,
+      toolCalls: [{ tool: toolMatch[1], parameters: params }],
+      thought: "Recovered from badly malformed JSON via regex"
+    };
+  }
+
+  // 8. Final attempt with the repaired string  
+  return JSON.parse(repaired); // let this throw if still completely unparseable
 }
 
 export const checkApiKey = () => true; 
@@ -232,7 +305,8 @@ export const runExecutorAgent = async (
   previousResults: string = "", 
   delegator: string = "Planner", 
   serverFilename: string | null = null,
-  retryError: string = ""
+  retryError: string = "",
+  toolHint: string = ""
 ) => {
   const toolDefinitions = availableTools.map(t => 
     `Tool: ${t.name}
@@ -240,20 +314,29 @@ export const runExecutorAgent = async (
      Parameters Schema: ${JSON.stringify(t.inputSchema.properties || {})}`
   ).join('\n\n');
 
-  console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || '', retryError));
+  console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || '', retryError, toolHint));
   
-  try {
-    // Executor uses the GENERAL model for precise instruction following
+  const makeRequest = async () => {
     const response = await ollama.generate({
       model: generalModel,
-      prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || '', retryError),
+      prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || '', retryError, toolHint),
       format: 'json',
       stream: false
     });
     return robustJsonParse(response.response);
-  } catch (e) {
-    console.error("Executor Agent Error:", e);
-    throw new Error("Executor Agent failed to generate tool calls.");
+  };
+
+  try {
+    return await makeRequest();
+  } catch (firstError) {
+    console.warn("Executor Agent first attempt failed, retrying:", firstError);
+    try {
+      // Retry once — LLM output can vary between calls
+      return await makeRequest();
+    } catch (secondError) {
+      console.error("Executor Agent Error (both attempts):", secondError);
+      throw new Error("Executor Agent failed to generate tool calls.");
+    }
   }
 };
 

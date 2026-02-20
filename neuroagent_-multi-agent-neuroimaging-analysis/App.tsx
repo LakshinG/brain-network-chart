@@ -23,7 +23,7 @@ import {
 import { mcpClient } from './services/mcpService';
 import { INTERNAL_TOOLS, executeInternalTool } from './services/internalTools';
 import { 
-  editVisualizationHtmlWithStreaming
+  editVisualizationHtmlWithRetry
 } from './services/visualizerService';
 import { chartDataToHtml } from './utils/chartToHtml';
 import ChatArea from './components/Chat/ChatArea';
@@ -286,6 +286,15 @@ const App: React.FC = () => {
     ));
   };
 
+  // Update chart config (axis labels, title, etc.) for inline property editing
+  const handleConfigChange = (vizId: string, newConfig: any) => {
+    setVisualizations(prev => prev.map(viz =>
+      viz.vizId === vizId
+        ? { ...viz, config: { ...(viz.config || {}), ...newConfig } }
+        : viz
+    ));
+  };
+
   const loadData = (csvText: string, name: string, serverFilename?: string) => {
     const { columns, data } = parseCSV(csvText);
     const newId = Date.now().toString() + Math.random().toString().slice(2, 6);
@@ -339,6 +348,11 @@ const App: React.FC = () => {
         reader.readAsText(file);
     }
   };
+
+  // Stable wrapper so ChatArea doesn't get a new function reference every render
+  const handleSingleFileUpload = useCallback((file: File) => {
+    handleFileUpload(createFileList(file));
+  }, []);
 
   const handleLoadDemo = () => {
     loadData(MOCK_CSV_DATA, "Amyloid_SUVR_Swapped.csv");
@@ -668,7 +682,8 @@ const App: React.FC = () => {
 
       while (!stepSuccess && retryCount < MAX_RETRIES) {
         try {
-            const context = (i === 0 && retryCount === 0) ? stepClarification : undefined;
+            // Pass clarification on ALL retries for the first step, not just the first attempt
+            const context = (i === 0) ? stepClarification : undefined;
             
             let previousResultsContext = resultsSummary.join('\n\n');
             
@@ -690,7 +705,8 @@ const App: React.FC = () => {
               previousResultsContext,
               "Planner",
               activeServerFilename,
-              executionError || ""
+              executionError || "",
+              step.tool  // pass planner's tool hint
             );
             
             if (executorResult.needs_clarification) {
@@ -986,8 +1002,11 @@ const App: React.FC = () => {
   const describeChartData = (viz: ToolVisualization): string => {
     const d = viz.data;
     switch (viz.type) {
-      case VisualizationType.SCATTER_PLOT:
-        return `Scatter plot: X="${d.xCol}", Y="${d.yCol}", r=${d.r?.toFixed(3)}, p=${d.pVal}, n=${d.dataPoints?.length} points.\nSample points: ${JSON.stringify((d.dataPoints || []).slice(0, 8))}`;
+      case VisualizationType.SCATTER_PLOT: {
+        const allPts = (d.series || []).flatMap((s: any) => s.dataPoints || []);
+        const seriesInfo = (d.series || []).map((s: any) => `${s.name}: r=${s.r?.toFixed(3)}, p=${s.p?.toFixed(4)}, n=${s.n}`).join('; ');
+        return `Scatter plot: X="${d.xCol}", Y="${d.yCol}"${d.groupCol ? `, grouped by "${d.groupCol}"` : ''}.\nSeries: [${seriesInfo}]\nTotal points: ${allPts.length}. Sample: ${JSON.stringify(allPts.slice(0, 8))}`;
+      }
       case VisualizationType.BOX_PLOT:
         return `Group comparison bar chart: value="${d.valueCol}", group="${d.groupCol}", p=${d.pVal}.\nGroup stats: ${JSON.stringify(d.stats)}`;
       case VisualizationType.AGING_CURVE:
@@ -1022,7 +1041,7 @@ const App: React.FC = () => {
         targetVizId: selectedViz.vizId
       });
 
-      const result = await editVisualizationHtmlWithStreaming(
+      const result = await editVisualizationHtmlWithRetry(
         query,
         currentHtml,
         visualizerModel,
@@ -1069,7 +1088,7 @@ const App: React.FC = () => {
         targetVizId: selectedViz.vizId
       });
 
-      const result = await editVisualizationHtmlWithStreaming(
+      const result = await editVisualizationHtmlWithRetry(
         conversionPrompt,
         currentHtml,
         visualizerModel,
@@ -1121,7 +1140,7 @@ const App: React.FC = () => {
       isVisualizerEdit: true
     });
 
-    const result = await editVisualizationHtmlWithStreaming(
+    const result = await editVisualizationHtmlWithRetry(
       query,
       starterHtml,
       visualizerModel,
@@ -1310,8 +1329,8 @@ const App: React.FC = () => {
     : null;
 
 
-  // Header component
-  const Header = () => (
+  // Header – plain JSX, NOT a component function (avoids remount flashing)
+  const header = (
     <header className="mb-4 flex-none flex flex-col gap-2">
       <div className="flex justify-between items-center">
         <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
@@ -1482,10 +1501,10 @@ const App: React.FC = () => {
     </header>
   );
 
-  // Left panel (Visualizations)
-  const LeftPanel = () => (
+  // Left panel – plain JSX element (NOT a component function, avoids remount flashing)
+  const leftPanel = (
     <div className="p-4 flex flex-col h-full border-r border-slate-800">
-      <Header />
+      {header}
       <div className="flex-1 min-h-0">
         <VisualizerArea 
           visualizations={visualizations} 
@@ -1493,15 +1512,17 @@ const App: React.FC = () => {
           onVizClick={handleVizClick}
           onHtmlChange={handleHtmlChange}
           onConvertToHtml={handleConvertToHtml}
+          onConfigChange={handleConfigChange}
           activeDatasetIds={activeDatasetIds}
           selectedVisualizationId={selectedVisualizationId}
+          isProcessing={isProcessing}
         />
       </div>
     </div>
   );
 
-  // Right panel (Chat)
-  const RightPanel = () => (
+  // Right panel – plain JSX element (NOT a component function, avoids remount flashing)
+  const rightPanel = (
     <div className="h-full flex flex-col relative">
       {/* Editing Banner - shows when a visualization is selected */}
       {selectedVisualizationId && selectedVisualization && (
@@ -1535,7 +1556,7 @@ const App: React.FC = () => {
         <ChatArea 
           messages={messages} 
           onSendMessage={handleUserQuery} 
-          onFileUpload={(file: File) => handleFileUpload(createFileList(file))}
+          onFileUpload={handleSingleFileUpload}
           onLoadDemo={handleLoadDemo}
           isProcessing={isProcessing}
           hasData={!!activeDataset}
@@ -1557,8 +1578,8 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-full overflow-hidden bg-slate-950 text-slate-200">
       <ResizablePanels
-        leftPanel={<LeftPanel />}
-        rightPanel={<RightPanel />}
+        leftPanel={leftPanel}
+        rightPanel={rightPanel}
         defaultLeftWidth={50}
         minLeftWidth={25}
         maxLeftWidth={75}

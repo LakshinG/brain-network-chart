@@ -271,6 +271,82 @@ function extractVisualizationHtml(response: string): string | null {
 }
 
 /**
+ * Check if generated HTML is essentially empty or broken (no chart content)
+ */
+function isVisualizationHtmlEmpty(html: string): boolean {
+  const hasPlotly = /Plotly\.newPlot|Plotly\.react/i.test(html);
+  const hasChartJs = /new\s+Chart\s*\(/i.test(html);
+  const hasScript = /<script[\s>]/i.test(html);
+
+  // No script tag at all → definitely empty
+  if (!hasScript) return true;
+
+  // Has a script but no chart library call
+  if (!hasPlotly && !hasChartJs) {
+    // Check if script has any meaningful content
+    const scriptContent = html.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
+    if (!scriptContent || scriptContent[1].trim().length < 50) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Edit visualization HTML with streaming and auto-retry on empty results.
+ * Retries up to maxRetries times (default 2, so 3 total attempts).
+ * On final failure, returns an error.
+ */
+export async function editVisualizationHtmlWithRetry(
+  userQuery: string,
+  currentHtml: string,
+  model: string,
+  onProgress: (text: string, done: boolean) => void,
+  maxRetries: number = 2
+): Promise<VisualizerEditResponse> {
+  const totalAttempts = maxRetries + 1;
+  let lastResult: VisualizerEditResponse = { status: 'error', message: 'Unknown error' };
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+    if (attempt > 1) {
+      onProgress(`⚠️ Empty/invalid visualization detected. Retrying... (attempt ${attempt}/${totalAttempts})`, false);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    lastResult = await editVisualizationHtmlWithStreaming(
+      userQuery,
+      currentHtml,
+      model,
+      onProgress
+    );
+
+    // Network/connection errors → don't retry
+    if (lastResult.status === 'error') {
+      const msg = lastResult.message || '';
+      if (msg.includes('Ollama error:') || msg.includes('No response stream')) {
+        return lastResult;
+      }
+      // Extraction errors (null HTML) → retry
+      console.warn(`[VisualizerAgent] Attempt ${attempt}/${totalAttempts}: extraction failed — ${msg}`);
+      continue;
+    }
+
+    // Success with valid (non-empty) HTML → done
+    if (lastResult.html && !isVisualizationHtmlEmpty(lastResult.html)) {
+      return lastResult;
+    }
+
+    // Success but HTML is empty/broken → retry
+    console.warn(`[VisualizerAgent] Attempt ${attempt}/${totalAttempts}: produced empty visualization`);
+  }
+
+  // All retries exhausted
+  return {
+    status: 'error',
+    message: `Failed to generate a valid visualization after ${totalAttempts} attempts. The model produced empty or incomplete charts. Please try rephrasing your request or selecting a different model.`,
+  };
+}
+
+/**
  * Get available Ollama models
  */
 export async function getAvailableModels(): Promise<string[]> {

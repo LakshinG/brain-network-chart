@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Legend, ComposedChart, Line, ZAxis, Cell
@@ -7,15 +7,74 @@ import {
 import { CorrelationResult, GroupComparisonResult, GrowthCurveResult, ClusteringResult, StratificationResult, SVMResult, CorrelationSeries } from '../../types';
 import { Eye, EyeOff } from 'lucide-react';
 
-interface ChartConfig {
+export interface ChartConfig {
   color?: string;
   dotSize?: number;
   title?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
 }
+
+/** Click-to-edit text label used for chart titles, X-axis labels, and Y-axis labels. */
+const EditableLabel: React.FC<{
+  value: string;
+  defaultValue: string;
+  onSave: (value: string) => void;
+  className?: string;
+  inputClassName?: string;
+  style?: React.CSSProperties;
+}> = ({ value, defaultValue, onSave, className = '', inputClassName = '', style }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value || '');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setEditValue(value || ''); }, [value]);
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const display = value || defaultValue;
+
+  const handleSave = useCallback(() => {
+    setIsEditing(false);
+    onSave(editValue);
+  }, [editValue, onSave]);
+
+  if (isEditing) {
+    return (
+      <input
+        ref={inputRef}
+        value={editValue}
+        onChange={e => setEditValue(e.target.value)}
+        onBlur={handleSave}
+        onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') { setEditValue(value || ''); setIsEditing(false); } }}
+        className={`bg-slate-800 border border-cyan-500 rounded px-2 py-0.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 ${inputClassName}`}
+        placeholder={defaultValue}
+        style={style}
+        onClick={e => e.stopPropagation()}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={`cursor-pointer hover:text-cyan-300 transition-colors border-b border-dotted border-transparent hover:border-cyan-500/50 ${className}`}
+      onClick={e => { e.stopPropagation(); setIsEditing(true); }}
+      title="Click to edit"
+      style={style}
+    >
+      {display}
+    </span>
+  );
+};
 
 interface ScatterPlotProps {
   data: CorrelationResult;
   config?: ChartConfig;
+  onConfigChange?: (config: ChartConfig) => void;
 }
 
 const DEFAULT_COLORS = [
@@ -70,7 +129,7 @@ const RegressionLine: React.FC<{ points: {x:number, y:number}[], color: string }
   );
 };
 
-export const ScatterPlot: React.FC<ScatterPlotProps> = ({ data, config }) => {
+export const ScatterPlot: React.FC<ScatterPlotProps> = ({ data, config, onConfigChange }) => {
   const allSeries = data.series || [];
   
   // State for visibility: default to p < 0.05 if grouped, else true
@@ -153,17 +212,30 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ data, config }) => {
       }));
   };
   
-  const title = config?.title || (
-      data.groupCol
+  const defaultTitle = data.groupCol
       ? `Grouped Correlation: ${data.xCol} vs ${data.yCol} by ${data.groupCol}`
-      : `Correlation: ${data.xCol} vs ${data.yCol} (r=${allSeries[0]?.r.toFixed(3)})`
-  );
+      : `Correlation: ${data.xCol} vs ${data.yCol} (r=${allSeries[0]?.r.toFixed(3)})`;
+
+  const title = config?.title || defaultTitle;
+  const xLabel = config?.xAxisLabel || data.xCol;
+  const yLabel = config?.yAxisLabel || data.yCol;
+
+  const saveField = useCallback((field: 'title' | 'xAxisLabel' | 'yAxisLabel', value: string) => {
+    if (!onConfigChange) return;
+    const newCfg: ChartConfig = { ...(config || {}), [field]: value || undefined };
+    if (!newCfg.title) delete newCfg.title;
+    if (!newCfg.xAxisLabel) delete newCfg.xAxisLabel;
+    if (!newCfg.yAxisLabel) delete newCfg.yAxisLabel;
+    onConfigChange(newCfg);
+  }, [config, onConfigChange]);
 
   return (
     <div className="w-full flex flex-col bg-slate-900 rounded-lg border border-slate-700 overflow-hidden">
       <div className="p-3 bg-slate-800/50 border-b border-slate-700 flex justify-between items-center">
-         <h3 className="text-slate-300 text-sm font-semibold truncate max-w-[70%]" title={title}>
-            {title}
+         <h3 className="text-slate-300 text-sm font-semibold truncate max-w-[70%]">
+            {onConfigChange ? (
+              <EditableLabel value={config?.title || ''} defaultValue={defaultTitle} onSave={v => saveField('title', v)} className="text-slate-300" />
+            ) : title}
          </h3>
          <div className="text-xs text-slate-500">
             {allSeries.length} group{allSeries.length !== 1 ? 's' : ''}
@@ -216,55 +288,87 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ data, config }) => {
       </div>
 
       <div className="h-96 w-full p-2 relative">
-         <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 30 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-            <XAxis 
-                type="number" 
-                dataKey="x" 
-                name="X Value" 
-                stroke="#94a3b8" 
-                fontSize={12}
-                label={{ value: data.xCol, position: 'insideBottom', offset: -30, fill: '#e2e8f0', fontSize: 12 }}
-                domain={xDomain as [number, number] | ['auto', 'auto']}
-            />
-            <YAxis 
-                type="number" 
-                dataKey="y" 
-                name={data.yCol} 
-                stroke="#94a3b8" 
-                fontSize={12}
-                label={{ value: data.yCol, angle: -90, position: 'insideLeft', offset: 0, fill: '#e2e8f0', fontSize: 12, style: { textAnchor: 'middle' } }}
-                domain={yDomain as [number, number] | ['auto', 'auto']}
-            />
-            <Tooltip 
-                cursor={{ strokeDasharray: '3 3' }} 
-                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#f1f5f9' }} 
-                formatter={(value: any, name: any, props: any) => {
-                    return [value, props.payload.seriesName ? `${props.payload.seriesName} (${name})` : name];
-                }}
-            />
-            
-            {allSeries.map((s, idx) => {
-                if (!visibleSeries[s.name]) return null;
-                
-                const color = DEFAULT_COLORS[idx % DEFAULT_COLORS.length];
-                const sampled = sampledSeries[idx];
-                const seriesData = sampled.displayPoints.map(p => ({ ...p, seriesName: s.name }));
-                
-                return (
-                    <React.Fragment key={idx}>
-                        <Scatter 
-                            name={`${s.name} (r=${s.r.toFixed(2)})`} 
-                            data={seriesData} 
-                            fill={color} 
-                        />
-                        <RegressionLine points={s.dataPoints} color={color} />
-                    </React.Fragment>
-                );
-            })}
-            </ScatterChart>
-        </ResponsiveContainer>
+         <div className="flex h-full">
+           {/* Y-axis editable label */}
+           <div className="flex items-center justify-center flex-shrink-0" style={{ width: 28 }}>
+             {onConfigChange ? (
+               <EditableLabel
+                 value={config?.yAxisLabel || ''}
+                 defaultValue={data.yCol}
+                 onSave={v => saveField('yAxisLabel', v)}
+                 className="text-slate-400 text-[11px]"
+                 inputClassName="w-20"
+                 style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+               />
+             ) : (
+               <span className="text-slate-400 text-[11px]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>{yLabel}</span>
+             )}
+           </div>
+           <div className="flex-1 flex flex-col min-w-0">
+             <div className="flex-1 min-h-0">
+               <ResponsiveContainer width="100%" height="100%">
+                  <ScatterChart margin={{ top: 20, right: 20, bottom: 10, left: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis 
+                      type="number" 
+                      dataKey="x" 
+                      name="X Value" 
+                      stroke="#94a3b8" 
+                      fontSize={12}
+                      domain={xDomain as [number, number] | ['auto', 'auto']}
+                  />
+                  <YAxis 
+                      type="number" 
+                      dataKey="y" 
+                      name={yLabel} 
+                      stroke="#94a3b8" 
+                      fontSize={12}
+                      domain={yDomain as [number, number] | ['auto', 'auto']}
+                  />
+                  <Tooltip 
+                      cursor={{ strokeDasharray: '3 3' }} 
+                      contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#f1f5f9' }} 
+                      formatter={(value: any, name: any, props: any) => {
+                          return [value, props.payload.seriesName ? `${props.payload.seriesName} (${name})` : name];
+                      }}
+                  />
+                  
+                  {allSeries.map((s, idx) => {
+                      if (!visibleSeries[s.name]) return null;
+                      
+                      const color = DEFAULT_COLORS[idx % DEFAULT_COLORS.length];
+                      const sampled = sampledSeries[idx];
+                      const seriesData = sampled.displayPoints.map(p => ({ ...p, seriesName: s.name }));
+                      
+                      return (
+                          <React.Fragment key={idx}>
+                              <Scatter 
+                                  name={`${s.name} (r=${s.r.toFixed(2)})`} 
+                                  data={seriesData} 
+                                  fill={color} 
+                              />
+                              <RegressionLine points={s.dataPoints} color={color} />
+                          </React.Fragment>
+                      );
+                  })}
+                  </ScatterChart>
+              </ResponsiveContainer>
+             </div>
+             {/* X-axis editable label */}
+             <div className="text-center py-1">
+               {onConfigChange ? (
+                 <EditableLabel
+                   value={config?.xAxisLabel || ''}
+                   defaultValue={data.xCol}
+                   onSave={v => saveField('xAxisLabel', v)}
+                   className="text-slate-400 text-[11px]"
+                 />
+               ) : (
+                 <span className="text-slate-400 text-[11px]">{xLabel}</span>
+               )}
+             </div>
+           </div>
+         </div>
         {Object.values(visibleSeries).every(v => !v) && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <span className="text-slate-500 text-sm bg-slate-900/80 px-4 py-2 rounded border border-slate-700">
@@ -280,35 +384,80 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ data, config }) => {
 interface BoxPlotProps {
   data: GroupComparisonResult;
   config?: ChartConfig;
+  onConfigChange?: (config: ChartConfig) => void;
 }
 
 // Simulating a Box Plot using Bar Chart (min, median, max) for simplicity in Recharts without custom shapes
 // In a real app, use a dedicated BoxPlot component or library
-export const StatsBarChart: React.FC<BoxPlotProps> = ({ data, config }) => {
+export const StatsBarChart: React.FC<BoxPlotProps> = ({ data, config, onConfigChange }) => {
   const fill = config?.color || "#8b5cf6";
+  const defaultTitle = `Group Comparison: ${data.valueCol} by ${data.groupCol} (p=${data.pVal})`;
+
+  const saveField = useCallback((field: 'title' | 'xAxisLabel' | 'yAxisLabel', value: string) => {
+    if (!onConfigChange) return;
+    const newCfg: ChartConfig = { ...(config || {}), [field]: value || undefined };
+    if (!newCfg.title) delete newCfg.title;
+    if (!newCfg.xAxisLabel) delete newCfg.xAxisLabel;
+    if (!newCfg.yAxisLabel) delete newCfg.yAxisLabel;
+    onConfigChange(newCfg);
+  }, [config, onConfigChange]);
 
   return (
-    <div className="w-full h-96 bg-slate-900 rounded-lg p-4 border border-slate-700">
+    <div className="w-full bg-slate-900 rounded-lg p-4 border border-slate-700">
       <h3 className="text-center text-slate-300 mb-2 text-sm font-semibold">
-        Group Comparison: {data.valueCol} by {data.groupCol} (p={data.pVal})
+        {onConfigChange ? (
+          <EditableLabel value={config?.title || ''} defaultValue={defaultTitle} onSave={v => saveField('title', v)} className="text-slate-300" />
+        ) : (config?.title || defaultTitle)}
       </h3>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data.stats} margin={{ top: 20, right: 30, left: 30, bottom: 40 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-          <XAxis 
-            dataKey="group" 
-            stroke="#94a3b8"
-            label={{ value: data.groupCol, position: 'insideBottom', offset: -30, fill: '#e2e8f0', fontSize: 12 }}
-          />
-          <YAxis 
-            stroke="#94a3b8"
-            label={{ value: data.valueCol, angle: -90, position: 'insideLeft', offset: 0, fill: '#e2e8f0', fontSize: 12, style: { textAnchor: 'middle' } }}
-          />
-          <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#f1f5f9' }} />
-          <Legend verticalAlign="top" height={36}/>
-          <Bar dataKey="mean" fill={fill} name="Mean Value" />
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="flex" style={{ height: '22rem' }}>
+        {/* Y-axis editable label */}
+        <div className="flex items-center justify-center flex-shrink-0" style={{ width: 28 }}>
+          {onConfigChange ? (
+            <EditableLabel
+              value={config?.yAxisLabel || ''}
+              defaultValue={data.valueCol}
+              onSave={v => saveField('yAxisLabel', v)}
+              className="text-slate-400 text-[11px]"
+              inputClassName="w-20"
+              style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+            />
+          ) : (
+            <span className="text-slate-400 text-[11px]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>{config?.yAxisLabel || data.valueCol}</span>
+          )}
+        </div>
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 min-h-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data.stats} margin={{ top: 20, right: 30, left: 10, bottom: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis 
+                  dataKey="group" 
+                  stroke="#94a3b8"
+                />
+                <YAxis 
+                  stroke="#94a3b8"
+                />
+                <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#f1f5f9' }} />
+                <Legend verticalAlign="top" height={36}/>
+                <Bar dataKey="mean" fill={fill} name="Mean Value" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {/* X-axis editable label */}
+          <div className="text-center py-1">
+            {onConfigChange ? (
+              <EditableLabel
+                value={config?.xAxisLabel || ''}
+                defaultValue={data.groupCol}
+                onSave={v => saveField('xAxisLabel', v)}
+                className="text-slate-400 text-[11px]"
+              />
+            ) : (
+              <span className="text-slate-400 text-[11px]">{config?.xAxisLabel || data.groupCol}</span>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -316,9 +465,10 @@ export const StatsBarChart: React.FC<BoxPlotProps> = ({ data, config }) => {
 interface AgingCurveProps {
     data: GrowthCurveResult;
     config?: ChartConfig;
+    onConfigChange?: (config: ChartConfig) => void;
 }
 
-export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config }) => {
+export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config, onConfigChange }) => {
     // Robustly map chart data, ensuring all values are numbers
     const chartData = useMemo(() => {
         if (!data.data || !data.data.X) return [];
@@ -395,10 +545,25 @@ export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config }) => 
         return [min - padding, max + padding];
     }, [chartData, overlayData]);
 
+    const saveField = useCallback((field: 'title' | 'xAxisLabel' | 'yAxisLabel', value: string) => {
+      if (!onConfigChange) return;
+      const newCfg: ChartConfig = { ...(config || {}), [field]: value || undefined };
+      if (!newCfg.title) delete newCfg.title;
+      if (!newCfg.xAxisLabel) delete newCfg.xAxisLabel;
+      if (!newCfg.yAxisLabel) delete newCfg.yAxisLabel;
+      onConfigChange(newCfg);
+    }, [config, onConfigChange]);
+
+    const defaultTitle = data.phenotype || 'Growth Curve';
+
     return (
       <div className="w-full bg-slate-900 rounded-lg p-4 border border-slate-700">
         <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
-            <span className="font-semibold text-slate-200">{data.phenotype}</span>
+            <span className="font-semibold text-slate-200">
+              {onConfigChange ? (
+                <EditableLabel value={config?.title || ''} defaultValue={defaultTitle} onSave={v => saveField('title', v)} className="text-slate-200" />
+              ) : (config?.title || defaultTitle)}
+            </span>
         </div>
 
         <div className="flex gap-4 mb-4 text-xs">
@@ -422,24 +587,41 @@ export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config }) => 
 
         <div className="h-96 w-full">
             {chartData.length > 0 || overlayData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 10, right: 16, left: 10, bottom: 30 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                        <XAxis
-                            dataKey="age"
-                            label={{ value: 'Age (yr)', position: 'insideBottom', offset: -20, style: { fontSize: 11, fill: '#64748b' } }}
-                            type="number"
-                            domain={xAxisDomain}
-                            tick={{ fontSize: 10, fill: '#64748b' }}
-                            stroke="#475569"
-                        />
-                        <YAxis
-                            domain={yAxisDomain}
-                            width={50}
-                            tick={{ fontSize: 10, fill: '#64748b' }}
-                            tickFormatter={v => v.toFixed(2)}
-                            stroke="#475569"
-                        />
+              <div className="flex h-full">
+                {/* Y-axis editable label */}
+                <div className="flex items-center justify-center flex-shrink-0" style={{ width: 24 }}>
+                  {onConfigChange ? (
+                    <EditableLabel
+                      value={config?.yAxisLabel || ''}
+                      defaultValue="Value"
+                      onSave={v => saveField('yAxisLabel', v)}
+                      className="text-slate-500 text-[11px]"
+                      inputClassName="w-16"
+                      style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                    />
+                  ) : (
+                    <span className="text-slate-500 text-[11px]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>{config?.yAxisLabel || 'Value'}</span>
+                  )}
+                </div>
+                <div className="flex-1 flex flex-col min-w-0">
+                  <div className="flex-1 min-h-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={chartData} margin={{ top: 10, right: 16, left: 10, bottom: 10 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                            <XAxis
+                                dataKey="age"
+                                type="number"
+                                domain={xAxisDomain}
+                                tick={{ fontSize: 10, fill: '#64748b' }}
+                                stroke="#475569"
+                            />
+                            <YAxis
+                                domain={yAxisDomain}
+                                width={50}
+                                tick={{ fontSize: 10, fill: '#64748b' }}
+                                tickFormatter={v => v.toFixed(2)}
+                                stroke="#475569"
+                            />
                         <Tooltip
                             contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', borderRadius: 8, fontSize: 11, color: '#f1f5f9' }}
                             labelStyle={{ color: '#a5b4fc' }}
@@ -469,6 +651,22 @@ export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config }) => 
                         )}
                     </ComposedChart>
                 </ResponsiveContainer>
+                  </div>
+                  {/* X-axis editable label */}
+                  <div className="text-center py-1">
+                    {onConfigChange ? (
+                      <EditableLabel
+                        value={config?.xAxisLabel || ''}
+                        defaultValue="Age (yr)"
+                        onSave={v => saveField('xAxisLabel', v)}
+                        className="text-slate-500 text-[11px]"
+                      />
+                    ) : (
+                      <span className="text-slate-500 text-[11px]">{config?.xAxisLabel || 'Age (yr)'}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
             ) : (
                 <div className="flex h-full items-center justify-center text-slate-500 text-sm">
                     No curve data available
@@ -585,43 +783,74 @@ export const ClusteringDashboard: React.FC<ClusteringDashboardProps> = ({ data, 
   );
 };
 
-export const StratificationChart: React.FC<{ data: StratificationResult, config?: ChartConfig }> = ({ data, config }) => {
+export const StratificationChart: React.FC<{ data: StratificationResult, config?: ChartConfig, onConfigChange?: (config: ChartConfig) => void }> = ({ data, config, onConfigChange }) => {
     const fill = config?.color || "#10b981"; // Emerald
+    const defaultTitle = `Stratification: ${data.targetCol} by ${data.groupCol} (Row Counts)`;
+
+    const saveField = useCallback((field: 'title' | 'xAxisLabel' | 'yAxisLabel', value: string) => {
+      if (!onConfigChange) return;
+      const newCfg: ChartConfig = { ...(config || {}), [field]: value || undefined };
+      if (!newCfg.title) delete newCfg.title;
+      if (!newCfg.xAxisLabel) delete newCfg.xAxisLabel;
+      if (!newCfg.yAxisLabel) delete newCfg.yAxisLabel;
+      onConfigChange(newCfg);
+    }, [config, onConfigChange]);
     
     return (
-        <div className="w-full h-96 bg-slate-900 rounded-lg p-4 border border-slate-700">
+        <div className="w-full bg-slate-900 rounded-lg p-4 border border-slate-700">
           <h3 className="text-center text-slate-300 mb-2 text-sm font-semibold">
-            Stratification: {data.targetCol} by {data.groupCol} (Row Counts)
+            {onConfigChange ? (
+              <EditableLabel value={config?.title || ''} defaultValue={defaultTitle} onSave={v => saveField('title', v)} className="text-slate-300" />
+            ) : (config?.title || defaultTitle)}
           </h3>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.newColumns} margin={{ top: 20, right: 30, left: 30, bottom: 60 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis 
-                dataKey="name" 
-                stroke="#94a3b8" 
-                angle={-45} 
-                textAnchor="end"
-                height={60}
-                tick={{ fontSize: 10 }}
-              />
-              <YAxis 
-                stroke="#94a3b8" 
-                label={{ value: 'Row Count', angle: -90, position: 'insideLeft', fill: '#e2e8f0', fontSize: 12 }} 
-              />
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#f1f5f9' }} 
-                cursor={{ fill: '#334155', opacity: 0.4 }}
-              />
-              <Bar dataKey="count" fill={fill} name="Rows" />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="flex" style={{ height: '20rem' }}>
+            {/* Y-axis editable label */}
+            <div className="flex items-center justify-center flex-shrink-0" style={{ width: 28 }}>
+              {onConfigChange ? (
+                <EditableLabel
+                  value={config?.yAxisLabel || ''}
+                  defaultValue="Row Count"
+                  onSave={v => saveField('yAxisLabel', v)}
+                  className="text-slate-400 text-[11px]"
+                  inputClassName="w-20"
+                  style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                />
+              ) : (
+                <span className="text-slate-400 text-[11px]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>{config?.yAxisLabel || 'Row Count'}</span>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data.newColumns} margin={{ top: 20, right: 30, left: 10, bottom: 60 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#94a3b8" 
+                    angle={-45} 
+                    textAnchor="end"
+                    height={60}
+                    tick={{ fontSize: 10 }}
+                  />
+                  <YAxis 
+                    stroke="#94a3b8" 
+                  />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#f1f5f9' }} 
+                    cursor={{ fill: '#334155', opacity: 0.4 }}
+                  />
+                  <Bar dataKey="count" fill={fill} name="Rows" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
     );
 };
 
-export const SVMBoundaryChart: React.FC<{ data: SVMResult, config?: ChartConfig }> = ({ data, config }) => {
+export const SVMBoundaryChart: React.FC<{ data: SVMResult, config?: ChartConfig, onConfigChange?: (config: ChartConfig) => void }> = ({ data, config, onConfigChange }) => {
     const colors = ['#3b82f6', '#ef4444']; // Blue and Red for classes
     const classes = data.classes;
+    const defaultTitle = `SVM Classification: ${data.targetCol} (Accuracy: ${(data.accuracy * 100).toFixed(1)}%)`;
     
     // Boundary line data (2 points)
     const lineData = [
@@ -629,58 +858,101 @@ export const SVMBoundaryChart: React.FC<{ data: SVMResult, config?: ChartConfig 
         { x: data.decisionBoundary.x2, y: data.decisionBoundary.y2 }
     ];
 
+    const saveField = useCallback((field: 'title' | 'xAxisLabel' | 'yAxisLabel', value: string) => {
+      if (!onConfigChange) return;
+      const newCfg: ChartConfig = { ...(config || {}), [field]: value || undefined };
+      if (!newCfg.title) delete newCfg.title;
+      if (!newCfg.xAxisLabel) delete newCfg.xAxisLabel;
+      if (!newCfg.yAxisLabel) delete newCfg.yAxisLabel;
+      onConfigChange(newCfg);
+    }, [config, onConfigChange]);
+
     return (
-        <div className="w-full h-96 bg-slate-900 rounded-lg p-4 border border-slate-700">
+        <div className="w-full bg-slate-900 rounded-lg p-4 border border-slate-700">
             <h3 className="text-center text-slate-300 mb-1 text-sm font-semibold">
-                SVM Classification: {data.targetCol} (Accuracy: {(data.accuracy * 100).toFixed(1)}%)
+                {onConfigChange ? (
+                  <EditableLabel value={config?.title || ''} defaultValue={defaultTitle} onSave={v => saveField('title', v)} className="text-slate-300" />
+                ) : (config?.title || defaultTitle)}
             </h3>
             <p className="text-center text-slate-500 text-xs mb-2">
                 Features: {data.xCol} vs {data.yCol}
             </p>
-            <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 30 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                    <XAxis 
-                        type="number" 
-                        dataKey="x" 
-                        name={data.xCol} 
-                        stroke="#94a3b8" 
-                        fontSize={12}
-                        label={{ value: data.xCol, position: 'insideBottom', offset: -30, fill: '#e2e8f0', fontSize: 12 }}
-                    />
-                    <YAxis 
-                        type="number" 
-                        dataKey="y" 
-                        name={data.yCol} 
-                        stroke="#94a3b8" 
-                        fontSize={12}
-                        label={{ value: data.yCol, angle: -90, position: 'insideLeft', offset: 0, fill: '#e2e8f0', fontSize: 12, style: { textAnchor: 'middle' } }}
-                    />
-                    <Tooltip 
-                        cursor={{ strokeDasharray: '3 3' }} 
-                        contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#f1f5f9' }}
-                    />
-                    <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', color: '#cbd5e1' }} />
-                    
-                    {classes.map((cls, idx) => (
-                        <Scatter 
-                            key={cls}
-                            name={`Class ${cls}`} 
-                            data={data.dataPoints.filter(p => p.classLabel === cls)} 
-                            fill={colors[idx % colors.length]} 
-                        />
-                    ))}
+            <div className="flex" style={{ height: '20rem' }}>
+              {/* Y-axis editable label */}
+              <div className="flex items-center justify-center flex-shrink-0" style={{ width: 28 }}>
+                {onConfigChange ? (
+                  <EditableLabel
+                    value={config?.yAxisLabel || ''}
+                    defaultValue={data.yCol}
+                    onSave={v => saveField('yAxisLabel', v)}
+                    className="text-slate-400 text-[11px]"
+                    inputClassName="w-20"
+                    style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                  />
+                ) : (
+                  <span className="text-slate-400 text-[11px]" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>{config?.yAxisLabel || data.yCol}</span>
+                )}
+              </div>
+              <div className="flex-1 flex flex-col min-w-0">
+                <div className="flex-1 min-h-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                      <ScatterChart margin={{ top: 20, right: 20, bottom: 10, left: 10 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                          <XAxis 
+                              type="number" 
+                              dataKey="x" 
+                              name={config?.xAxisLabel || data.xCol} 
+                              stroke="#94a3b8" 
+                              fontSize={12}
+                          />
+                          <YAxis 
+                              type="number" 
+                              dataKey="y" 
+                              name={config?.yAxisLabel || data.yCol} 
+                              stroke="#94a3b8" 
+                              fontSize={12}
+                          />
+                          <Tooltip 
+                              cursor={{ strokeDasharray: '3 3' }} 
+                              contentStyle={{ backgroundColor: '#1e293b', borderColor: '#475569', color: '#f1f5f9' }}
+                          />
+                          <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', color: '#cbd5e1' }} />
+                          
+                          {classes.map((cls, idx) => (
+                              <Scatter 
+                                  key={cls}
+                                  name={`Class ${cls}`} 
+                                  data={data.dataPoints.filter(p => p.classLabel === cls)} 
+                                  fill={colors[idx % colors.length]} 
+                              />
+                          ))}
 
-                    <Scatter 
-                        name="Decision Boundary" 
-                        data={lineData} 
-                        line={{ stroke: '#10b981', strokeWidth: 3 }} 
-                        shape={() => <></>}
-                        fill="none" 
-                        legendType="plainline"
+                          <Scatter 
+                              name="Decision Boundary" 
+                              data={lineData} 
+                              line={{ stroke: '#10b981', strokeWidth: 3 }} 
+                              shape={() => <></>}
+                              fill="none" 
+                              legendType="plainline"
+                          />
+                      </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
+                {/* X-axis editable label */}
+                <div className="text-center py-1">
+                  {onConfigChange ? (
+                    <EditableLabel
+                      value={config?.xAxisLabel || ''}
+                      defaultValue={data.xCol}
+                      onSave={v => saveField('xAxisLabel', v)}
+                      className="text-slate-400 text-[11px]"
                     />
-                </ScatterChart>
-            </ResponsiveContainer>
+                  ) : (
+                    <span className="text-slate-400 text-[11px]">{config?.xAxisLabel || data.xCol}</span>
+                  )}
+                </div>
+              </div>
+            </div>
         </div>
     );
 };
