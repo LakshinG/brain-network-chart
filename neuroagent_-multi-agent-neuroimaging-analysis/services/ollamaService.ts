@@ -189,6 +189,7 @@ export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERA
   try {
     const response = await ollama.generate({
       model: generalModel,
+      keep_alive: -1,
       prompt: PROMPTS.ORCHESTRATOR_CLASSIFY(query),
       format: 'json',
       stream: false
@@ -213,7 +214,8 @@ export const generateGeneralPlan = async (query: string, availableTools: McpTool
       model: generalModel,
       prompt: PROMPTS.GENERAL_PLANNER(query, toolDescriptions, feedback || "", chatHistory),
       format: 'json',
-      stream: false
+      stream: false,
+      keep_alive: -1
     });
     return robustJsonParse(response.response);
   } catch (e) {
@@ -230,11 +232,10 @@ export const generateNeuroPlan = async (query: string, dataContext: string, avai
   const toolDescriptions = availableTools.map(t => 
     `- ${t.name}: ${t.description || 'No description'}`
   ).join('\n    ');
-
+  //    - TRANSFORM_DATA: Convert categorical columns (e.g. DX, Sex) to numeric (creates {col}_numeric). Use this before Correlation if input is categorical.
   const allToolDescs = `
     [Core Data Tools]
     - DATA_INSPECT: Display data rows to the user (Visualization). Use this when the user wants to see the table or when you need to check value formats (e.g. string vs number).
-    - TRANSFORM_DATA: Convert categorical columns (e.g. DX, Sex) to numeric (creates {col}_numeric). Use this before Correlation if input is categorical.
     
     [Advanced/MCP Tools]
     ${toolDescriptions ? toolDescriptions : 'No external tools available.'}
@@ -246,7 +247,8 @@ export const generateNeuroPlan = async (query: string, dataContext: string, avai
       model: neuroModel,
       prompt: PROMPTS.NEURO_PLANNER(query, dataContext, allToolDescs, feedback || "", chatHistory),
       format: 'json',
-      stream: false
+      stream: false,
+      keep_alive: -1
     });
     return robustJsonParse(response.response);
   } catch (e) {
@@ -275,7 +277,8 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
       model: generalModel,
       prompt: PROMPTS.PLAN_VALIDATOR(JSON.stringify(toolManifest), JSON.stringify(plan, null, 2)),
       format: 'json',
-      stream: false
+      stream: false,
+      keep_alive: -1
     });
     
     const result = robustJsonParse(response.response);
@@ -321,7 +324,8 @@ export const runExecutorAgent = async (
       model: generalModel,
       prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || '', retryError, toolHint),
       format: 'json',
-      stream: false
+      stream: false,
+      keep_alive: -1
     });
     return robustJsonParse(response.response);
   };
@@ -354,7 +358,8 @@ export const interpretToolResult = async (instruction: string, toolName: string,
     const response = await ollama.generate({
       model: generalModel,
       prompt: PROMPTS.EXECUTOR_INTERPRET(instruction, toolName, outputStr),
-      stream: false
+      stream: false,
+      keep_alive: -1
     });
     return stripThinkTags(response.response);
   } catch (e) {
@@ -370,6 +375,7 @@ export const generatePreprocessingMapping = async (column: string, values: strin
       model: neuroModel,
       prompt: PROMPTS.PREPROCESSOR_MAPPING(column, values),
       format: 'json',
+      keep_alive: -1,
       stream: false
     });
     return robustJsonParse(response.response);
@@ -389,6 +395,7 @@ export const generateResearchInsights = async (results: string, availableTools: 
       model: neuroModel,
       prompt: PROMPTS.RESEARCHER_INSIGHTS(results, toolsStr),
       format: 'json',
+      keep_alive: -1,
       stream: false
     });
     return robustJsonParse(response.response);
@@ -407,6 +414,7 @@ export const generateProposalReport = async (userQuery: string, analysisResults:
   try {
     const response = await ollama.generate({
       model: neuroModel,
+      keep_alive: -1,
       prompt: PROMPTS.PROPOSAL_REPORTER(userQuery, analysisResults, researcherNotes),
       stream: false
     });

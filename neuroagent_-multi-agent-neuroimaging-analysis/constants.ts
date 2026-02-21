@@ -88,11 +88,8 @@ export const PROMPTS = {
 
     Planning Strategy:
     1. Analyze the user's scientific intent.
-    2. **CRITICAL**: Inspect the "Dataset Context" for an 'Age' related column (e.g., 'Age', 'Age_Years', 'Visit_Age').
-       - If an 'Age' column exists, you MUST plan to use the "get_aging_curves" tool (or similar if available) to contextulize findings, especially for biomarkers.
-       - Pick a relevant biomarker/phenotype based on the tool description and the dataset to compare against the aging curve.
-    3. Design a multi-step flow.
-    4. DO NOT generate specific parameters (e.g., do not write JSON args). Instead, write a clear INSTRUCTION for the Executor Agent. The Executor will map columns and handle specifics.
+    2. Design a multi-step flow.
+    3. DO NOT generate specific parameters (e.g., do not write JSON args). Instead, write a clear INSTRUCTION for the Executor Agent. The Executor will map columns and handle specifics.
     
     Example: 
     - Tool: "CORRELATION_ANALYSIS"
@@ -125,8 +122,7 @@ export const PROMPTS = {
     ${planJson}
 
     Validation Rules:
-    1. Logical Sufficiency: Read the "instruction". Does this instruction provide enough context (like column names or goals) for a smart Executor agent to run the tool?
-    2. Goal Alignment: Will this sequence of steps answer the user's query?
+    Goal Alignment: Will this sequence of steps answer the user's query?
 
     Return strictly a JSON object:
     {

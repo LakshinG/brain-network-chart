@@ -27,41 +27,41 @@ export const INTERNAL_TOOLS: McpTool[] = [
       required: ['x_column', 'y_column']
     }
   },
-  {
-    name: 'GROUP_COMPARISON',
-    description: 'Compare a numeric value across all groups in a categorical column. Performs pairwise T-tests and Cohen\'s d analysis for all unique pairs.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        group_column: { type: 'string', description: 'The categorical column to group by (e.g., DX, Sex)' },
-        target_column: { type: 'string', description: 'The numeric column to analyze (e.g., Amyloid, Tau)' }
-      },
-      required: ['group_column', 'target_column']
-    }
-  },
-  {
-    name: 'MODIFY_VISUALIZATION',
-    description: 'Update the style of the currently visible visualization. Use this to change colors, titles, or sizes.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        color: { type: 'string', description: 'Color name or hex code (e.g. "red", "#ff0000")' },
-        title: { type: 'string', description: 'New title for the chart' },
-        dotSize: { type: 'number', description: 'Size of dots in scatter plot (default 100)' }
-      }
-    }
-  },
-  {
-    name: 'TRANSFORM_DATA',
-    description: 'Convert a categorical column to numeric values. This creates a new column with "_numeric" suffix (e.g. DX -> DX_numeric). Use this before correlation analysis involving categorical data.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        column: { type: 'string', description: 'The categorical column to convert (e.g., DX, Sex)' }
-      },
-      required: ['column']
-    }
-  },
+  // {
+  //   name: 'GROUP_COMPARISON',
+  //   description: 'Compare a numeric value across all groups in a categorical column. Performs pairwise T-tests and Cohen\'s d analysis for all unique pairs.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       group_column: { type: 'string', description: 'The categorical column to group by (e.g., DX, Sex)' },
+  //       target_column: { type: 'string', description: 'The numeric column to analyze (e.g., Amyloid, Tau)' }
+  //     },
+  //     required: ['group_column', 'target_column']
+  //   }
+  // },
+  // {
+  //   name: 'MODIFY_VISUALIZATION',
+  //   description: 'Update the style of the currently visible visualization. Use this to change colors, titles, or sizes.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       color: { type: 'string', description: 'Color name or hex code (e.g. "red", "#ff0000")' },
+  //       title: { type: 'string', description: 'New title for the chart' },
+  //       dotSize: { type: 'number', description: 'Size of dots in scatter plot (default 100)' }
+  //     }
+  //   }
+  // },
+  // {
+  //   name: 'TRANSFORM_DATA',
+  //   description: 'Convert a categorical column to numeric values. This creates a new column with "_numeric" suffix (e.g. DX -> DX_numeric). Use this before correlation analysis involving categorical data.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       column: { type: 'string', description: 'The categorical column to convert (e.g., DX, Sex)' }
+  //     },
+  //     required: ['column']
+  //   }
+  // },
   {
     name: 'AVERAGE_MULTIPLE_COLUMNS',
     description: 'Calculate average values across multiple columns for each row. Matches columns by name using a "condition" string (substring match). Use this to aggregate multiple metrics (e.g. "Amyloid" matches "Amyloid_Orbital", "Amyloid_Frontal").',
@@ -86,19 +86,19 @@ export const INTERNAL_TOOLS: McpTool[] = [
       required: ['feature_pattern']
     }
   },
-  {
-    name: 'STRATIFY_DATASET',
-    description: 'Split a dataset into subsets based on unique values of a grouping column. Creates new sparse columns for each group (e.g. IQ -> IQ_Sex_F, IQ_Sex_M) and inserts them back into the dataset. Useful for visualizing distributions across groups.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        target_column: { type: 'string', description: 'The value column to split (e.g. IQ)' },
-        group_column: { type: 'string', description: 'The categorical/numeric column to group by (e.g. Sex, Age)' },
-        max_group_num: { type: 'number', description: 'Max number of groups to create (default 10)' }
-      },
-      required: ['target_column', 'group_column']
-    }
-  },
+  // {
+  //   name: 'STRATIFY_DATASET',
+  //   description: 'Split a dataset into subsets based on unique values of a grouping column. Creates new sparse columns for each group (e.g. IQ -> IQ_Sex_F, IQ_Sex_M) and inserts them back into the dataset. Useful for visualizing distributions across groups.',
+  //   inputSchema: {
+  //     type: 'object',
+  //     properties: {
+  //       target_column: { type: 'string', description: 'The value column to split (e.g. IQ)' },
+  //       group_column: { type: 'string', description: 'The categorical/numeric column to group by (e.g. Sex, Age)' },
+  //       max_group_num: { type: 'number', description: 'Max number of groups to create (default 10)' }
+  //     },
+  //     required: ['target_column', 'group_column']
+  //   }
+  // },
   {
     name: 'SVM_CLASSIFICATION',
     description: 'Fit a Linear SVM classifier to predict a target categorical column based on two numeric feature columns. Preprocesses target to binary if needed. Outputs accuracy and a plot with the decision boundary.',

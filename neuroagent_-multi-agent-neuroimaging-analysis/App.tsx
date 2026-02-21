@@ -238,7 +238,7 @@ const App: React.FC = () => {
 
     if (role === AgentType.ORCHESTRATOR || role === AgentType.GENERAL_PLANNER || role === AgentType.EXECUTOR) {
       usedModel = selectedGeneralModel;
-    } else if (role === AgentType.NEURO_PLANNER || role === AgentType.PLAN_VALIDATOR || role === AgentType.PREPROCESSOR || role === AgentType.RESEARCHER || role === AgentType.PROPOSAL_REPORTER) {
+    } else if (role === AgentType.PLAN_VALIDATOR || role === AgentType.NEURO_PLANNER || role === AgentType.PREPROCESSOR || role === AgentType.RESEARCHER || role === AgentType.PROPOSAL_REPORTER) {
       usedModel = selectedNeuroModel;
     }
 
@@ -538,7 +538,7 @@ const App: React.FC = () => {
               if (toolName === 'CORRELATION_ANALYSIS') {
                   const corrResult = result as CorrelationResult;
                   const series = corrResult.series || [];
-                  const primarySeries = series.length > 0 ? series[0] : { r: 0, p: 1, name: 'No Data' };
+                  const primarySeries = series.length > 0 ? series[0] : { r: 0, p: 1, n: 0, name: 'No Data' };
                   
                   const vizData = {
                     ...corrResult,
@@ -554,8 +554,11 @@ const App: React.FC = () => {
                   
                   if (corrResult.groupCol) {
                      stepResult = `Correlation Analysis grouped by ${corrResult.groupCol} complete. Found ${series.length} groups.`;
+                     for (const s of series) {
+                        stepResult += ` Group '${s.name}': R=${s.r.toFixed(5)}, p=${s.p.toExponential(5)}, n=${s.n}.`;
+                     }
                   } else {
-                     stepResult = `Correlation Analysis complete. R=${primarySeries.r.toFixed(3)}, p-value=${primarySeries.p.toExponential(3)}.`;
+                     stepResult = `Correlation Analysis complete. R=${primarySeries.r.toFixed(5)}, p-value=${primarySeries.p.toExponential(5)}, n=${primarySeries.n}.`;
                   }
               } else if (toolName === 'GROUP_COMPARISON') {
                    const groupResult = result as any;
@@ -1334,11 +1337,11 @@ const App: React.FC = () => {
     <header className="mb-4 flex-none flex flex-col gap-2">
       <div className="flex justify-between items-center">
         <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-          <span className="bg-indigo-600 p-1 rounded-lg">NA</span>
+          <span className="bg-indigo-600 p-1 rounded-lg">CN</span>
           CyberNeuro <span className="text-slate-500 font-normal">Platform</span>
         </h1>
         <div className="flex items-center gap-4">
-          <button
+          {/* <button
             onClick={() => {
               const testViz: ToolVisualization = {
                 type: VisualizationType.VIS_HTML,
@@ -1390,7 +1393,7 @@ const App: React.FC = () => {
           >
             <Database className="w-3 h-3" />
             Mock Data
-          </button>
+          </button> */}
           
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${ollamaConnected ? 'bg-green-500' : 'bg-red-500'}`} />
