@@ -56,6 +56,7 @@ export interface ToolVisualization {
   vizId?: string;       // unique per visualization (for selection/keying) — auto-generated if omitted
   messageId?: string;   // links back to the chat message that created it
   datasetId?: string;
+  customCode?: string;  // LLM-edited Recharts JSX code — when set, rendered dynamically instead of static component
 }
 
 // NEW: Type for VIS_HTML data

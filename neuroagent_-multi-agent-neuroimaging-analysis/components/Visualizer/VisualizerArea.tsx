@@ -3,16 +3,17 @@ import ReactMarkdown from 'react-markdown';
 import { ToolVisualization, VisualizationType, GroupComparisonResult } from '../../types';
 import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart, SVMBoundaryChart, ChartConfig } from './Charts';
 import { HtmlVisualizationRenderer } from './HtmlVisualizationRenderer';
+import DynamicChartRenderer from './DynamicChartRenderer';
 import CodeEditorModal from './CodeEditorModal';
-import { chartDataToHtml } from '../../utils/chartToHtml';
-import { FileText, Database, BookOpen, Link, FileCheck2, Code2, CheckCircle2, TrendingUp, Grid2X2, Layers, Download, Code, Binary, Pencil } from 'lucide-react';
+import { prepareDataScope, chartDataToCode } from '../../utils/chartToCode';
+import { FileText, Database, BookOpen, Link, FileCheck2, CheckCircle2, TrendingUp, Grid2X2, Layers, Download, Binary, Pencil, Code } from 'lucide-react';
 
 interface VisualizerAreaProps {
   visualizations: ToolVisualization[];
   datasetName?: string;
   onVizClick?: (id?: string) => void;
   onHtmlChange?: (messageId: string, newHtml: string) => void;
-  onConvertToHtml?: (messageId: string, newHtml: string) => void;
+  onCodeChange?: (vizId: string, code: string) => void;
   onConfigChange?: (vizId: string, config: ChartConfig) => void;
   activeDatasetIds?: string[];
   selectedVisualizationId?: string | null;
@@ -105,11 +106,11 @@ const VisualizationCard: React.FC<{
     onClick?: () => void, 
     onReportLinkClick?: (stepId: number) => void,
     onHtmlChange?: (newHtml: string) => void,
-    onConvertToHtml?: (messageId: string, html: string) => void,
+    onCodeChange?: (code: string) => void,
     onConfigChange?: (config: ChartConfig) => void,
     isActiveDataset?: boolean,
     isSelected?: boolean
-}> = ({ visualization, onClick, onReportLinkClick, onHtmlChange, onConvertToHtml, onConfigChange, isActiveDataset, isSelected }) => {
+}> = ({ visualization, onClick, onReportLinkClick, onHtmlChange, onCodeChange, onConfigChange, isActiveDataset, isSelected }) => {
   const isClickable = true; // All cards are clickable for editing
   const bodyRef = useRef<HTMLDivElement>(null);
   const [showCodeEditor, setShowCodeEditor] = useState(false);
@@ -313,7 +314,6 @@ const VisualizationCard: React.FC<{
           {visualization.type === VisualizationType.LITERATURE_LIST && <BookOpen className="w-4 h-4 text-amber-400" />}
           {visualization.type === VisualizationType.DATA_TABLE && <FileText className="w-4 h-4 text-emerald-400" />}
           {visualization.type === VisualizationType.RESEARCH_REPORT && <FileCheck2 className="w-4 h-4 text-indigo-400" />}
-          {visualization.type === VisualizationType.VIS_HTML && <Code2 className="w-4 h-4 text-cyan-400" />}
           <span className="font-semibold text-slate-200">{visualization.title}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -329,20 +329,20 @@ const VisualizationCard: React.FC<{
             )}
             {hasChart && (
                 <button
+                    onClick={(e) => { e.stopPropagation(); setShowCodeEditor(true); }}
+                    className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-indigo-400 transition-colors"
+                    title="View / Edit Code"
+                >
+                    <Code className="w-3.5 h-3.5" />
+                </button>
+            )}
+            {hasChart && (
+                <button
                     onClick={(e) => { e.stopPropagation(); setShowPropertyEditor(!showPropertyEditor); }}
                     className={`p-1 rounded hover:bg-slate-700 transition-colors ${showPropertyEditor ? 'text-cyan-400 bg-slate-700' : 'text-slate-400 hover:text-cyan-400'}`}
                     title="Edit Chart Properties"
                 >
                     <Pencil className="w-3.5 h-3.5" />
-                </button>
-            )}
-            {hasChart && (
-                <button
-                    onClick={(e) => { e.stopPropagation(); setShowCodeEditor(true); }}
-                    className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-indigo-400 transition-colors"
-                    title="View / Edit HTML Code"
-                >
-                    <Code className="w-3.5 h-3.5" />
                 </button>
             )}
             {hasChart && (
@@ -412,6 +412,15 @@ const VisualizationCard: React.FC<{
 
       {/* Body */}
       <div ref={bodyRef} className="p-4 bg-slate-800/50"> 
+        {/* Dynamic rendering: when customCode exists, use DynamicChartRenderer */}
+        {visualization.customCode ? (
+          <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
+            <DynamicChartRenderer
+              code={visualization.customCode}
+              data={prepareDataScope(visualization.type, visualization.data, visualization.config)}
+            />
+          </div>
+        ) : (<>
         {visualization.type === VisualizationType.SCATTER_PLOT && (
           <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
             <ScatterPlot data={visualization.data} config={visualization.config} onConfigChange={onConfigChange} />
@@ -498,7 +507,7 @@ const VisualizationCard: React.FC<{
           </div>
         )}
 
-        {/* HTML Visualization */}
+        {/* HTML Visualization (legacy) */}
         {visualization.type === VisualizationType.VIS_HTML && (
           <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
             <HtmlVisualizationRenderer
@@ -508,28 +517,26 @@ const VisualizationCard: React.FC<{
             />
           </div>
         )}
+        </>)}
       </div>
 
-      {/* Code Editor Modal for non-VIS_HTML charts */}
-      {hasChart && (
+      {/* Code Editor Modal */}
+      {hasChart && showCodeEditor && (
         <CodeEditorModal
           isOpen={showCodeEditor}
           onClose={() => setShowCodeEditor(false)}
-          html={chartDataToHtml(visualization) || '<!-- No HTML conversion available -->'}
-          onSave={(newHtml: string) => {
-            if (onConvertToHtml) {
-              onConvertToHtml(visualization.vizId, newHtml);
-            }
-            setShowCodeEditor(false);
+          html={visualization.customCode || chartDataToCode(visualization.type, visualization.data, visualization.config) || '// No code available'}
+          onSave={(newCode: string) => {
+            if (onCodeChange) onCodeChange(newCode);
           }}
-          title={`Edit: ${visualization.title}`}
+          title="Edit Recharts Code"
         />
       )}
     </div>
   );
 };
 
-const VisualizerArea: React.FC<VisualizerAreaProps> = React.memo(({ visualizations, datasetName, onVizClick, onHtmlChange, onConvertToHtml, onConfigChange, activeDatasetIds, selectedVisualizationId, isProcessing }) => {
+const VisualizerArea: React.FC<VisualizerAreaProps> = React.memo(({ visualizations, datasetName, onVizClick, onHtmlChange, onCodeChange, onConfigChange, activeDatasetIds, selectedVisualizationId, isProcessing }) => {
   const handleReportLinkClick = (stepId: number) => {
     const reportViz = visualizations.find(v => v.type === VisualizationType.RESEARCH_REPORT);
     if (reportViz && reportViz.data.stepIdToMessageId[stepId]) {
@@ -571,7 +578,10 @@ const VisualizerArea: React.FC<VisualizerAreaProps> = React.memo(({ visualizatio
                ? (newHtml: string) => onHtmlChange(viz.vizId, newHtml) 
                : undefined
              }
-             onConvertToHtml={onConvertToHtml}
+             onCodeChange={onCodeChange
+               ? (code: string) => onCodeChange(viz.vizId!, code)
+               : undefined
+             }
              onConfigChange={onConfigChange 
                ? (config: ChartConfig) => onConfigChange(viz.vizId!, config) 
                : undefined
