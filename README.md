@@ -13,7 +13,6 @@
 ## MCP server
 - `cd mcp_server`
 - Install dependencies: See `mcp_server/README.md`
-- Change tmp file
 - `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`. `--port` needs to match the URL used in MCP client `cyberneuro_multi-agent-neuroimaging-analysis/backend/server.mjs`
 
 ## Runtime Architecture
