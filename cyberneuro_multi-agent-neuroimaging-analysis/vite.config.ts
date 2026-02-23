@@ -1,7 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/brain-network-chart/' : '/',
   plugins: [react()],
   server: {
     proxy: {
@@ -17,4 +18,4 @@ export default defineConfig({
       external: ["cross-spawn", "which", "mcp-client"]
     }
   }
-})
+}))

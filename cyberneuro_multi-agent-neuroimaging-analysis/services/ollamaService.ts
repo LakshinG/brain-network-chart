@@ -1,5 +1,5 @@
 
-import { Ollama } from 'ollama';
+import { Ollama } from 'ollama/browser';
 import { McpTool, ChatMessage, AgentType } from "../types";
 import { PROMPTS } from "../constants";
 import { validatePlanColumns } from './internalTools';

@@ -9,6 +9,9 @@
     "backend:dev": "node --watch backend/server.mjs",
     "dev:all": "concurrently -k \"npm run backend\" \"npm run dev\"",
     "build": "vite build",
+    "build:gh-pages": "vite build --base=/brain-network-chart/",
+    "predeploy": "npm run build:gh-pages",
+    "deploy": "npx gh-pages -d dist",
     "preview": "vite preview"
   },
   "dependencies": {
