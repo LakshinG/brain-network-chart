@@ -4,6 +4,8 @@ from hub_detection import detect_hubs_from_graphs
 import numpy as np
 import argparse
 import io
+import csv as csv_module
+import glob as glob_module
 import h5py
 import pandas as pd
 from datetime import datetime
@@ -11,8 +13,64 @@ from utils import corrcoef
 import os
 import shutil
 from pathlib import Path
-from typing import Optional, Tuple
-import glob as glob_module
+from typing import Optional, Tuple, List
+from PIL import Image as _Image
+import io as _io
+
+_ROI_CSV = "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/roi_figs/code_name.csv"
+_ROI_FIG_DIR = "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/roi_figs"
+_LIFESPAN_MAT_DIR = "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat"
+_ROI_PALETTE = [
+    "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f7",
+    "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16",
+]
+
+
+def load_roi_list() -> List[dict]:
+    """Load ROI code-name mapping from CSV. Returns list of {code, name} indexed by node position."""
+    rows = []
+    try:
+        with open(_ROI_CSV, newline="") as f:
+            for row in csv_module.reader(f):
+                if len(row) >= 2:
+                    rows.append({"code": row[0].strip(), "name": row[1].strip()})
+    except Exception:
+        pass
+    return rows
+
+
+def composite_roi_images(roi_ids: List[str]) -> bytes:
+    """Composite multiple ROI brain images into one PNG with different colors per region.
+
+    Args:
+        roi_ids: List of ROI code strings (e.g. ['2001', '2002'])
+
+    Returns:
+        PNG image bytes
+    """
+    base = None
+    for i, roi_id in enumerate(roi_ids):
+        path = os.path.join(_ROI_FIG_DIR, f"mask{roi_id}_roi.png")
+        if not os.path.isfile(path):
+            continue
+        arr = np.array(_Image.open(path).convert("RGBA"))
+        if base is None:
+            gray = np.array(_Image.open(path).convert("L"))
+            base = np.stack([gray, gray, gray, np.full_like(gray, 255)], axis=-1)
+        # Detect pre-rendered colored region: R significantly higher than B
+        mask = (arr[:, :, 0].astype(int) - arr[:, :, 2].astype(int) > 80) & (arr[:, :, 3] > 128)
+        hex_c = _ROI_PALETTE[i % len(_ROI_PALETTE)]
+        base[mask, 0] = int(hex_c[1:3], 16)
+        base[mask, 1] = int(hex_c[3:5], 16)
+        base[mask, 2] = int(hex_c[5:7], 16)
+
+    if base is None:
+        raise FileNotFoundError("No valid ROI images found")
+
+    buf = _io.BytesIO()
+    _Image.fromarray(base).save(buf, format="PNG")
+    buf.seek(0)
+    return buf.read()
 
 # Upload configuration
 UPLOAD_DIR = '/ram/USERS/ziquanw/brain-network-chart/uploaded_files'
@@ -34,62 +92,76 @@ def save_uploaded_file(file_content: bytes, filename: str) -> Tuple[str, dict]:
     # Validate filename
     if not filename:
         raise ValueError("Filename cannot be empty")
-    
-    # Sanitize filename to prevent path traversal
-    safe_filename = os.path.basename(filename)
-    if not safe_filename:
+
+    # Sanitize: allow relative paths (for folder uploads) but reject traversal
+    rel = Path(filename).as_posix()
+    parts = rel.split('/')
+    if '..' in parts or any(p == '' for p in parts[:-1]):
         raise ValueError(f"Invalid filename: {filename}")
-    
-    # Create unique path to avoid overwrites
-    file_path = os.path.join(UPLOAD_DIR, safe_filename)
-    
-    # If file exists, create versioned filename
-    if os.path.exists(file_path):
-        base, ext = os.path.splitext(safe_filename)
-        counter = 1
-        while os.path.exists(os.path.join(UPLOAD_DIR, f"{base}_{counter}{ext}")):
-            counter += 1
-        safe_filename = f"{base}_{counter}{ext}"
-        file_path = os.path.join(UPLOAD_DIR, safe_filename)
-    
-    # Write file
+
+    file_path = Path(UPLOAD_DIR) / rel
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write file (overwrite existing — caller manages names for folder uploads)
     try:
         with open(file_path, 'wb') as f:
             f.write(file_content)
-        
+
         file_size = len(file_content)
+        saved_rel = rel
         file_info = {
             "original_filename": filename,
-            "saved_filename": safe_filename,
+            "saved_filename": saved_rel,
             "file_size_bytes": file_size,
             "upload_timestamp": datetime.now().isoformat(),
         }
-        
-        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [UPLOAD] File saved: {safe_filename} ({file_size} bytes)")
-        return file_path, file_info
+
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [UPLOAD] File saved: {saved_rel} ({file_size} bytes)")
+        return str(file_path), file_info
     except Exception as e:
         raise IOError(f"Failed to save file {filename}: {str(e)}")
 
 
 def list_uploaded_files() -> list:
-    """List all uploaded files in the upload directory.
-    
+    """List uploaded files and folders.
+
     Returns:
-        List of file info dictionaries (without absolute paths for security)
+        List of dicts: {filename, size, upload_time, is_dir}
+        - Root-level files: filename = "file.csv", is_dir=False
+        - Subdirectory entries: filename = "myfolder", is_dir=True
+        - Files inside subdirs: filename = "myfolder/file.csv", is_dir=False
     """
-    files = []
+    entries = []
     try:
-        for filename in os.listdir(UPLOAD_DIR):
-            file_path = os.path.join(UPLOAD_DIR, filename)
-            if os.path.isfile(file_path):
-                stat = os.stat(file_path)
-                files.append({
-                    "filename": filename,
-                    "size_bytes": stat.st_size,
-                    "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+        upload_path = Path(UPLOAD_DIR)
+        for item in sorted(upload_path.iterdir()):
+            stat = item.stat()
+            if item.is_dir():
+                entries.append({
+                    "filename": item.name,
+                    "size": 0,
+                    "upload_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "is_dir": True,
                 })
-        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [UPLOAD] Found {len(files)} uploaded files")
-        return sorted(files, key=lambda x: x['modified_time'], reverse=True)
+                # Also list files inside the subdirectory
+                for sub in sorted(item.iterdir()):
+                    if sub.is_file():
+                        sub_stat = sub.stat()
+                        entries.append({
+                            "filename": f"{item.name}/{sub.name}",
+                            "size": sub_stat.st_size,
+                            "upload_time": datetime.fromtimestamp(sub_stat.st_mtime).isoformat(),
+                            "is_dir": False,
+                        })
+            elif item.is_file():
+                entries.append({
+                    "filename": item.name,
+                    "size": stat.st_size,
+                    "upload_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "is_dir": False,
+                })
+        print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [UPLOAD] Found {len(entries)} entries")
+        return entries
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [UPLOAD] Error listing files: {str(e)}")
         return []
@@ -140,16 +212,16 @@ def get_file_path(filename: str, uploaded_only: bool = False) -> str:
             return filename
         raise FileNotFoundError(f"File not found: {filename}")
     
-    # Check uploaded_files directory first
-    upload_path = os.path.join(UPLOAD_DIR, os.path.basename(filename))
+    # Check uploaded_files directory (support relative paths like "folder/file.csv")
+    upload_path = os.path.join(UPLOAD_DIR, filename)
     if os.path.exists(upload_path):
         return upload_path
-    
+
     # If not uploaded_only, check current directory and relative paths
     if not uploaded_only:
         if os.path.exists(filename):
             return filename
-    
+
     raise FileNotFoundError(f"File not found: {filename} (checked uploads and current directory)")
 
 class AnalysisConfig():
@@ -177,9 +249,11 @@ class AnalysisConfig():
     val_col: str = ''
     
 
-def tool_cfc_wavelet( bolds: np.ndarray,  config: AnalysisConfig,):
-
-        fcs = corrcoef(bolds)
+def tool_cfc_wavelet(bolds: np.ndarray, config: AnalysisConfig, precomputed_fcs: bool = False):
+        if precomputed_fcs:
+            fcs = bolds          # already FC/adj matrices (num_windows, nodes, nodes)
+        else:
+            fcs = corrcoef(bolds)
         adjs = thresholding(fcs, ratio=config.ratio)
         # graphs = [nx.from_numpy_array(adj) for adj in adjs]
         wavelets_list = []
@@ -288,8 +362,10 @@ def load_bolds_from_csv(path: str, window_size: int = 5, step_size: int = 3, pad
     print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Filtering for numeric columns...")
     numeric_cols = df.select_dtypes(include=[np.number]).columns
     df = df[numeric_cols]
+    if len(df.columns) == 116:
+        df = df.iloc[:, :90]
     print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Numeric columns selected: {len(df.columns)} nodes")
-    
+
     if df.empty:
         raise ValueError(f"No numeric columns found in {path}")
     
@@ -326,9 +402,80 @@ def load_bolds_from_csv(path: str, window_size: int = 5, step_size: int = 3, pad
     
     # Transpose to (num_windows, num_nodes, window_size)
     result = np.transpose(stacked, (0, 2, 1))
-    
+
     return result
 
+
+def load_bolds_list(path: str) -> List[Tuple[str, np.ndarray]]:
+    """Load BOLD data from a file or a folder of CSV files.
+
+    Returns:
+        List of (filename, np.ndarray) pairs, each array with shape (1, num_nodes, num_timepoints).
+        For a single file: one entry. For a folder: one entry per CSV.
+    """
+    full = get_file_path(path, uploaded_only=False)
+    if os.path.isdir(full):
+        csvs = sorted(glob_module.glob(os.path.join(full, '*.csv')))
+        if not csvs:
+            raise ValueError(f"No CSV files found in folder: {path}")
+        return [(os.path.basename(f), load_bolds_full(f)) for f in csvs]
+    return [(os.path.basename(path), load_bolds_full(path))]
+
+
+def list_bold_paths(path: str) -> List[Tuple[str, str]]:
+    """Resolve a file or folder path to a list of (basename, fullpath) pairs without loading data."""
+    full = get_file_path(path, uploaded_only=False)
+    if os.path.isdir(full):
+        csvs = sorted(glob_module.glob(os.path.join(full, '*.csv')))
+        if not csvs:
+            raise ValueError(f"No CSV files found in folder: {path}")
+        return [(os.path.basename(f), f) for f in csvs]
+    return [(os.path.basename(full), full)]
+
+
+def load_adjs_from_path(path: str, config) -> List[np.ndarray]:
+    """Load adjacency matrices from a file or folder.
+
+    Computes correlation + thresholding per file, returns flat list of adj matrices.
+    """
+    adjs = []
+    for _fname, b in load_bolds_list(path):
+        fcs = corrcoef(b)
+        adjs.extend(thresholding(fcs, ratio=config.ratio))
+    return adjs
+
+
+def load_bolds_full(path: str) -> np.ndarray:
+    """Load full BOLD data without windowing. Returns shape (1, num_nodes, num_timepoints)."""
+    try:
+        file_path = get_file_path(path, uploaded_only=False)
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Cannot find '{path}'. Error: {str(e)}")
+    df = pd.read_csv(file_path)
+    df = df.loc[:, ~df.columns.str.contains('^Unnamed', na=False)]
+    df = df[df.select_dtypes(include=[np.number]).columns]
+    if len(df.columns) == 116:
+        df = df.iloc[:, :90]
+    if df.empty:
+        raise ValueError(f"No numeric columns in {path}")
+    data = df.values.astype(np.float32)   # (num_timepoints, num_nodes)
+    print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [LOAD] Full BOLD: {data.shape[0]} timepoints × {data.shape[1]} nodes")
+    return data.T[np.newaxis]             # (1, num_nodes, num_timepoints)
+
+
+def load_adjs_from_npy(path: str) -> np.ndarray:
+    """Load adjacency matrices from a .npy file.
+
+    Returns shape (num_windows, nodes, nodes).
+    Accepts 2D (nodes, nodes) → wrapped to (1, nodes, nodes).
+    """
+    file_path = get_file_path(path, uploaded_only=False)
+    data = np.load(file_path)
+    if data.ndim == 2:
+        data = data[np.newaxis]   # (1, nodes, nodes)
+    elif data.ndim != 3:
+        raise ValueError(f"Expected 2D or 3D array in {path}, got shape {data.shape}")
+    return data.astype(np.float64)
 
 
 
@@ -344,7 +491,6 @@ def load_mat_v73(path: str) -> dict:
         "centiles": centiles.tolist(),
     }
 
-_LIFESPAN_MAT_DIR = "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat"
 
 _FC_PHENOTYPES = {
     "Global mean of FC": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_global_mean_of_FC.mat",
@@ -362,7 +508,41 @@ _FC_PHENOTYPES = {
     "Ventricular volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/Ventricles.mat",
     "Total cerebrum volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/TCV.mat",
     "Total surface area": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/SA.mat",
-    "Mean cortical thickness": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/CT_0_20.mat",
+    "Mean cortical thickness": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/CT.mat",
+    # "Banks STS volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/bankssts.mat",
+    # "Caudal anterior cingulate volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/caudalanteriorcingulate.mat",
+    # "Caudal middle frontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/caudalmiddlefrontal.mat",
+    # "Cuneus volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/cuneus.mat",
+    # "Entorhinal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/entorhinal.mat",
+    # "Frontal pole volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/frontalpole.mat",
+    # "Fusiform volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/fusiform.mat",
+    # "Inferior parietal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/inferiorparietal.mat",
+    # "Inferior temporal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/inferiortemporal.mat",
+    # "Insula volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/insula.mat",
+    # "Isthmus cingulate volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/isthmuscingulate.mat",
+    # "Lateral occipital volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/lateraloccipital.mat",
+    # "Lateral orbitofrontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/lateralorbitofrontal.mat",
+    # "Lingual volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/lingual.mat",
+    # "Medial orbitofrontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/medialorbitofrontal.mat",
+    # "Middle temporal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/middletemporal.mat",
+    # "Paracentral volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/paracentral.mat",
+    # "Parahippocampal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/parahippocampal.mat",
+    # "Pars opercularis volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/parsopercularis.mat",
+    # "Pars orbitalis volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/parsorbitalis.mat",
+    # "Pars triangularis volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/parstriangularis.mat",
+    # "Pericalcarine volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/pericalcarine.mat",
+    # "Postcentral volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/postcentral.mat",
+    # "Posterior cingulate volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/posteriorcingulate.mat",
+    # "Precentral volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/precentral.mat",
+    # "Precuneus volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/precuneus.mat",
+    # "Rostral anterior cingulate volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/rostralanteriorcingulate.mat",
+    # "Rostral middle frontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/rostralmiddlefrontal.mat",
+    # "Superior frontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/superiorfrontal.mat",
+    # "Superior parietal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/superiorparietal.mat",
+    # "Superior temporal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/superiortemporal.mat",
+    # "Supramarginal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/supramarginal.mat",
+    # "Temporal pole volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/temporalpole.mat",
+    # "Transverse temporal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/transversetemporal.mat",
 }
 
 
@@ -378,10 +558,9 @@ def _get_lifespan_phenotypes() -> dict:
     return result
 
 
-
 def list_available_phenotypes() -> list:
     """Return all available phenotype names (FC + Lifespan)."""
-    return list(_FC_PHENOTYPES.keys()) #+ list(_get_lifespan_phenotypes().keys())
+    return list(_FC_PHENOTYPES.keys())# + list(_get_lifespan_phenotypes().keys())
 
 
 def load_curve_data(phenotype: str) -> dict:
@@ -437,7 +616,7 @@ def overlay_data_from_bytes(contents: bytes, age_col: str, val_col: str) -> dict
     y_raw = df[val_col].to_numpy(dtype=float)
 
     valid_mask = ~(np.isnan(age_raw) | np.isnan(y_raw))
-    age = age_raw[valid_mask] #/ 12
+    age = age_raw[valid_mask] / 12
     y = y_raw[valid_mask]
 
     return {

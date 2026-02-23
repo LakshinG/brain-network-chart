@@ -1,7 +1,7 @@
 # from mcp.server.fastmcp import FastMCP
 from fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException
 import sys
 import io
@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, Any, Callable
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
+from hub_detection import detect_hubs_from_graphs
 from tools import (
     tool_cfc_wavelet,
     tool_hub_detection,
@@ -33,7 +34,16 @@ from tools import (
     list_uploaded_files,
     delete_uploaded_file,
     get_file_path,
-    list_available_phenotypes
+    _read_table,
+    load_roi_list,
+    composite_roi_images,
+    load_bolds_full,
+    load_bolds_list,
+    load_adjs_from_path,
+    list_bold_paths,
+    load_adjs_from_npy,
+    list_available_phenotypes,
+    _ROI_FIG_DIR,
 )
 
 from fastapi import FastAPI
@@ -77,30 +87,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Rate limiting configuration
-RATE_LIMIT_REQUESTS = 10
+RATE_LIMIT_REQUESTS = 5
 RATE_LIMIT_WINDOW = 60  # seconds
 client_requests: Dict[str, list] = {}
 
 # Request/Response schemas
 class CFCWaveletRequest(BaseModel):
     data_path: str = Field(default="data_example_BOLD.csv", description="Path to BOLD CSV file")
-    window_size: int = Field(default=100, ge=10, le=1000, description="Sliding window size")
-    step_size: int = Field(default=90, ge=1, le=500, description="Window step size")
-    padding: bool = Field(default=True, description="Pad edges")
-    ratio: float = Field(default=0.8, ge=0.0, le=1.0, description="Edge weight threshold ratio")
-    wavelets_num: int = Field(default=10, ge=1, le=100, description="Number of wavelets")
-    beta: float = Field(default=1.0, ge=0.0, description="Regularization parameter")
-    gamma: float = Field(default=0.005, ge=0.0, description="Convergence threshold")
-    max_iter: int = Field(default=100, ge=1, le=1000, description="Max iterations")
-    node_select: int = Field(default=10, ge=1, description="Node selection parameter")
     
-    @field_validator('step_size')
-    @classmethod
-    def validate_step_size(cls, v, info: ValidationInfo):
-        if info.data.get('window_size') and v > info.data['window_size']:
-            raise ValueError('step_size must be <= window_size')
-        return v
-
 class HubDetectionRequest(BaseModel):
     data_path: str = Field(default="data_example_BOLD.csv", description="Path to BOLD CSV file")
     window_size: int = Field(default=100, ge=10, le=1000, description="Sliding window size")
@@ -1003,46 +997,30 @@ def _openneuro_try_queries(
 
 
 
-# @server.tool(name="run_cfc_wavelet_analysis")
-# @validate_parameters(
-#     window_size={'min': 10, 'max': 1000, 'type': int},
-#     step_size={'min': 30, 'max': 500, 'type': int},
-#     ratio={'min': 0.0, 'max': 1.0, 'type': float},
-#     wavelets_num={'min': 1, 'max': 100, 'type': int},
-#     max_iter={'min': 1, 'max': 1000, 'type': int},
-# )
+@server.tool(name="run_cfc_wavelet_analysis")
 def run_cfc_wavelet_analysis(
     data_path: str = "data_example_BOLD.csv",
-    window_size: int = 100,
-    step_size: int = 90,
-    padding: bool = True,
-    ratio: float = 0.8,
-    wavelets_num: int = 10,
-    beta: float = 1.0,
-    gamma: float = 0.005,
-    max_iter: int = 100,
-    node_select: int = 10,
 ) -> dict:
     """
     Run cross-frequency coupling (CFC) analysis using harmonic wavelets.
     
     Parameters:
     - data_path: Path to BOLD CSV file
-    - window_size: Sliding window size (10-1000)
-    - step_size: Window step size (30-500)
-    - padding: Pad edges
-    - ratio: Edge weight threshold ratio (0.0-1.0)
-    - wavelets_num: Number of wavelets (1-100)
-    - beta: Regularization parameter
-    - gamma: Convergence threshold
-    - max_iter: Maximum iterations (1-1000)
-    - node_select: Node selection parameter
     
     Returns: Analysis results with console output and progress tracking
     """
     progress_log = []
     captured_output = []
     start_time = time.time()
+    window_size: int = 30
+    step_size: int = 15
+    padding: bool = True
+    ratio: float = 0.8
+    wavelets_num: int = 10
+    beta: float = 1.0
+    gamma: float = 0.1
+    max_iter: int = 100
+    node_select: int = 10
     
     try:
         logger.info(f"CFC analysis started: window_size={window_size}, step_size={step_size}")
@@ -1054,8 +1032,8 @@ def run_cfc_wavelet_analysis(
             raise FileNotFoundError(f"Data file not found: {e}")
         
         # Validate parameters consistency
-        if step_size > window_size:
-            raise ValueError(f"step_size ({step_size}) must be <= window_size ({window_size})")
+        # if step_size > window_size:
+        #     raise ValueError(f"step_size ({step_size}) must be <= window_size ({window_size})")
         
         config = AnalysisConfig()
         config.ratio = ratio
@@ -1065,22 +1043,52 @@ def run_cfc_wavelet_analysis(
         config.max_iter = max_iter
         config.node_select = node_select
         
-        progress_log.append({"step": "loading", "message": f"Loading BOLD data from {data_path}"})
-        with capture_output() as output:
-            bolds = load_bolds_from_csv(data_path, window_size=window_size, step_size=step_size, padding=padding)
-        captured_output.append(output.getvalue())
-        num_windows = bolds.shape[0]
-        progress_log.append({"step": "loaded", "message": f"Data loaded successfully: shape {list(bolds.shape)}"})
-        
-        progress_log.append({"step": "analyzing", "message": f"Starting CFC analysis on {num_windows} windows"})
-        with capture_output() as output:
-            cfcs = tool_cfc_wavelet(bolds, config)
-        captured_output.append(output.getvalue())
-        progress_log.append({"step": "analyzed", "message": f"CFC analysis complete: {len(cfcs)} windows processed"})
-        
+        import numpy as _np
+        all_cfcs = []
+        files_cfcs = []
+        files_avg_cfcs = []
+
+        is_npy = data_path.lower().endswith('.npy')
+
+        if is_npy:
+            fname = os.path.basename(data_path)
+            progress_log.append({"step": "loading", "message": f"Loading .npy adj from {fname}"})
+            adjs = load_adjs_from_npy(data_path)   # (num_windows, nodes, nodes)
+            progress_log.append({"step": "loaded", "message": f"Loaded {len(adjs)} adj matrices"})
+            progress_log.append({"step": "analyzing", "message": f"Running CFC on {fname}"})
+            with capture_output() as output:
+                cfcs_for_file = tool_cfc_wavelet(adjs, config, precomputed_fcs=True)
+            captured_output.append(output.getvalue())
+            all_cfcs = list(cfcs_for_file)
+            file_avg = _np.mean([_np.array(c) for c in cfcs_for_file], axis=0).tolist() if cfcs_for_file else []
+            files_cfcs = [{"filename": fname, "cfcs": cfcs_for_file}]
+            files_avg_cfcs = [{"filename": fname, "avg_cfc": file_avg}]
+        else:
+            progress_log.append({"step": "loading", "message": f"Resolving paths from {data_path}"})
+            file_paths = list_bold_paths(data_path)
+            progress_log.append({"step": "loaded", "message": f"Found {len(file_paths)} file(s)"})
+            for fname, fpath in file_paths:
+                progress_log.append({"step": "analyzing", "message": f"Running CFC on {fname}"})
+                with capture_output() as output:
+                    b = load_bolds_from_csv(fpath, window_size=window_size, step_size=step_size, padding=padding)
+                    cfcs_for_file = tool_cfc_wavelet(b, config)
+                captured_output.append(output.getvalue())
+                all_cfcs.extend(cfcs_for_file)
+                file_avg = _np.mean([_np.array(c) for c in cfcs_for_file], axis=0).tolist() if cfcs_for_file else []
+                files_cfcs.append({"filename": fname, "cfcs": cfcs_for_file})
+                files_avg_cfcs.append({"filename": fname, "avg_cfc": file_avg})
+
+        num_windows = len(all_cfcs)
+        if all_cfcs:
+            avg_cfc = _np.mean([_np.array(c) for c in all_cfcs], axis=0).tolist()
+        else:
+            avg_cfc = []
+
+        progress_log.append({"step": "analyzed", "message": f"CFC analysis complete: {num_windows} total windows"})
+
         elapsed = time.time() - start_time
         logger.info(f"CFC analysis completed in {elapsed:.2f}s")
-        
+
         return {
             "status": "success",
             "timestamp": datetime.now().isoformat(),
@@ -1088,11 +1096,14 @@ def run_cfc_wavelet_analysis(
             "window_size": window_size,
             "step_size": step_size,
             "num_windows": num_windows,
-            "shape": list(bolds.shape),
-            "cfcs_count": len(cfcs),
+            "cfcs_count": num_windows,
+            "cfcs": all_cfcs,
+            "avg_cfc": avg_cfc,
+            "files_cfcs": files_cfcs,
+            "files_avg_cfcs": files_avg_cfcs if len(files_cfcs) > 1 else [],
             "elapsed_seconds": elapsed,
             "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "progress": progress_log,
         }
     except FileNotFoundError as e:
         logger.error(f"File error: {str(e)}")
@@ -1103,7 +1114,7 @@ def run_cfc_wavelet_analysis(
             "error_type": "FileNotFoundError",
             "error": str(e),
             "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "progress": progress_log,
         }
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
@@ -1114,7 +1125,7 @@ def run_cfc_wavelet_analysis(
             "error_type": "ValueError",
             "error": str(e),
             "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "progress": progress_log,
         }
     except Exception as e:
         logger.error(f"Unexpected error in CFC analysis: {str(e)}", exc_info=True)
@@ -1125,23 +1136,18 @@ def run_cfc_wavelet_analysis(
             "error_type": type(e).__name__,
             "error": str(e),
             "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "progress": progress_log,
         }
 
 
-# @server.tool(name="run_hub_detection")
-# @validate_parameters(
-#     window_size={'min': 10, 'max': 1000, 'type': int},
-#     step_size={'min': 1, 'max': 500, 'type': int},
-#     ratio={'min': 0.0, 'max': 1.0, 'type': float},
-#     k={'min': 1, 'max': 100, 'type': int},
-#     hub_num={'min': 1, 'type': int},
-# )
+@server.tool(name="run_hub_detection")
+@validate_parameters(
+    ratio={'min': 0.0, 'max': 1.0, 'type': float},
+    k={'min': 1, 'max': 100, 'type': int},
+    hub_num={'min': 1, 'type': int},
+)
 def run_hub_detection(
     data_path: str = "data_example_BOLD.csv",
-    window_size: int = 100,
-    step_size: int = 90,
-    padding: bool = True,
     ratio: float = 0.8,
     k: int = 2,
     hub_num: int = 10,
@@ -1149,66 +1155,50 @@ def run_hub_detection(
 ) -> dict:
     """
     Detect hub nodes in brain networks using graph analysis.
-    
+
     Parameters:
     - data_path: Path to BOLD CSV file
-    - window_size: Sliding window size (10-1000)
-    - step_size: Window step size (1-500)
-    - padding: Pad edges
     - ratio: Edge weight threshold (0.0-1.0)
     - k: Embedding dimension (1-100)
     - hub_num: Number of hubs to identify
     - use_group: Use group/Grassmann manifold method for multiple networks
-    
+
     Returns: Hub detection results with embeddings and selection matrices
     """
     progress_log = []
     captured_output = []
     start_time = time.time()
-    
+
     try:
-        logger.info(f"Hub detection started: window_size={window_size}, step_size={step_size}, k={k}, hub_num={hub_num}")
-        
-        # Resolve file path (checks uploaded_files first, then local directory)
-        try:
-            data_path = get_file_path(data_path)
-        except FileNotFoundError as e:
-            raise FileNotFoundError(f"Data file not found: {e}")
-        
-        # Validate parameters
-        if step_size > window_size:
-            raise ValueError(f"step_size ({step_size}) must be <= window_size ({window_size})")
-        
+        logger.info(f"Hub detection started: k={k}, hub_num={hub_num}")
+
         config = AnalysisConfig()
         config.ratio = ratio
         config.k = k
         config.hub_num = hub_num
         config.use_group = use_group
-        
+
         progress_log.append({"step": "loading", "message": f"Loading BOLD data from {data_path}"})
         with capture_output() as output:
-            bolds = load_bolds_from_csv(data_path, window_size=window_size, step_size=step_size, padding=padding)
+            adjs = load_adjs_from_path(data_path, config)
         captured_output.append(output.getvalue())
-        num_windows = bolds.shape[0]
-        progress_log.append({"step": "loaded", "message": f"Data loaded successfully: shape {list(bolds.shape)}"})
-        
-        progress_log.append({"step": "detecting", "message": f"Starting hub detection on {num_windows} windows (k={k}, hub_num={hub_num}, use_group={use_group})"})
+        num_windows = len(adjs)
+        progress_log.append({"step": "loaded", "message": f"Data loaded: {num_windows} adjacency matrices"})
+
+        progress_log.append({"step": "detecting", "message": f"Starting hub detection (k={k}, hub_num={hub_num}, use_group={use_group})"})
         with capture_output() as output:
-            results = tool_hub_detection(bolds, config)
+            results = detect_hubs_from_graphs(adjs, k=k, hub=hub_num, use_group=use_group)
         captured_output.append(output.getvalue())
         progress_log.append({"step": "detected", "message": f"Hub detection complete"})
-        
+
         elapsed = time.time() - start_time
         logger.info(f"Hub detection completed in {elapsed:.2f}s")
-        
+
         return {
             "status": "success",
             "timestamp": datetime.now().isoformat(),
             "data_path": data_path,
-            "window_size": window_size,
-            "step_size": step_size,
             "num_windows": num_windows,
-            "shape": list(bolds.shape),
             "k": k,
             "hub_num": hub_num,
             "use_group": use_group,
@@ -1216,6 +1206,7 @@ def run_hub_detection(
             "elapsed_seconds": elapsed,
             "console_output": "\n".join(captured_output),
             "progress": progress_log,
+            "roi_list": load_roi_list(),
         }
     except FileNotFoundError as e:
         logger.error(f"File error: {str(e)}")
@@ -1434,17 +1425,18 @@ def search_pubmed(
 
         if not pmids:
             elapsed = time.time() - start_time
-            return {
-                "status": "success",
-                "timestamp": datetime.now().isoformat(),
-                "elapsed_seconds": elapsed,
-                "query_used": q,
-                "count_returned": 0,
-                "results": [],
-                "suggested_keywords": [],
-                "console_output": "",
-                "progress": progress_log + [{"step": "done", "message": "No results found"}],
-            }
+            return {"results": []}
+            # return {
+            #     "status": "success",
+            #     "timestamp": datetime.now().isoformat(),
+            #     "elapsed_seconds": elapsed,
+            #     "query_used": q,
+            #     "count_returned": 0,
+            #     "results": [],
+            #     "suggested_keywords": [],
+            #     "console_output": "",
+            #     "progress": progress_log + [{"step": "done", "message": "No results found"}],
+            # }
 
         progress_log.append({"step": "summarize", "message": f"Fetching summaries for {len(pmids)} PMIDs"})
         summary = _pubmed_esummary(pmids)
@@ -1496,15 +1488,15 @@ def search_pubmed(
 
         elapsed = time.time() - start_time
         return {
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "elapsed_seconds": elapsed,
-            "query_used": q,
-            "count_returned": len(rows),
+            # "status": "success",
+            # "timestamp": datetime.now().isoformat(),
+            # "elapsed_seconds": elapsed,
+            # "query_used": q,
+            # "count_returned": len(rows),
             "results": rows,
-            "suggested_keywords": suggested_keywords,
-            "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "suggested_keywords": suggested_keywords,
+            # "console_output": "\n".join(captured_output),
+            # "progress": progress_log,
         }
 
     except ValueError as e:
@@ -1912,16 +1904,36 @@ async def api_schema(request: Request) -> JSONResponse:
         "title": "Brain Network Analysis API",
         "description": "MCP server for brain network analysis",
         "endpoints": {
-            # "run_cfc_wavelet_analysis": {
-            #     "method": "POST",
-            #     "description": "Cross-frequency coupling wavelet analysis",
-            #     "parameters": CFCWaveletRequest.model_json_schema(),
-            # },
-            # "run_hub_detection": {
-            #     "method": "POST",
-            #     "description": "Hub detection in brain networks",
-            #     "parameters": HubDetectionRequest.model_json_schema(),
-            # },
+            "run_cfc_wavelet_analysis": {
+                "method": "POST",
+                "description": """Run cross-frequency coupling (CFC) analysis using harmonic wavelets on brain functional connectivity data.
+Computes sliding-window adjacency matrices and applies wavelet decomposition to extract CFC features.
+Parameters:
+- data_path: Path to input data. """,
+                "parameters":  """Run cross-frequency coupling (CFC) analysis using harmonic wavelets on brain functional connectivity data.
+Computes sliding-window adjacency matrices and applies wavelet decomposition to extract CFC features.
+Parameters:
+- data_path: Path to input data. """,
+            },
+            "run_hub_detection": {
+                "method": "POST",
+                "description": """Detect hub nodes in brain functional connectivity networks using graph embedding analysis.
+Supports both single-subject and group-level Grassmann manifold methods.
+Parameters:
+- data_path: Path to input data.
+- ratio: Edge weight threshold for binarizing adjacency matrix (default: 0.8, range: 0.0-1.0)
+- k: Graph embedding dimension (default: 2, range: 1-100)
+- hub_num: Number of hub nodes to identify (default: 10)
+- use_group: Use group/Grassmann manifold method combining multiple networks (default: False)""",
+                "parameters": """Detect hub nodes in brain functional connectivity networks using graph embedding analysis.
+Supports both single-subject and group-level Grassmann manifold methods.
+Parameters:
+- data_path: Path to input data.
+- ratio: Edge weight threshold for binarizing adjacency matrix (default: 0.8, range: 0.0-1.0)
+- k: Graph embedding dimension (default: 2, range: 1-100)
+- hub_num: Number of hub nodes to identify (default: 10)
+- use_group: Use group/Grassmann manifold method combining multiple networks (default: False)""",
+            },
             # "get_aging_curve": {
             #     "method": "POST",
             #     "description": "Load age-vs-phenotype data from the database of a large-scale lifespan cohort",
@@ -1956,16 +1968,16 @@ Returns: Combined x and y data for normative modeling""",
             #     "description": "Scholarly discovery search via OpenAlex works",
             #     "parameters": OpenAlexSearchRequest.model_json_schema(),
             # },
-            "crossref_enrich": {
-                "method": "POST",
-                "description": "Enrich/normalize bibliographic metadata by DOI via Crossref",
-                "parameters": CrossrefEnrichRequest.model_json_schema(),
-            },
-            "internet_search": {
-                "method": "POST",
-                "description": "Combined internet search (OpenAlex discovery + Crossref DOI enrichment)",
-                "parameters": InternetSearchRequest.model_json_schema(),
-            },
+            # "crossref_enrich": {
+            #     "method": "POST",
+            #     "description": "Enrich/normalize bibliographic metadata by DOI via Crossref",
+            #     "parameters": CrossrefEnrichRequest.model_json_schema(),
+            # },
+            # "internet_search": {
+            #     "method": "POST",
+            #     "description": "Combined internet search (OpenAlex discovery + Crossref DOI enrichment)",
+            #     "parameters": InternetSearchRequest.model_json_schema(),
+            # },
         },
         "rate_limiting": {
             "requests_per_window": RATE_LIMIT_REQUESTS,
@@ -2076,15 +2088,6 @@ async def http_run_cfc_wavelet_analysis(request: Request) -> JSONResponse:
         
         result = run_cfc_wavelet_analysis(
             data_path=validated_data.data_path,
-            window_size=validated_data.window_size,
-            step_size=validated_data.step_size,
-            padding=validated_data.padding,
-            ratio=validated_data.ratio,
-            wavelets_num=validated_data.wavelets_num,
-            beta=validated_data.beta,
-            gamma=validated_data.gamma,
-            max_iter=validated_data.max_iter,
-            node_select=validated_data.node_select,
         )
         return JSONResponse(result)
     except ValueError as e:
@@ -2238,14 +2241,35 @@ async def http_internet_search(request: Request) -> JSONResponse:
 #     result = StatsToolkit.correct_p_values(p_values)
 #     return json.dumps(result)
 
-@server.tool(name="detect_outliers")
-def detect_outliers(data_source: str, column: str) -> str:
-    """
-    Scans a column for statistical outliers (Z-score > 3).
-    Use this to clean data before running T-tests.
-    """
-    result = StatsToolkit.detect_outliers_zscore(data_source, column)
-    return json.dumps(result)
+# @server.tool(name="detect_outliers")
+# def detect_outliers(data_source: str, column: str) -> str:
+#     """
+#     Scans a column for statistical outliers (Z-score > 3).
+#     Use this to clean data before running T-tests.
+#     """
+#     result = StatsToolkit.detect_outliers_zscore(data_source, column)
+#     return json.dumps(result)
+
+@server.custom_route("/roi_figs/composite", methods=["GET"])
+async def roi_composite(request: Request):
+    ids_str = request.query_params.get("ids", "")
+    roi_ids = [s.strip() for s in ids_str.split(",") if s.strip()]
+    if not roi_ids:
+        raise HTTPException(status_code=400, detail="ids required")
+    try:
+        png_bytes = composite_roi_images(roi_ids)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return Response(png_bytes, media_type="image/png")
+
+
+# @server.custom_route("/roi_figs/{path:path}", methods=["GET"])
+# async def roi_figs(request: Request):
+#     path = request.path_params["path"]
+#     fp = os.path.join(_ROI_FIG_DIR, path)
+#     if not os.path.isfile(fp):
+#         raise HTTPException(status_code=404, detail="Image not found")
+#     return FileResponse(fp)
 
 # app = FastAPI()
 
