@@ -8,12 +8,12 @@
 
 ## MCP Client
 - `cd cyberneuro_multi-agent-neuroimaging-analysis`
-- `node backend/server.mjs`, or change the PORT parameter in `backend/server.mjs` and `services/mcpService.ts`.
+- `node backend/server.mjs`, or change the `PORT` parameter in `backend/server.mjs` and `services/mcpService.ts`.
 
 ## MCP server
 - `cd mcp_server`
 - Install dependencies: See `mcp_server/README.md`
-- `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`. `--port` needs to match the URL used in MCP client `cyberneuro_multi-agent-neuroimaging-analysis/backend/server.mjs`
+- `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`. `--port` needs to match the `MCP_SERVER_URL` used in MCP client `cyberneuro_multi-agent-neuroimaging-analysis/backend/server.mjs`
 
 ## Runtime Architecture
 
