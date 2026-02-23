@@ -47,7 +47,7 @@ Actual Negative  False Positive (FP)   True Negative (TN)
 - **Recall** = TP/(TP+FN) = 162/(162+13) = 92.6%
 - **Accuracy** = (TP+TN)/(Total) = (162+293)/500 = 91.0%
 
-## Tool calling times
+**Tool calling times**
 
 ```
 ✅ connectivity analysis          - 68 queries (13.6%)
@@ -75,7 +75,7 @@ Actual Negative  False Positive (FP)   True Negative (TN)
 - ~~Test stratifying dataset by a grouping column.~~
 - ~~Add linear regression using SVM~~
 - ~~Merge visualizer agent by Xiyun for other MCP tool visualization.~~
-- Merge chat area frontend by Shaoqi.
+- Merge chat area in frontend-with-ts.
 - ~~Improve Proposal Reporter prompt, focusin gon statistical results.~~
 - ~~Three demos questions:~~
    - ~~Correlation between Global Cortical Thickness (CT) and IQ (sb_abiq_ss column) grouping by mental health status (FinalDiagnosis column) to see if disease changes the correlation.~~
