@@ -68,6 +68,8 @@ const App: React.FC = () => {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [activeImageId, setActiveImageId] = useState<number | null>(null);
 
+  const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://acmlab.github.io';
+
 
 
   // Plan Validator Toggle
@@ -1470,6 +1472,24 @@ const App: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {!ollamaConnected && (
+        <div className="mt-3 rounded-md border border-amber-700/60 bg-amber-900/20 px-3 py-2 text-xs text-amber-100">
+          <p className="font-semibold">Ollama is unreachable (connection or CORS).</p>
+          <p className="mt-1 text-amber-200/90">
+            On the machine running Ollama, allow this origin and restart:
+          </p>
+          <p className="mt-1 font-mono text-[11px] text-amber-200/90">
+            sudo systemctl edit ollama
+          </p>
+          <p className="font-mono text-[11px] text-amber-200/90">
+            [Service] Environment="OLLAMA_HOST=0.0.0.0:11434" Environment="OLLAMA_ORIGINS={pageOrigin}"
+          </p>
+          <p className="font-mono text-[11px] text-amber-200/90">
+            sudo systemctl daemon-reload && sudo systemctl restart ollama
+          </p>
+        </div>
+      )}
       
       {availableModels.length > 0 && (
         <div className="flex flex-col gap-2 text-xs">

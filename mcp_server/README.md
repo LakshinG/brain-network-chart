@@ -5,6 +5,51 @@
 - Run MCP server:
   - `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`. `--port` needs to match the URL used in MCP client `cyberneuro_multi-agent-neuroimaging-analysis/backend/server.mjs`.
 
+## Using with GitHub Pages frontend
+
+If your frontend is hosted at `https://acmlab.github.io/brain-network-chart/`, this MCP server is only one part of the runtime. You need all three local services running:
+
+1. Ollama at `http://127.0.0.1:11434`
+2. MCP server at `http://localhost:8010`
+3. Node MCP backend at `http://localhost:8789` (in `cyberneuro_multi-agent-neuroimaging-analysis/backend/server.mjs`)
+
+### Start MCP server
+
+```bash
+cd mcp_server
+uv sync
+uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010
+```
+
+### Start Node MCP backend (separate terminal)
+
+```bash
+cd cyberneuro_multi-agent-neuroimaging-analysis
+FRONTEND_ORIGIN=https://acmlab.github.io PORT=8789 MCP_SERVER_URL=http://localhost:8010/mcp node backend/server.mjs
+```
+
+### Configure Ollama CORS for GitHub Pages origin (Linux systemd)
+
+```bash
+sudo systemctl edit ollama
+```
+
+Add:
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+Environment="OLLAMA_ORIGINS=https://acmlab.github.io,http://localhost:8000,http://127.0.0.1:8000"
+```
+
+Apply changes:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+curl http://127.0.0.1:11434/api/tags
+```
+
 ## Features
 A Model Context Protocol (MCP) server for brain network analysis using advanced signal processing and graph-based hub detection. Includes tools for cross-frequency coupling (CFC) analysis, hub detection in single and multiple networks, and normative developmental trajectory analysis.
 
