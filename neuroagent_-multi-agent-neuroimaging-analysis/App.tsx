@@ -8,6 +8,7 @@ import {
   generateNeuroPlan,
   generateGeneralPlan,
   classifyQuery,
+  runVisionAgent,
   generateResearchInsights, 
   generateProposalReport,
   generatePreprocessingMapping,
@@ -16,6 +17,7 @@ import {
   interpretToolResult,
   checkOllamaConnection, 
   getAvailableModels, 
+  getVisionModel,
   setGeneralModel, 
   setNeuroModel,
   buildConversationContext
@@ -33,6 +35,14 @@ import { X, Pencil, Database } from 'lucide-react';
 import { getMockVisualization, getAllMockVisualizations } from './mockVisualizations';
 
 const VISUALIZER_AGENT = AgentType.EXECUTOR;
+
+interface UploadedImage {
+  fileName: string;
+  imageBytesBase64: string;
+  mimeType: string;
+  uploadedAt: number;
+  vizId: string;
+}
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -55,6 +65,8 @@ const App: React.FC = () => {
   
   const [selectedVisualizationId, setSelectedVisualizationId] = useState<string | null>(null);
   const [visualizerModel, setVisualizerModel] = useState<string>('qwen2.5-coder:32b');
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [activeImageId, setActiveImageId] = useState<number | null>(null);
 
 
 
@@ -240,6 +252,8 @@ const App: React.FC = () => {
       usedModel = selectedGeneralModel;
     } else if (role === AgentType.PLAN_VALIDATOR || role === AgentType.NEURO_PLANNER || role === AgentType.PREPROCESSOR || role === AgentType.RESEARCHER || role === AgentType.PROPOSAL_REPORTER) {
       usedModel = selectedNeuroModel;
+    } else if (role === AgentType.VISION) {
+      usedModel = getVisionModel();
     }
 
     const msg: ChatMessage = {
@@ -263,6 +277,122 @@ const App: React.FC = () => {
     // Ensure every visualization has a unique vizId
     const withId = viz.vizId ? viz : { ...viz, vizId: genVizId() };
     setVisualizations(prev => [withId, ...prev]);
+  };
+
+  const escapeHtml = (value: string) => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  };
+
+  const createImageVisualization = (fileName: string, mimeType: string, imageBytesBase64: string) => {
+    const safeName = escapeHtml(fileName);
+    const displayDataUrl = `data:${mimeType};base64,${imageBytesBase64}`;
+    const safeDataUrl = escapeHtml(displayDataUrl);
+    const uploadedAt = Date.now();
+    const vizId = genVizId();
+
+    addVisualization({
+      type: VisualizationType.VIS_HTML,
+      title: `Uploaded Image: ${fileName}`,
+      vizId,
+      data: {
+        html: `<div class="visualizationCard bg-slate-900 rounded-xl border border-slate-700 p-3">
+  <div class="vc-header mb-3">
+    <h3 class="vc-title text-slate-100 font-semibold text-sm">${safeName}</h3>
+  </div>
+  <div class="vc-body">
+    <div class="segment-overlay-container" data-segment-bboxes='[]' style="position:relative;display:inline-block;width:100%;">
+      <img src="${safeDataUrl}" alt="${safeName}" style="width:100%;height:auto;max-height:520px;object-fit:contain;border-radius:0.5rem;display:block;" />
+    </div>
+  </div>
+</div>`,
+        heightPx: 560
+      }
+    });
+
+    setUploadedImages(prev => [{ fileName, imageBytesBase64, mimeType, uploadedAt, vizId }, ...prev]);
+    setActiveImageId(prev => prev ?? uploadedAt);
+    addMessage(AgentType.SYSTEM, `Image uploaded: ${fileName}`);
+  };
+
+  const handleImageToggle = (uploadedAt: number) => {
+    setActiveImageId(prev => prev === uploadedAt ? null : uploadedAt);
+  };
+
+  const handleImageRemove = (uploadedAt: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const target = uploadedImages.find(img => img.uploadedAt === uploadedAt);
+    if (!target) return;
+
+    const targetVizId = target.vizId;
+    const hasVizId = typeof targetVizId === 'string' && targetVizId.length > 0;
+    const fallbackTitle = `Uploaded Image: ${target.fileName}`;
+
+    const selectedViz = selectedVisualizationId
+      ? visualizations.find(v => v.vizId === selectedVisualizationId)
+      : null;
+    const shouldClearSelected = selectedViz
+      ? (hasVizId
+          ? selectedViz.vizId === targetVizId
+          : (selectedViz.type === VisualizationType.VIS_HTML && selectedViz.title === fallbackTitle))
+      : false;
+
+    const remaining = uploadedImages.filter(img => img.uploadedAt !== uploadedAt);
+    setUploadedImages(remaining);
+
+    if (activeImageId === uploadedAt) {
+      setActiveImageId(remaining.length > 0 ? remaining[0].uploadedAt : null);
+    }
+
+    setVisualizations(prev => prev.filter(v => {
+      const matchedById = hasVizId && v.vizId === targetVizId;
+      const matchedByTitle = !hasVizId && v.type === VisualizationType.VIS_HTML && v.title === fallbackTitle;
+      return !(matchedById || matchedByTitle);
+    }));
+
+    if (shouldClearSelected) {
+      setSelectedVisualizationId(null);
+    }
+
+    addMessage(AgentType.SYSTEM, `Removed image and visualization card: ${target.fileName}`);
+  };
+
+  const handleImageUpload = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach((file) => {
+      if (!file.type.startsWith('image/')) {
+        addMessage(AgentType.SYSTEM, `Skipped non-image file: ${file.name}`);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result;
+        if (result instanceof ArrayBuffer) {
+          const imageBytesBase64 = arrayBufferToBase64(result);
+          createImageVisualization(file.name, file.type || 'image/png', imageBytesBase64);
+        }
+      };
+      reader.onerror = () => {
+        addMessage(AgentType.SYSTEM, `Failed to read image: ${file.name}`);
+      };
+      reader.readAsArrayBuffer(file);
+    });
   };
 
   const updateVisualization = (vizId: string, newData: any) => {
@@ -397,13 +527,18 @@ const App: React.FC = () => {
           // Check if there is a 'colors' column in the dataset to use for overlayDot_color
           if (currentData.length > 0 && 'colors' in currentData[0]) {
               vizData.overlayDot_color = currentData.map(r => {
-                  const val = parseFloat(String(r.colors));
+                  const val = parseFloat(String(r.colors)); 
                   return isNaN(val) ? 0 : val;
               });
           }
           return { type: VisualizationType.AGING_CURVE, title: `Aging Curve: ${json.phenotype}`, data: vizData };
       }
-      
+      if (json.cfcs !== undefined) {
+        return { type: VisualizationType.CFC_DASHBOARD, title: `CFC Wavelet Analysis`, data: json };
+      }
+      if (json.hub_num !== undefined) {
+        return { type: VisualizationType.HUB_DETECTION, title: `Hub Detection`, data: json };
+      }
       if (json.r !== undefined && json.p !== undefined && Array.isArray(json.dataPoints)) {
         return { type: VisualizationType.SCATTER_PLOT, title: `Result: ${toolName}`, data: json };
       }
@@ -1032,6 +1167,12 @@ const App: React.FC = () => {
 
     // ─── Case 1: Selected VIS_HTML → edit its HTML in place ───
     if (selectedViz && selectedViz.type === VisualizationType.VIS_HTML) {
+      const selectedVizId = selectedViz.vizId;
+      if (!selectedVizId) {
+        addMessage(AgentType.SYSTEM, "Error: Selected visualization is missing an internal id.");
+        return false;
+      }
+
       const currentHtml = selectedViz.data?.html;
       if (!currentHtml) {
         addMessage(AgentType.SYSTEM, "Error: Selected visualization has no HTML content.");
@@ -1056,7 +1197,7 @@ const App: React.FC = () => {
       );
 
       if (result.status === 'success' && result.html) {
-        updateVisualization(selectedViz.vizId, {
+        updateVisualization(selectedVizId, {
           html: result.html,
           heightPx: selectedViz.data?.heightPx || 400
         });
@@ -1197,15 +1338,15 @@ const App: React.FC = () => {
       return;
     }
 
-    if (!activeDataset) {
-        addMessage(AgentType.SYSTEM, "Please select or upload a dataset first.");
-        return;
-    }
-    
     addMessage(AgentType.USER, query);
     setIsProcessing(true);
 
     if (suspendedState) {
+       if (!activeDataset) {
+         addMessage(AgentType.SYSTEM, "No active dataset available to resume this workflow.");
+         setIsProcessing(false);
+         return;
+       }
        addMessage(AgentType.SYSTEM, "Received clarification. Resuming execution...");
        try {
            const { plan, stepIndex, data, columns, intent, originalUserQuery } = suspendedState;
@@ -1232,7 +1373,85 @@ const App: React.FC = () => {
 
       addMessage(AgentType.ORCHESTRATOR, "Evaluating query intent...");
       const intent = await classifyQuery(query);
-      addMessage(AgentType.ORCHESTRATOR, `Identified intent: ${intent}`);
+      const hasImageContext = uploadedImages.length > 0;
+      const effectiveIntent = (!activeDataset && hasImageContext && intent !== 'VISION') ? 'VISION' : intent;
+
+      addMessage(
+        AgentType.ORCHESTRATOR,
+        effectiveIntent === intent
+          ? `Identified intent: ${intent}`
+          : `Identified intent: ${intent}. No dataset loaded but image context exists, routing to: ${effectiveIntent}`
+      );
+
+      if (effectiveIntent === 'VISION') {
+        const activeImage = activeImageId !== null
+          ? uploadedImages.find(img => img.uploadedAt === activeImageId)
+          : null;
+        const normalizedQuery = query.toLowerCase();
+        const matchedImage = uploadedImages.find(img => normalizedQuery.includes(img.fileName.toLowerCase()));
+        const targetImage = activeImage || matchedImage || uploadedImages[0];
+
+        if (!targetImage) {
+          addMessage(AgentType.SYSTEM, "No uploaded image found for vision analysis. Please upload an image using Add Image first.");
+          return;
+        }
+
+        addMessage(AgentType.VISION, `Analyzing image: ${targetImage.fileName}`);
+        const visionResult = await runVisionAgent(query, targetImage.imageBytesBase64);
+
+        const displayDataUrl = `data:${targetImage.mimeType || 'image/png'};base64,${targetImage.imageBytesBase64}`;
+        const safeName = escapeHtml(targetImage.fileName);
+        const safeDataUrl = escapeHtml(displayDataUrl);
+        const bboxes = (visionResult.findings || [])
+          .map(item => item?.bbox)
+          .filter((bbox): bbox is number[] => Array.isArray(bbox) && bbox.length === 4);
+        const bboxesJson = escapeHtml(JSON.stringify(bboxes));
+
+        updateVisualization(targetImage.vizId, {
+          html: `<div class="visualizationCard bg-slate-900 rounded-xl border border-slate-700 p-3">
+  <div class="vc-header mb-3">
+    <h3 class="vc-title text-slate-100 font-semibold text-sm">${safeName}</h3>
+  </div>
+  <div class="vc-body">
+    <div class="segment-overlay-container" data-segment-bboxes='${bboxesJson}' style="position:relative;display:inline-block;width:100%;">
+      <img src="${safeDataUrl}" alt="${safeName}" style="width:100%;height:auto;max-height:520px;object-fit:contain;border-radius:0.5rem;display:block;" />
+    </div>
+  </div>
+</div>`,
+          heightPx: 560
+        });
+
+        const findingsText = (visionResult.findings || []).length > 0
+          ? visionResult.findings
+              .map((item, index) => {
+                const findingText = item?.finding?.trim() || `Finding ${index + 1}`;
+                const bboxText = Array.isArray(item?.bbox) && item.bbox.length === 4
+                  ? `[${item.bbox.join(', ')}]`
+                  : '[]';
+                return `${index + 1}. ${findingText}\n   bbox: ${bboxText}`;
+              })
+              .join('\n')
+          : 'No localized findings returned.';
+
+        addMessage(
+          AgentType.VISION,
+          `Basic medical/biological info: ${visionResult.basicMedicalBiologicalInfo}\n\nFindings:\n${findingsText}`,
+          {
+            imageName: targetImage.fileName,
+            activeImage: targetImage.uploadedAt === activeImageId,
+            basicMedicalBiologicalInfo: visionResult.basicMedicalBiologicalInfo,
+            findings: visionResult.findings
+          }
+        );
+        return;
+      }
+
+      if (!activeDataset) {
+        addMessage(AgentType.SYSTEM, "Please select or upload a dataset first.");
+        return;
+      }
+
+      const workflowIntent: 'RESEARCH' | 'GENERAL' = effectiveIntent === 'RESEARCH' ? 'RESEARCH' : 'GENERAL';
 
       const allTools = [...INTERNAL_TOOLS, ...mcpTools];
       let plan: any = { analysis_steps: [] };
@@ -1245,7 +1464,7 @@ const App: React.FC = () => {
       const chatHistory = buildConversationContext(messages, isContextMemoryEnabled ? 3 : 0);
 
       while (!planIsValid && planningRetries < MAX_PLANNING_RETRIES) {
-        if (intent === 'RESEARCH') {
+        if (workflowIntent === 'RESEARCH') {
           addMessage(AgentType.NEURO_PLANNER, planningRetries === 0 ? "Formulating research analysis plan..." : "Refining research plan based on feedback...");
           plan = await generateNeuroPlan(query, activeDataset.columns.join(', '), allTools, currentFeedback, chatHistory);
           // Guard: ensure analysis_steps is an array
@@ -1290,7 +1509,7 @@ const App: React.FC = () => {
         }
       }
 
-      await executePlanSteps(plan, 0, null, [...activeDataset.data], [...activeDataset.columns], intent, undefined, query);
+      await executePlanSteps(plan, 0, null, [...activeDataset.data], [...activeDataset.columns], workflowIntent, undefined, query);
 
     } catch (error) {
       console.error(error);
@@ -1560,6 +1779,11 @@ const App: React.FC = () => {
           messages={messages} 
           onSendMessage={handleUserQuery} 
           onFileUpload={handleSingleFileUpload}
+          onImageUpload={handleImageUpload}
+          uploadedImages={uploadedImages.map(img => ({ fileName: img.fileName, uploadedAt: img.uploadedAt }))}
+          activeImageId={activeImageId}
+          onImageToggle={handleImageToggle}
+          onImageRemove={handleImageRemove}
           onLoadDemo={handleLoadDemo}
           isProcessing={isProcessing}
           hasData={!!activeDataset}

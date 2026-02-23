@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ChatMessage, AgentType, Dataset } from '../../types';
 import MessageBubble from './MessageBubble';
-import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw } from 'lucide-react';
+import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw, ImagePlus } from 'lucide-react';
 
 interface ChatAreaProps {
   messages: ChatMessage[];
@@ -18,6 +18,11 @@ interface ChatAreaProps {
   onDatasetToggle: (id: string) => void;
   onDatasetRemove: (id: string, e: React.MouseEvent) => void;
   onMultiFileUpload: (files: FileList | null) => void;
+  onImageUpload: (files: FileList | null) => void;
+  uploadedImages: { fileName: string; uploadedAt: number }[];
+  activeImageId: number | null;
+  onImageToggle: (uploadedAt: number) => void;
+  onImageRemove: (uploadedAt: number, e: React.MouseEvent) => void;
   onMergeDatasets: () => void;
   onSyncDataset: () => void;
 }
@@ -25,7 +30,8 @@ interface ChatAreaProps {
 const ChatArea: React.FC<ChatAreaProps> = React.memo(({ 
   messages, onSendMessage, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep,
   placeholder,
-  datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload, onMergeDatasets, onSyncDataset
+  datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload, onImageUpload,
+  uploadedImages, activeImageId, onImageToggle, onImageRemove, onMergeDatasets, onSyncDataset
 }) => {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -155,39 +161,88 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                             onChange={(e) => onMultiFileUpload(e.target.files)} 
                           />
                       </label>
+                      <label className="cursor-pointer text-xs flex items-center gap-1 bg-cyan-600 hover:bg-cyan-500 text-white px-2 py-1 rounded transition-colors shadow-sm">
+                          <ImagePlus className="w-3 h-3" /> Add Image
+                          <input 
+                            type="file" 
+                            multiple 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              onImageUpload(e.target.files);
+                              e.currentTarget.value = '';
+                            }}
+                          />
+                      </label>
                    </div>
             </div>
             
-            <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto custom-scrollbar">
-                {datasets.length === 0 && (
-                     <div className="w-full py-2 text-xs text-slate-500 text-center border border-dashed border-slate-700 rounded bg-slate-800/50">
-                        No datasets active. Upload a CSV to begin.
-                     </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto custom-scrollbar content-start">
+                  {datasets.length === 0 && (
+                       <div className="w-full py-2 text-xs text-slate-500 text-center border border-dashed border-slate-700 rounded bg-slate-800/50">
+                          No datasets active. Upload a CSV to begin.
+                       </div>
+                  )}
+                  {datasets.map(ds => {
+                      const isActive = activeDatasetIds.includes(ds.id);
+                      return (
+                          <div 
+                          key={ds.id}
+                          onClick={() => onDatasetToggle(ds.id)}
+                          className={`
+                              group flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border cursor-pointer transition-all select-none
+                              ${isActive
+                                  ? 'bg-indigo-900/40 border-indigo-500/50 text-indigo-200' 
+                                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}
+                          `}
+                          >
+                              {isActive && <CheckCircle2 className="w-3 h-3 text-indigo-400" />}
+                              <span className="truncate max-w-[120px]">{ds.name}</span>
+                              <button 
+                              onClick={(e) => onDatasetRemove(ds.id, e)}
+                              className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
+                              >
+                                  <Trash2 className="w-3 h-3" />
+                              </button>
+                          </div>
+                      );
+                  })}
+              </div>
+
+              <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto custom-scrollbar content-start">
+                {uploadedImages.length === 0 && (
+                  <div className="w-full py-2 text-xs text-slate-500 text-center border border-dashed border-slate-700 rounded bg-slate-800/50">
+                    No images uploaded.
+                  </div>
                 )}
-                {datasets.map(ds => {
-                    const isActive = activeDatasetIds.includes(ds.id);
-                    return (
-                        <div 
-                        key={ds.id}
-                        onClick={() => onDatasetToggle(ds.id)}
-                        className={`
-                            group flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border cursor-pointer transition-all select-none
-                            ${isActive
-                                ? 'bg-indigo-900/40 border-indigo-500/50 text-indigo-200' 
-                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}
-                        `}
-                        >
-                            {isActive && <CheckCircle2 className="w-3 h-3 text-indigo-400" />}
-                            <span className="truncate max-w-[120px]">{ds.name}</span>
-                            <button 
-                            onClick={(e) => onDatasetRemove(ds.id, e)}
-                            className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
-                            >
-                                <Trash2 className="w-3 h-3" />
-                            </button>
-                        </div>
-                    );
+                {uploadedImages.map(img => {
+                  const isActive = activeImageId === img.uploadedAt;
+                  return (
+                    <div
+                      key={img.uploadedAt}
+                      onClick={() => onImageToggle(img.uploadedAt)}
+                      className={`
+                        group flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border cursor-pointer transition-all select-none
+                        ${isActive
+                          ? 'bg-cyan-900/40 border-cyan-500/50 text-cyan-200'
+                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}
+                      `}
+                      title={img.fileName}
+                    >
+                      {isActive && <CheckCircle2 className="w-3 h-3 text-cyan-400" />}
+                      <span className="truncate max-w-[160px]">{img.fileName}</span>
+                      <button
+                        onClick={(e) => onImageRemove(img.uploadedAt, e)}
+                        className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
+                        title="Remove image"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
                 })}
+              </div>
             </div>
         </div>
 

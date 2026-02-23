@@ -4,9 +4,9 @@ import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Legend, ComposedChart, Line, ZAxis, Cell
 } from 'recharts';
-import { CorrelationResult, GroupComparisonResult, GrowthCurveResult, ClusteringResult, StratificationResult, SVMResult, CorrelationSeries } from '../../types';
+import { CorrelationResult, GroupComparisonResult, GrowthCurveResult, ClusteringResult, StratificationResult, SVMResult, CorrelationSeries, CFCWaveletResult, HubDetectionResult } from '../../types';
 import { Eye, EyeOff } from 'lucide-react';
-
+import { MCP_API_URL }  from '../../services/mcpService';
 export interface ChartConfig {
   color?: string;
   dotSize?: number;
@@ -14,6 +14,122 @@ export interface ChartConfig {
   xAxisLabel?: string;
   yAxisLabel?: string;
 }
+
+interface VisionBBoxesChartProps {
+  html?: string;
+}
+
+export const VisionBBoxesChart: React.FC<VisionBBoxesChartProps> = ({ html }) => {
+  const [imgSize, setImgSize] = useState({ width: 1, height: 1 });
+
+  const parsed = useMemo(() => {
+    if (!html || typeof window === 'undefined') {
+      return { title: 'Uploaded Image', imgSrc: '', bboxes: [] as number[][] };
+    }
+
+    try {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const container = doc.querySelector('.segment-overlay-container');
+      const img = container?.querySelector('img') || doc.querySelector('img');
+      const title = (doc.querySelector('.vc-title')?.textContent || 'Uploaded Image').trim();
+
+      const bboxesRaw = container?.getAttribute('data-segment-bboxes');
+      const legacyBBoxRaw = container?.getAttribute('data-segment-bbox');
+
+      let rawBBoxes: any[] = [];
+      if (bboxesRaw) {
+        const parsedBBoxes = JSON.parse(bboxesRaw);
+        rawBBoxes = Array.isArray(parsedBBoxes) ? parsedBBoxes : [];
+      } else if (legacyBBoxRaw) {
+        const parsedBBox = JSON.parse(legacyBBoxRaw);
+        rawBBoxes = Array.isArray(parsedBBox) && parsedBBox.length === 4 ? [parsedBBox] : [];
+      }
+
+      const bboxes = rawBBoxes
+        .filter((bbox: any) => Array.isArray(bbox) && bbox.length === 4)
+        .map((bbox: any) => bbox.map((v: any) => Number(v)))
+        .filter((bbox: number[]) => bbox.every((v: number) => Number.isFinite(v)));
+
+      return {
+        title,
+        imgSrc: img?.getAttribute('src') || '',
+        bboxes
+      };
+    } catch {
+      return { title: 'Uploaded Image', imgSrc: '', bboxes: [] as number[][] };
+    }
+  }, [html]);
+
+  const handleImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    const target = e.currentTarget;
+    setImgSize({
+      width: Math.max(target.naturalWidth || target.clientWidth, 1),
+      height: Math.max(target.naturalHeight || target.clientHeight, 1)
+    });
+  }, []);
+
+  if (!parsed.imgSrc) {
+    return (
+      <div className="bg-slate-900 rounded-lg border border-slate-700 p-4 text-sm text-slate-400">
+        No image content available.
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full bg-slate-900 rounded-lg border border-slate-700 p-3">
+      <div className="mb-3">
+        <h3 className="text-slate-100 font-semibold text-sm">{parsed.title}</h3>
+      </div>
+      <div className="relative inline-block w-full">
+        <img
+          src={parsed.imgSrc}
+          alt={parsed.title}
+          onLoad={handleImageLoad}
+          className="w-full h-auto max-h-[520px] object-contain rounded-lg block"
+        />
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          viewBox={`0 0 ${imgSize.width} ${imgSize.height}`}
+          preserveAspectRatio="none"
+        >
+          {parsed.bboxes.map((bbox, index) => {
+            const clamp = (value: number, lower: number, upper: number) =>
+              Math.min(Math.max(value, lower), upper);
+
+            const x1 = clamp(bbox[0], 0, imgSize.width);
+            const y1 = clamp(bbox[1], 0, imgSize.height);
+            const x2 = clamp(bbox[2], 0, imgSize.width);
+            const y2 = clamp(bbox[3], 0, imgSize.height);
+
+            const minX = Math.min(x1, x2);
+            const minY = Math.min(y1, y2);
+            const maxX = Math.max(x1, x2);
+            const maxY = Math.max(y1, y2);
+
+            if (maxX - minX <= 0 || maxY - minY <= 0) {
+              return null;
+            }
+
+            return (
+              <rect
+                key={`${index}-${bbox.join('-')}`}
+                x={minX}
+                y={minY}
+                width={maxX - minX}
+                height={maxY - minY}
+                fill="rgba(248, 113, 113, 0.12)"
+                stroke="#f87171"
+                strokeWidth={2}
+                strokeDasharray="6 4"
+              />
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+};
 
 /** Click-to-edit text label used for chart titles, X-axis labels, and Y-axis labels. */
 const EditableLabel: React.FC<{
@@ -676,6 +792,432 @@ export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config, onCon
       </div>
     );
 };
+
+
+interface CfcProps {
+  data: CFCWaveletResult
+  timestamp: string
+}
+
+function getHeatColor(normalized: number): string {
+  const r = normalized > 0.5 ? 255 : Math.round(normalized * 2 * 255)
+  const b = normalized < 0.5 ? 255 : Math.round((1 - normalized) * 2 * 255)
+  const g = normalized < 0.5
+    ? Math.round(normalized * 2 * 255)
+    : Math.round((1 - normalized) * 2 * 255)
+  return `rgb(${r},${g},${b})`
+}
+
+function CfcHeatmap({ matrix, title }: { matrix: number[][]; title: string }) {
+  const displayMatrix = useMemo(() => {
+    return matrix.map((row, i) => row.map((val, j) => (i === j ? 0 : val)))
+  }, [matrix])
+
+  const stats = useMemo(() => {
+    let min = Infinity, max = -Infinity, validCount = 0
+    displayMatrix.forEach(row => {
+      if (Array.isArray(row)) row.forEach(val => {
+        const n = Number(val)
+        if (!isNaN(n) && isFinite(n)) { validCount++; if (n < min) min = n; if (n > max) max = n }
+      })
+    })
+    if (validCount === 0 || !isFinite(min) || !isFinite(max)) return null
+    const absMax = Math.max(Math.abs(min), Math.abs(max))
+    return { min: -absMax, max: absMax, absMax }
+  }, [displayMatrix])
+
+  const size = matrix.length
+  const cellSize = Math.min(200 / Math.max(size, 1), 14)
+
+  if (!stats) return (
+    <div style={{ textAlign: 'center', padding: '16px 0', color: '#4b5563', fontSize: 13 }}>No CFC data</div>
+  )
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>{title}</span>
+        <span style={{ fontSize: 11, color: '#64748b' }}>{size}×{matrix[0]?.length ?? 0}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div style={{ border: '1px solid #2d3250', borderRadius: 6, overflow: 'hidden' }}>
+          {displayMatrix.map((row, i) => (
+            <div key={i} style={{ display: 'flex' }}>
+              {Array.isArray(row) && row.map((val, j) => {
+                const numVal = Number(val)
+                const isValid = !isNaN(numVal) && isFinite(numVal)
+                const normalized = isValid && stats.max > stats.min
+                  ? (numVal - stats.min) / (stats.max - stats.min)
+                  : 0
+                return (
+                  <div key={j}
+                    style={{ width: cellSize, height: cellSize, backgroundColor: isValid ? getHeatColor(normalized) : '#334155' }}
+                    title={`[${i},${j}]: ${isValid ? numVal.toFixed(4) : 'N/A'}`}
+                  />
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, fontSize: 11, color: '#64748b' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span>Low</span>
+          <div style={{ width: 60, height: 8, borderRadius: 4, background: 'linear-gradient(to right, #3b82f6, #ffffff, #ef4444)', border: '1px solid #2d3250' }} />
+          <span>High</span>
+        </div>
+        <span>±{stats.absMax.toFixed(4)}</span>
+      </div>
+    </div>
+  )
+}
+
+export function CFCWaveletCard({ data, timestamp }: CfcProps) {
+  const [selectedFile, setSelectedFile] = useState(0)
+  const [selectedWindow, setSelectedWindow] = useState(0)
+  const [showConsole, setShowConsole] = useState(false)
+
+  const isFolderMode = (data.files_cfcs?.length ?? 0) > 1
+
+  // Current file's window list
+  const currentFileCfcs = useMemo(() => {
+    if (isFolderMode && data.files_cfcs) return data.files_cfcs[selectedFile]?.cfcs ?? []
+    return data.cfcs ?? []
+  }, [isFolderMode, data.files_cfcs, data.cfcs, selectedFile])
+
+  const numWindowsInFile = currentFileCfcs.length
+
+  const windowCfc = useMemo(() => {
+    return currentFileCfcs[selectedWindow] ?? null
+  }, [currentFileCfcs, selectedWindow])
+
+  const currentFileAvg = useMemo(() => {
+    if (isFolderMode) return data.files_avg_cfcs?.[selectedFile]?.avg_cfc ?? null
+    return data.avg_cfc ?? null
+  }, [isFolderMode, data.files_avg_cfcs, data.avg_cfc, selectedFile])
+
+  function handleFileChange(idx: number) {
+    setSelectedFile(idx)
+    setSelectedWindow(0)
+  }
+
+  return (
+    <div  className="w-full bg-slate-900 rounded-lg p-4 border border-slate-700">
+        <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
+            <span className="font-semibold text-slate-200">
+              CFC Wavelet Analysis
+            </span>
+        </div>
+
+      
+        <div className="flex gap-4 mb-4 text-xs">
+            <div className="flex-1 bg-slate-800 p-2 rounded">
+                <div className="text-slate-500 mb-1">Elapsed (s)</div>
+                <div className="font-mono text-indigo-300">{data.elapsed_seconds.toFixed(2)}</div>
+            </div>
+            <div className="flex-1 bg-slate-800 p-2 rounded">
+                <div className="text-slate-500 mb-1">Files</div>
+                <div className="font-mono text-slate-200">
+                    {data.files_cfcs?.length ?? 1}
+                </div>
+            </div>
+            <div className="flex-1 bg-slate-800 p-2 rounded">
+                <div className="text-slate-500 mb-1">Total Windows</div>
+                <div className="font-mono text-rose-400">{data.num_windows}</div>
+            </div>
+        </div>
+
+      {/* Progress steps
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+        {data.progress.map((p, i) => {
+          const color = p.step === 'error' ? '#f87171' : p.step === 'analyzing' ? '#fbbf24' : '#4ade80'
+          const bg = p.step === 'error' ? '#450a0a' : p.step === 'analyzing' ? '#422006' : '#052e16'
+          return (
+            <span key={i} style={{ background: bg, color, borderRadius: 6, padding: '2px 8px', fontSize: 11 }}>
+              {p.message}
+            </span>
+          )
+        })}
+      </div> */}
+
+      {/* File selector (folder mode only) */}
+      {isFolderMode && (
+        <div className="form-row" style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: '#94a3b8', display: 'block', marginBottom: 4 }}>File</label>
+          <select
+            className="form-select"
+            value={selectedFile}
+            onChange={e => handleFileChange(Number(e.target.value))}
+          >
+            {data.files_cfcs!.map((f, i) => (
+              <option key={i} value={i}>{f.filename}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Window slider */}
+      {numWindowsInFile > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap' }}>Window</span>
+          <input
+            type="range" min={0} max={numWindowsInFile - 1} value={selectedWindow}
+            onChange={e => setSelectedWindow(parseInt(e.target.value))}
+            style={{ flex: 1, accentColor: '#7c3aed' }}
+          />
+          <span style={{ fontSize: 12, color: '#a5b4fc', fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {selectedWindow + 1}/{numWindowsInFile}
+          </span>
+        </div>
+      )}
+
+      {/* Heatmaps side by side */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {windowCfc && windowCfc.length > 0 && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <CfcHeatmap
+              matrix={windowCfc}
+              title={isFolderMode
+                ? `Window ${selectedWindow + 1}`
+                : `Window ${selectedWindow + 1}`}
+            />
+          </div>
+        )}
+        {currentFileAvg && currentFileAvg.length > 0 && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <CfcHeatmap
+              matrix={currentFileAvg}
+              title={isFolderMode ? `File Avg` : 'Avg (all windows)'}
+            />
+          </div>
+        )}
+        {isFolderMode && data.avg_cfc && data.avg_cfc.length > 0 && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <CfcHeatmap matrix={data.avg_cfc} title="Overall Avg" />
+          </div>
+        )}
+      </div>
+
+      {/* Console output toggle */}
+      {data.console_output && (
+        <div style={{ marginTop: 12 }}>
+          <button
+            onClick={() => setShowConsole(v => !v)}
+            style={{ fontSize: 11, color: '#7c3aed', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            {showConsole ? '▲ Hide' : '▼ Show'} console output
+          </button>
+          {showConsole && (
+            <pre style={{
+              marginTop: 6, padding: 8, background: '#0f1117', border: '1px solid #2d3250',
+              borderRadius: 6, fontSize: 10, color: '#94a3b8', maxHeight: 120,
+              overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+            }}>
+              {data.console_output}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+
+interface HubProps {
+  data: HubDetectionResult
+  timestamp: string
+}
+
+export function HubDetectionCard({ data, timestamp }: HubProps) {
+  const [selectedWindow, setSelectedWindow] = useState(0)
+  const [showConsole, setShowConsole] = useState(false)
+
+  const method = data.results?.method ?? 'unknown'
+  const isGroup = method === 'group'
+
+  const hubRankings = useMemo(() => {
+    if (isGroup || !data.results?.results) return null
+    const freq: Record<number, number> = {}
+    for (const r of data.results.results) {
+      for (const node of (r.hub_nodes ?? [])) {
+        freq[node] = (freq[node] ?? 0) + 1
+      }
+    }
+    return Object.entries(freq)
+      .map(([node_id, count]) => ({ node_id: Number(node_id), count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20)
+  }, [data.results, isGroup])
+
+  const currentWindowHubs = useMemo(() => {
+    if (isGroup) return data.results?.hub_nodes ?? []
+    return data.results?.results?.[selectedWindow]?.hub_nodes ?? []
+  }, [data.results, isGroup, selectedWindow])
+
+  return (
+    <div  className="w-full bg-slate-900 rounded-lg p-4 border border-slate-700">
+        <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
+            <span className="font-semibold text-slate-200">
+              Hub Detection
+            </span>
+        </div>
+      
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span style={{
+          padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+          background: isGroup ? '#14532d' : '#1e1b4b',
+          color: isGroup ? '#4ade80' : '#a5b4fc',
+        }}>
+          {isGroup ? 'Group' : 'Individual'}
+        </span>
+      </div>
+
+      
+      <div className="flex gap-4 mb-4 text-xs">
+          <div className="flex-1 bg-slate-800 p-2 rounded">
+              <div className="text-slate-500 mb-1">Files</div>
+              <div className="font-mono text-indigo-300">{data.num_windows}</div>
+          </div>
+          <div className="flex-1 bg-slate-800 p-2 rounded">
+              <div className="text-slate-500 mb-1">Embedding k</div>
+              <div className="font-mono text-slate-200">
+                  {data.k}
+              </div>
+          </div>
+          <div className="flex-1 bg-slate-800 p-2 rounded">
+              <div className="text-slate-500 mb-1">Hub Count</div>
+              <div className="font-mono text-rose-400">{data.hub_num}</div>
+          </div>
+      </div>
+
+      {/* Progress steps */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+        {data.progress.map((p, i) => {
+          const color = p.step === 'error' ? '#f87171' : p.step === 'analyzing' ? '#fbbf24' : '#4ade80'
+          const bg = p.step === 'error' ? '#450a0a' : p.step === 'analyzing' ? '#422006' : '#052e16'
+          return (
+            <span key={i} style={{ background: bg, color, borderRadius: 6, padding: '2px 8px', fontSize: 11 }}>
+              {p.message}
+            </span>
+          )
+        })}
+      </div>
+
+      {/* Window slider for individual mode */}
+      {!isGroup && data.num_windows > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap' }}>File</span>
+          <input
+            type="range" min={0} max={data.num_windows - 1} value={selectedWindow}
+            onChange={e => setSelectedWindow(parseInt(e.target.value))}
+            style={{ flex: 1, accentColor: '#7c3aed' }}
+          />
+          <span style={{ fontSize: 12, color: '#a5b4fc', fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {selectedWindow + 1}/{data.num_windows}
+          </span>
+        </div>
+      )}
+
+      {/* Hub nodes */}
+      <div style={{
+        background: isGroup ? '#1c0505' : '#0d0f1e',
+        border: `1px solid ${isGroup ? '#7f1d1d' : '#2d3250'}`,
+        borderRadius: 8, padding: '10px 12px', marginBottom: 12,
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: isGroup ? '#f87171' : '#a5b4fc', marginBottom: 6 }}>
+          {isGroup ? 'Group Common Hubs' : `Hub Nodes — File ${selectedWindow + 1}`}
+        </div>
+        {currentWindowHubs.length > 0 ? (
+          <div style={{ fontFamily: 'monospace', fontSize: 12, color: isGroup ? '#fca5a5' : '#c7d2fe', lineHeight: 1.6 }}>
+            {currentWindowHubs.map((idx, i) => {
+              const roi = data.roi_list?.[idx]
+              const label = roi ? `${idx} (${roi.name})` : `${idx}`
+              return <span key={idx}>{i > 0 ? ', ' : ''}{label}</span>
+            })}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: '#4b5563' }}>No hub nodes</div>
+        )}
+      </div>
+
+      {/* ROI composite + legend side by side */}
+      {data.roi_list && currentWindowHubs.length > 0 && (() => {
+        const PALETTE = ['#ef4444','#3b82f6','#22c55e','#f59e0b','#a855f7',
+                         '#ec4899','#14b8a6','#f97316','#6366f1','#84cc16']
+        const hubsWithRoi = currentWindowHubs.filter(idx => data.roi_list![idx]?.code)
+        if (hubsWithRoi.length === 0) return null
+        const roiIds = hubsWithRoi.map(idx => data.roi_list![idx].code)
+        const url = `${MCP_API_URL}/roi_figs/composite?ids=${roiIds.join(',')}`
+        return (
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'flex-start' }}>
+            <img src={url} style={{ width: '50%', borderRadius: 6, display: 'block', flexShrink: 0 }} alt="Hub ROIs" />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 2 }}>ROI Legend</div>
+              {hubsWithRoi.map((idx, i) => {
+                const roi = data.roi_list![idx]
+                return (
+                  <span key={idx} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 2, background: PALETTE[i % PALETTE.length], display: 'inline-block', flexShrink: 0 }} />
+                    <span style={{ color: '#94a3b8' }}>{roi.name}</span>
+                  </span>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Hub frequency ranking (individual mode only) */}
+      {hubRankings && hubRankings.length > 0 && (
+        <div style={{ border: '1px solid #2d3250', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
+          <div style={{ padding: '8px 12px', background: '#0f1117', fontSize: 11, fontWeight: 600, color: '#64748b' }}>
+            Hub Frequency Ranking
+          </div>
+          <div style={{ maxHeight: 160, overflowY: 'auto' }}>
+            {hubRankings.map((item, idx) => {
+              const roiName = data.roi_list?.[item.node_id]?.name
+              return (
+                <div key={item.node_id} style={{
+                  padding: '6px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  fontSize: 12, borderTop: idx === 0 ? 'none' : '1px solid #1e2235',
+                }}>
+                  <span style={{ color: '#94a3b8' }}>
+                    #{idx + 1} Node {item.node_id}
+                    {roiName && <span style={{ color: '#64748b', marginLeft: 6 }}>{roiName}</span>}
+                  </span>
+                  <span style={{ fontWeight: 600, color: '#a5b4fc' }}>{item.count}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Console output toggle */}
+      {data.console_output && (
+        <div>
+          <button
+            onClick={() => setShowConsole(v => !v)}
+            style={{ fontSize: 11, color: '#7c3aed', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          >
+            {showConsole ? '▲ Hide' : '▼ Show'} console output
+          </button>
+          {showConsole && (
+            <pre style={{
+              marginTop: 6, padding: 8, background: '#0f1117', border: '1px solid #2d3250',
+              borderRadius: 6, fontSize: 10, color: '#94a3b8', maxHeight: 120,
+              overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+            }}>
+              {data.console_output}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 interface ClusteringDashboardProps {
   data: ClusteringResult;

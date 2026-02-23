@@ -1,6 +1,7 @@
 export enum AgentType {
   USER = 'User',
   ORCHESTRATOR = 'Orchestrator',
+  VISION = 'Vision Agent',
   PLANNER = 'Planner', 
   GENERAL_PLANNER = 'General Planner',
   NEURO_PLANNER = 'Neuro Planner',
@@ -10,6 +11,39 @@ export enum AgentType {
   RESEARCHER = 'Researcher',
   PROPOSAL_REPORTER = 'Proposal Reporter',
   SYSTEM = 'System'
+}
+export interface CFCWaveletResult {
+  status: string;
+  data_path: string;
+  window_size: number;
+  step_size: number;
+  num_windows: number;
+  cfcs_count: number;
+  cfcs: number[][][];
+  avg_cfc?: number[][];
+  files_cfcs?: { filename: string; cfcs: number[][][] }[];
+  files_avg_cfcs?: { filename: string; avg_cfc: number[][] }[];
+  elapsed_seconds: number;
+  console_output: string;
+  progress: { step: string; message: string }[];
+}
+
+export interface HubDetectionResult {
+  status: string;
+  data_path: string;
+  num_windows: number;
+  k: number;
+  hub_num: number;
+  use_group: boolean;
+  results: {
+    method: string;
+    hub_nodes?: number[];
+    results?: { graph_index: number; hub_nodes: number[] }[];
+  };
+  elapsed_seconds: number;
+  console_output: string;
+  progress: { step: string; message: string }[];
+  roi_list?: { code: string; name: string }[];
 }
 
 export interface ChatMessage {
@@ -39,6 +73,8 @@ export enum VisualizationType {
   SCATTER_PLOT = 'SCATTER_PLOT',
   BOX_PLOT = 'BOX_PLOT',
   AGING_CURVE = 'AGING_CURVE',
+  CFC_DASHBOARD = 'CFC_DASHBOARD',
+  HUB_DETECTION = 'HUB_DETECTION',
   MARKDOWN_REPORT = 'MARKDOWN_REPORT',
   LITERATURE_LIST = 'LITERATURE_LIST',
   RESEARCH_REPORT = 'RESEARCH_REPORT',

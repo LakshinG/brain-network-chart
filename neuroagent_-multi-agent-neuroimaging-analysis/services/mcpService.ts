@@ -1,8 +1,8 @@
 
 import { McpTool, McpToolCallResult } from '../types';
-const BACKEND_BASE_URL = 'http://localhost:8787';
+export const BACKEND_BASE_URL = 'http://localhost:8789';
 const BACKEND_WS_URL = BACKEND_BASE_URL.replace(/^http/, 'ws');
-const MCP_API_URL = 'http://localhost:8010';
+export const MCP_API_URL = 'http://localhost:8010';
 export class McpService {
   public isConnected = false;
   private ws: WebSocket | null = null;

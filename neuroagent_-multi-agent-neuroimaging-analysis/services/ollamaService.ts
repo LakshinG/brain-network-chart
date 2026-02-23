@@ -8,6 +8,7 @@ const OLLAMA_HOST = 'http://127.0.0.1:11434';
 
 let generalModel = 'llama3'; 
 let neuroModel = 'llama3';
+const visionModel = 'dcarrascosa/medgemma-1.5-4b-it:F16';
 
 const ollama = new Ollama({ host: OLLAMA_HOST });
 
@@ -164,6 +165,7 @@ export const setGeneralModel = (model: string) => { generalModel = model; };
 export const setNeuroModel = (model: string) => { neuroModel = model; };
 export const getGeneralModel = () => generalModel;
 export const getNeuroModel = () => neuroModel;
+export const getVisionModel = () => visionModel;
 
 // Helper to build summarized history
 export const buildConversationContext = (messages: ChatMessage[], limit: number = 8): string => {
@@ -184,7 +186,7 @@ export const buildConversationContext = (messages: ChatMessage[], limit: number 
   }).join('\n\n');
 };
 
-export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERAL'> => {
+export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERAL' | 'VISION'> => {
   console.log('[Orchestrator Agent] Input:', PROMPTS.ORCHESTRATOR_CLASSIFY(query));
   try {
     const response = await ollama.generate({
@@ -195,10 +197,69 @@ export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERA
       stream: false
     });
     const json = robustJsonParse(response.response);
-    return (json.category === 'RESEARCH' || json.category === 'GENERAL') ? json.category : 'RESEARCH';
+    return (json.category === 'RESEARCH' || json.category === 'GENERAL' || json.category === 'VISION') ? json.category : 'RESEARCH';
   } catch (e) {
     console.error("Orchestrator Error:", e);
     return 'RESEARCH';
+  }
+};
+
+export interface VisionAgentResult {
+  basicMedicalBiologicalInfo: string;
+  findings: Array<{
+    finding: string;
+    bbox: number[];
+  }>;
+}
+
+export const runVisionAgent = async (query: string, imageBytesBase64: string): Promise<VisionAgentResult> => {
+  try {
+    const response: any = await ollama.generate({
+      model: visionModel,
+      keep_alive: -1,
+      prompt: PROMPTS.VISION_AGENT(query),
+      images: [imageBytesBase64],
+      format: 'json',
+      stream: false
+    } as any);
+
+    const parsed = robustJsonParse(response.response || '{}');
+    const basicMedicalBiologicalInfo = typeof parsed.basic_medical_biological_info === 'string' && parsed.basic_medical_biological_info.trim()
+      ? parsed.basic_medical_biological_info.trim()
+      : 'Basic medical/biological context is uncertain from the provided image.';
+
+    const rawFindings = Array.isArray(parsed.findings)
+      ? parsed.findings
+      : (typeof parsed.finding === 'string' || Array.isArray(parsed.bbox)
+          ? [{ finding: parsed.finding, bbox: parsed.bbox }]
+          : []);
+
+    const findings = rawFindings
+      .map((item: any) => {
+        const finding = typeof item?.finding === 'string' ? item.finding.trim() : '';
+        const bbox = Array.isArray(item?.bbox)
+          ? item.bbox
+              .slice(0, 4)
+              .map((value: any) => Number(value))
+              .filter((value: number) => Number.isFinite(value))
+          : [];
+        return {
+          finding,
+          bbox: bbox.length === 4 ? bbox : []
+        };
+      })
+      .filter((item: { finding: string; bbox: number[] }) => item.finding.length > 0 || item.bbox.length === 4);
+
+    return {
+      basicMedicalBiologicalInfo,
+      findings
+    };
+  } catch (e) {
+    console.error('Vision Agent Error:', e);
+    return {
+      basicMedicalBiologicalInfo: `Vision Agent [${visionModel}]: Error ${e}.`,
+      findings: []
+    };
   }
 };
 

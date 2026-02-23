@@ -202,12 +202,16 @@ function sendHeight() {
   window.parent.postMessage({ type: 'height-update', height: h }, '*');
 }
 
-window.addEventListener('load', function() { setTimeout(sendHeight, 200); });
+window.addEventListener('load', function() {
+  setTimeout(sendHeight, 220);
+});
 setTimeout(sendHeight, 600);
 setTimeout(sendHeight, 1500);
 
 if (typeof ResizeObserver !== 'undefined') {
-  new ResizeObserver(sendHeight).observe(document.body);
+  new ResizeObserver(function() {
+    sendHeight();
+  }).observe(document.body);
 }
 <\/script>
 </body>

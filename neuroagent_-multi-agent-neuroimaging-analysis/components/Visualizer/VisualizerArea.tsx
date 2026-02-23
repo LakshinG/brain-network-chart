@@ -1,7 +1,8 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ToolVisualization, VisualizationType, GroupComparisonResult } from '../../types';
-import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart, SVMBoundaryChart, ChartConfig } from './Charts';
+import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart, SVMBoundaryChart, ChartConfig, VisionBBoxesChart } from './Charts';
+import { CFCWaveletCard, HubDetectionCard } from './Charts';
 import { HtmlVisualizationRenderer } from './HtmlVisualizationRenderer';
 import CodeEditorModal from './CodeEditorModal';
 import { chartDataToHtml } from '../../utils/chartToHtml';
@@ -183,9 +184,15 @@ const VisualizationCard: React.FC<{
     VisualizationType.SCATTER_PLOT,
     VisualizationType.BOX_PLOT,
     VisualizationType.AGING_CURVE,
+    VisualizationType.CFC_DASHBOARD,
+    VisualizationType.HUB_DETECTION,
     VisualizationType.CLUSTERING_DASHBOARD,
     VisualizationType.STRATIFICATION_RESULT,
   ].includes(visualization.type);
+
+  const isVisionBBoxHtml = visualization.type === VisualizationType.VIS_HTML
+    && typeof visualization.data?.html === 'string'
+    && (visualization.data.html.includes('data-segment-bboxes=') || visualization.data.html.includes('data-segment-bbox='));
 
   const handleDownloadSvg = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -307,6 +314,8 @@ const VisualizationCard: React.FC<{
           {visualization.type === VisualizationType.SCATTER_PLOT && <Database className="w-4 h-4 text-sky-400" />}
           {visualization.type === VisualizationType.BOX_PLOT && <Database className="w-4 h-4 text-purple-400" />}
           {visualization.type === VisualizationType.AGING_CURVE && <TrendingUp className="w-4 h-4 text-teal-400" />}
+          {visualization.type === VisualizationType.CFC_DASHBOARD && <TrendingUp className="w-4 h-4 text-teal-400" />}
+          {visualization.type === VisualizationType.HUB_DETECTION && <TrendingUp className="w-4 h-4 text-teal-400" />}
           {visualization.type === VisualizationType.CLUSTERING_DASHBOARD && <Grid2X2 className="w-4 h-4 text-rose-400" />}
           {visualization.type === VisualizationType.STRATIFICATION_RESULT && <Layers className="w-4 h-4 text-emerald-400" />}
           {visualization.type === VisualizationType.SVM_BOUNDARY && <Binary className="w-4 h-4 text-blue-500" />}
@@ -432,6 +441,18 @@ const VisualizationCard: React.FC<{
             </div>
         )}
 
+        {visualization.type === VisualizationType.CFC_DASHBOARD && (
+            <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
+                <CFCWaveletCard data={visualization.data} timestamp={visualization.data.timestamp}/>
+            </div>
+        )}
+
+        {visualization.type === VisualizationType.HUB_DETECTION && (
+            <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
+                <HubDetectionCard data={visualization.data} timestamp={visualization.data.timestamp}/>
+            </div>
+        )}
+
         {visualization.type === VisualizationType.CLUSTERING_DASHBOARD && (
             <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
                 <ClusteringDashboard data={visualization.data} config={visualization.config} />
@@ -501,11 +522,15 @@ const VisualizationCard: React.FC<{
         {/* HTML Visualization */}
         {visualization.type === VisualizationType.VIS_HTML && (
           <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
-            <HtmlVisualizationRenderer
-              html={visualization.data?.html}
-              heightPx={visualization.data?.heightPx}
-              onHtmlChange={onHtmlChange}
-            />
+            {isVisionBBoxHtml ? (
+              <VisionBBoxesChart html={visualization.data?.html} />
+            ) : (
+              <HtmlVisualizationRenderer
+                html={visualization.data?.html}
+                heightPx={visualization.data?.heightPx}
+                onHtmlChange={onHtmlChange}
+              />
+            )}
           </div>
         )}
       </div>
@@ -517,7 +542,7 @@ const VisualizationCard: React.FC<{
           onClose={() => setShowCodeEditor(false)}
           html={chartDataToHtml(visualization) || '<!-- No HTML conversion available -->'}
           onSave={(newHtml: string) => {
-            if (onConvertToHtml) {
+            if (onConvertToHtml && visualization.vizId) {
               onConvertToHtml(visualization.vizId, newHtml);
             }
             setShowCodeEditor(false);
@@ -568,7 +593,9 @@ const VisualizerArea: React.FC<VisualizerAreaProps> = React.memo(({ visualizatio
              onClick={() => onVizClick && onVizClick(viz.vizId || viz.datasetId)}
              onReportLinkClick={handleReportLinkClick}
              onHtmlChange={onHtmlChange 
-               ? (newHtml: string) => onHtmlChange(viz.vizId, newHtml) 
+               ? (newHtml: string) => {
+                   if (viz.vizId) onHtmlChange(viz.vizId, newHtml);
+                 }
                : undefined
              }
              onConvertToHtml={onConvertToHtml}

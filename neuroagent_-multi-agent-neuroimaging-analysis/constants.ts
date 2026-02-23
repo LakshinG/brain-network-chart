@@ -4,6 +4,7 @@ import { AgentType } from './types';
 export const AGENT_COLORS = {
   [AgentType.USER]: 'bg-slate-700 border-slate-600',
   [AgentType.ORCHESTRATOR]: 'bg-fuchsia-900/50 border-fuchsia-700 text-fuchsia-200',
+  [AgentType.VISION]: 'bg-cyan-900/50 border-cyan-700 text-cyan-200',
   [AgentType.PLANNER]: 'bg-indigo-900/50 border-indigo-700 text-indigo-200',
   [AgentType.GENERAL_PLANNER]: 'bg-blue-900/50 border-blue-700 text-blue-200',
   [AgentType.NEURO_PLANNER]: 'bg-indigo-900/50 border-indigo-700 text-indigo-200',
@@ -37,13 +38,41 @@ export const PROMPTS = {
   ORCHESTRATOR_CLASSIFY: (query: string) => `
     You are an Orchestrator Agent for a neuroimaging analysis system.
     
-    Classify the User Query into one of two categories:
+    Classify the User Query into one of three categories:
     1. "RESEARCH": The user wants to analyze data, inspect columns, perform statistics, find correlations, compare groups, or search for literature.
     2. "GENERAL": The user wants to modify the visualization (e.g., change color, title, size), ask a general question unconnected to the dataset, or perform simple UI tasks.
+    3. "VISION": The user asks about understanding/interpreting image content (e.g., "what does this scan show", "describe this uploaded image", "is there lesion/atrophy/signs in the image").
 
     User Query: "${query}"
 
-    Return strictly a JSON object: { "category": "RESEARCH" } or { "category": "GENERAL" }
+    Return strictly a JSON object: { "category": "RESEARCH" } or { "category": "GENERAL" } or { "category": "VISION" }
+  `,
+
+  VISION_AGENT: (query: string) => `
+    You are a medical vision assistant. You are analyzing one uploaded image from the user.
+
+    User Query: "${query}"
+
+    Return STRICT JSON only:
+    {
+      "basic_medical_biological_info": "1-3 short sentences with likely modality/view, anatomical region/structure, and broad biological/pathological context (best-effort with uncertainty if needed).",
+      "findings": [
+        {
+          "finding": "Short finding sentence relevant to the query.",
+          "bbox": [x1, y1, x2, y2]
+        }
+      ]
+    }
+
+    Rules:
+    - basic_medical_biological_info is REQUIRED and must be non-empty.
+    - Return MULTIPLE findings when multiple notable regions are visible.
+    - Each finding MUST correspond to its own bbox.
+    - bbox must contain 4 numeric pixel coordinates in image space.
+    - bbox should tightly enclose that specific finding.
+    - keep x1 < x2 and y1 < y2.
+    - If no localized finding is visible, return "findings": [].
+    - Do not return markdown or extra keys.
   `,
 
   GENERAL_PLANNER: (query: string, toolDescriptions: string, feedback: string, chatHistory: string = '') => `
