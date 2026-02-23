@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool, SuspendedState, CorrelationResult, DatasetRow
 } from './types';
@@ -17,12 +17,14 @@ import {
   interpretToolResult,
   checkOllamaConnection, 
   getAvailableModels, 
+  getOllamaHost,
   getVisionModel,
+  setOllamaHost,
   setGeneralModel, 
   setNeuroModel,
   buildConversationContext
 } from './services/ollamaService';
-import { mcpClient } from './services/mcpService';
+import { getBackendBaseUrl, getMcpApiUrl, mcpClient, setMcpServiceUrls } from './services/mcpService';
 import { INTERNAL_TOOLS, executeInternalTool } from './services/internalTools';
 import { 
   editChartCodeWithRetry
@@ -35,6 +37,7 @@ import { X, Pencil, Database } from 'lucide-react';
 import { getMockVisualization, getAllMockVisualizations } from './mockVisualizations';
 
 const VISUALIZER_AGENT = AgentType.EXECUTOR;
+const WORKFLOW_ABORTED_ERROR = '__WORKFLOW_ABORTED__';
 
 interface UploadedImage {
   fileName: string;
@@ -43,6 +46,8 @@ interface UploadedImage {
   uploadedAt: number;
   vizId: string;
 }
+
+type WorkflowMode = 'DATASET' | 'IMAGE' | null;
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -67,6 +72,9 @@ const App: React.FC = () => {
   const [visualizerModel, setVisualizerModel] = useState<string>('qwen2.5-coder:32b');
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [activeImageId, setActiveImageId] = useState<number | null>(null);
+  const [activeWorkflowMode, setActiveWorkflowMode] = useState<WorkflowMode>(null);
+  const [ollamaUrlLabel, setOllamaUrlLabel] = useState(getOllamaHost());
+  const [mcpUrlLabel, setMcpUrlLabel] = useState(getBackendBaseUrl());
 
   const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://acmlab.github.io';
 
@@ -80,6 +88,25 @@ const App: React.FC = () => {
   const [isContextMemoryEnabled, setIsContextMemoryEnabled] = useState<boolean>(true);
 
   const [suspendedState, setSuspendedState] = useState<SuspendedState | null>(null);
+  const workflowAbortRef = useRef(false);
+  const workflowRunIdRef = useRef(0);
+
+  const startWorkflowRun = () => {
+    workflowAbortRef.current = false;
+    workflowRunIdRef.current += 1;
+    return workflowRunIdRef.current;
+  };
+
+  const throwIfWorkflowAborted = (runId: number) => {
+    if (workflowAbortRef.current || workflowRunIdRef.current !== runId) {
+      throw new Error(WORKFLOW_ABORTED_ERROR);
+    }
+  };
+
+  const isWorkflowAbortedError = (error: any) => {
+    const message = error?.message || String(error);
+    return message === WORKFLOW_ABORTED_ERROR;
+  };
 
   // Derived active dataset (merged)
   const activeDataset = useMemo(() => {
@@ -196,6 +223,76 @@ const App: React.FC = () => {
       // Switch selection to the new merged dataset
       setActiveDatasetIds([newId]);
       addMessage(AgentType.SYSTEM, `Merged ${activeDatasetIds.length} datasets into "${newDataset.name}" and added to file list.`);
+  };
+
+  const handleChangeOllamaUrl = async () => {
+    const current = getOllamaHost();
+    const input = window.prompt('Enter Ollama base URL', current);
+    if (input === null) return;
+    const next = input.trim();
+    if (!next || next === current) return;
+
+    try {
+      setOllamaHost(next);
+      setOllamaUrlLabel(getOllamaHost());
+      const connected = await checkOllamaConnection();
+      setOllamaConnected(connected);
+
+      if (connected) {
+        addMessage(AgentType.SYSTEM, `Updated Ollama URL: ${getOllamaHost()}`);
+        const models = await getAvailableModels();
+        setAvailableModels(models);
+      } else {
+        addMessage(AgentType.SYSTEM, `Updated Ollama URL to ${getOllamaHost()}, but connection failed.`);
+      }
+    } catch (error: any) {
+      addMessage(AgentType.SYSTEM, `Invalid Ollama URL: ${error?.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleChangeMcpUrl = async () => {
+    const currentBackend = getBackendBaseUrl();
+    const currentApi = getMcpApiUrl();
+
+    const backendInput = window.prompt('Enter MCP backend URL (used for /api/mcp/*)', currentBackend);
+    if (backendInput === null) return;
+    const apiInput = window.prompt('Enter MCP API URL (used for file upload/figures)', currentApi);
+    if (apiInput === null) return;
+
+    const nextBackend = backendInput.trim();
+    const nextApi = apiInput.trim();
+    if (!nextBackend || !nextApi) return;
+
+    try {
+      setMcpServiceUrls({ backendBaseUrl: nextBackend, mcpApiUrl: nextApi });
+      setMcpUrlLabel(getBackendBaseUrl());
+
+      await mcpClient.disconnect();
+      await mcpClient.connect();
+      setMcpConnected(mcpClient.isConnected);
+
+      if (mcpClient.isConnected) {
+        const tools = await mcpClient.listTools();
+        setMcpTools(tools);
+        addMessage(AgentType.SYSTEM, `Updated MCP URLs. Connected backend: ${getBackendBaseUrl()} (tools: ${tools.length}).`);
+      } else {
+        addMessage(AgentType.SYSTEM, `Updated MCP URLs to backend=${getBackendBaseUrl()} api=${getMcpApiUrl()}, but backend connection failed.`);
+      }
+    } catch (error: any) {
+      addMessage(AgentType.SYSTEM, `Invalid MCP URL: ${error?.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleAbortWorkflow = () => {
+    const hasWorkToAbort = isProcessing || !!suspendedState;
+    if (!hasWorkToAbort) return;
+
+    workflowAbortRef.current = true;
+    workflowRunIdRef.current += 1;
+    setSuspendedState(null);
+    setActiveWorkflowMode(null);
+    setIsProcessing(false);
+    addMessage(AgentType.SYSTEM, '⛔ Workflow aborted by user. Submit a new query to restart from the beginning.');
   };
 
   useEffect(() => {
@@ -770,6 +867,7 @@ const App: React.FC = () => {
 
   const executePlanSteps = async (
     plan: any, 
+    runId: number,
     startStepIndex: number = 0, 
     initialParamsOverride: any = null,
     currentData: any[],
@@ -778,6 +876,7 @@ const App: React.FC = () => {
     stepClarification?: string,
     originalUserQuery?: string
   ) => {
+    throwIfWorkflowAborted(runId);
     const resultsSummary: string[] = [];
     const stepIdToMessageId: Record<number, string> = {};
 
@@ -788,6 +887,7 @@ const App: React.FC = () => {
     let activeCols = [...currentColumns];
 
     for (let i = 0; i < stepsToRun.length; i++) {
+      throwIfWorkflowAborted(runId);
       const step = stepsToRun[i];
       const instruction = step.instruction;
       
@@ -813,6 +913,7 @@ const App: React.FC = () => {
 
       while (!stepSuccess && retryCount < MAX_RETRIES) {
         try {
+            throwIfWorkflowAborted(runId);
             // Pass clarification on ALL retries for the first step, not just the first attempt
             const context = (i === 0) ? stepClarification : undefined;
             
@@ -839,6 +940,7 @@ const App: React.FC = () => {
               executionError || "",
               step.tool  // pass planner's tool hint
             );
+            throwIfWorkflowAborted(runId);
             
             if (executorResult.needs_clarification) {
                const question = executorResult.clarification_question || "I need clarification on the parameters.";
@@ -879,6 +981,7 @@ const App: React.FC = () => {
             let attemptCols = [...stepStartCols];
             
             for (const call of toolCalls) {
+              throwIfWorkflowAborted(runId);
                 const toolName = call.tool;
                 const params = call.parameters;
                 const agentRole = getAgentForTool(toolName);
@@ -890,6 +993,7 @@ const App: React.FC = () => {
                 const { resultText, viz, updatedData, updatedColumns, rawResult } = await executeToolLogic(
                     toolName, params, attemptData, attemptCols
                 );
+                throwIfWorkflowAborted(runId);
                 
                 // Check for explicit failure signals
                 if (rawResult && rawResult.isError) {
@@ -926,6 +1030,7 @@ const App: React.FC = () => {
                     if (summaryRaw.curveData) summaryRaw.curveData = "payload";
                     
                     const interpreted = await interpretToolResult(instruction, toolName, summaryRaw);
+                    throwIfWorkflowAborted(runId);
                     finalStepResult = `${resultText}\n\nKey Finding: ${interpreted}`;
                 }
                 
@@ -974,6 +1079,9 @@ const App: React.FC = () => {
             resultsSummary.push(`Step ${step.step_id}: ${stepAggregateResult}`);
 
         } catch (e: any) {
+           if (isWorkflowAbortedError(e)) {
+             throw e;
+           }
            executionError = e.message;
            retryCount++;
            
@@ -992,6 +1100,7 @@ const App: React.FC = () => {
       }
 
       await new Promise(r => setTimeout(r, 1000));
+      throwIfWorkflowAborted(runId);
     }
 
     if (intent === 'RESEARCH') {
@@ -1006,6 +1115,7 @@ const App: React.FC = () => {
           addMessage(AgentType.RESEARCHER, "Analyzing findings and searching for external context...");
 
           while (researcherActive && loopCount < MAX_LOOPS) {
+              throwIfWorkflowAborted(runId);
               const context = resultsSummary.join('\n');
               const researchTools = allTools.filter(t => {
                 const name = t.name.toLowerCase();
@@ -1013,6 +1123,7 @@ const App: React.FC = () => {
               });
 
               const decision = await generateResearchInsights(context, researchTools);
+              throwIfWorkflowAborted(runId);
               
               if (decision.decision === 'TOOL_CALL') {
                 const instruction = decision.instruction;
@@ -1032,14 +1143,17 @@ const App: React.FC = () => {
                             AgentType.RESEARCHER, // Delegated by Researcher
                             activeServerFilename
                         );
+                          throwIfWorkflowAborted(runId);
                         const toolCalls = executorResult.toolCalls;
                         if (toolCalls && toolCalls.length > 0) {
                             for (const call of toolCalls) {
+                              throwIfWorkflowAborted(runId);
                                 const toolName = call.tool;
                                 const params = call.parameters;
                                 const { resultText, viz, updatedData, updatedColumns } = await executeToolLogic(
                                     toolName, params, activeData, activeCols
                                 );
+                              throwIfWorkflowAborted(runId);
                                 activeData = updatedData;
                                 activeCols = updatedColumns;
                                 if (viz) {
@@ -1071,6 +1185,7 @@ const App: React.FC = () => {
           addMessage(AgentType.PROPOSAL_REPORTER, "Synthesizing analysis and research into a final proposal...");
           
           const finalReport = await generateProposalReport(originalUserQuery || "Research Analysis", resultsSummary.join('\n'), aggregatedResearcherNotes);
+          throwIfWorkflowAborted(runId);
           
           const reporterMsg = addMessage(AgentType.PROPOSAL_REPORTER, "Final Proposal generated.");
           
@@ -1108,6 +1223,8 @@ const App: React.FC = () => {
         const validMessageIds = new Set(newMessages.map(m => m.id));
         setVisualizations(prev => prev.filter(v => !v.messageId || validMessageIds.has(v.messageId)));
         setIsProcessing(true);
+        setActiveWorkflowMode('DATASET');
+        const runId = startWorkflowRun();
         
         if (isPlanValidationEnabled) {
             addMessage(AgentType.PLAN_VALIDATOR, "Validating manually updated plan...");
@@ -1124,8 +1241,16 @@ const App: React.FC = () => {
             addMessage(AgentType.SYSTEM, "Validation disabled. Resuming execution with manual plan...");
         }
         
-        await executePlanSteps(newPlan, 0, null, [...activeDataset.data], [...activeDataset.columns], intent, undefined, msg.content); // Simplified passing query
-        setIsProcessing(false);
+        try {
+          await executePlanSteps(newPlan, runId, 0, null, [...activeDataset.data], [...activeDataset.columns], intent, undefined, msg.content); // Simplified passing query
+        } catch (error) {
+          if (!isWorkflowAbortedError(error)) {
+            addMessage(AgentType.SYSTEM, 'Error while restarting from edited step.');
+          }
+        } finally {
+          setActiveWorkflowMode(null);
+          setIsProcessing(false);
+        }
     }
   };
 
@@ -1221,6 +1346,7 @@ const App: React.FC = () => {
 
     addMessage(AgentType.USER, query);
     setIsProcessing(true);
+    const runId = startWorkflowRun();
 
     if (suspendedState) {
        if (!activeDataset) {
@@ -1229,13 +1355,17 @@ const App: React.FC = () => {
          return;
        }
        addMessage(AgentType.SYSTEM, "Received clarification. Resuming execution...");
+      setActiveWorkflowMode('DATASET');
        try {
            const { plan, stepIndex, data, columns, intent, originalUserQuery } = suspendedState;
            setSuspendedState(null);
-           await executePlanSteps(plan, stepIndex, null, data, columns, intent, query, originalUserQuery);
+           await executePlanSteps(plan, runId, stepIndex, null, data, columns, intent, query, originalUserQuery);
        } catch (error) {
+           if (!isWorkflowAbortedError(error)) {
            addMessage(AgentType.SYSTEM, "Error resuming execution.");
+           }
        } finally {
+           setActiveWorkflowMode(null);
            setIsProcessing(false);
        }
        return;
@@ -1244,6 +1374,7 @@ const App: React.FC = () => {
     try {
       if (!ollamaConnected) {
          const recheck = await checkOllamaConnection();
+        throwIfWorkflowAborted(runId);
          if (!recheck) {
             addMessage(AgentType.SYSTEM, "Error: Ollama is still unreachable.");
             setIsProcessing(false);
@@ -1254,6 +1385,7 @@ const App: React.FC = () => {
 
       addMessage(AgentType.ORCHESTRATOR, "Evaluating query intent...");
       const intent = await classifyQuery(query);
+      throwIfWorkflowAborted(runId);
       const hasImageContext = uploadedImages.length > 0;
       const effectiveIntent = (!activeDataset && hasImageContext && intent !== 'VISION') ? 'VISION' : intent;
 
@@ -1265,6 +1397,7 @@ const App: React.FC = () => {
       );
 
       if (effectiveIntent === 'VISION') {
+        setActiveWorkflowMode('IMAGE');
         const activeImage = activeImageId !== null
           ? uploadedImages.find(img => img.uploadedAt === activeImageId)
           : null;
@@ -1279,6 +1412,7 @@ const App: React.FC = () => {
 
         addMessage(AgentType.VISION, `Analyzing image: ${targetImage.fileName}`);
         const visionResult = await runVisionAgent(query, targetImage.imageBytesBase64);
+        throwIfWorkflowAborted(runId);
 
         const displayDataUrl = `data:${targetImage.mimeType || 'image/png'};base64,${targetImage.imageBytesBase64}`;
         const safeName = escapeHtml(targetImage.fileName);
@@ -1333,6 +1467,7 @@ const App: React.FC = () => {
       }
 
       const workflowIntent: 'RESEARCH' | 'GENERAL' = effectiveIntent === 'RESEARCH' ? 'RESEARCH' : 'GENERAL';
+      setActiveWorkflowMode('DATASET');
 
       const allTools = [...INTERNAL_TOOLS, ...mcpTools];
       let plan: any = { analysis_steps: [] };
@@ -1348,6 +1483,7 @@ const App: React.FC = () => {
         if (workflowIntent === 'RESEARCH') {
           addMessage(AgentType.NEURO_PLANNER, planningRetries === 0 ? "Formulating research analysis plan..." : "Refining research plan based on feedback...");
           plan = await generateNeuroPlan(query, activeDataset.columns.join(', '), allTools, currentFeedback, chatHistory);
+          throwIfWorkflowAborted(runId);
           // Guard: ensure analysis_steps is an array
           if (!Array.isArray(plan?.analysis_steps)) {
             console.warn('Planner returned invalid plan shape:', plan);
@@ -1357,6 +1493,7 @@ const App: React.FC = () => {
         } else {
           addMessage(AgentType.GENERAL_PLANNER, planningRetries === 0 ? "Formulating general task plan..." : "Refining general plan based on feedback...");
           plan = await generateGeneralPlan(query, allTools, currentFeedback, chatHistory);
+          throwIfWorkflowAborted(runId);
           // Guard: ensure analysis_steps is an array
           if (!Array.isArray(plan?.analysis_steps)) {
             console.warn('Planner returned invalid plan shape:', plan);
@@ -1368,6 +1505,7 @@ const App: React.FC = () => {
         if (isPlanValidationEnabled) {
           addMessage(AgentType.PLAN_VALIDATOR, "Verifying analysis steps...");
           const validation = await validatePlan(plan, allTools, activeDataset.columns);
+          throwIfWorkflowAborted(runId);
 
           if (validation.valid) {
             planIsValid = true;
@@ -1390,12 +1528,15 @@ const App: React.FC = () => {
         }
       }
 
-      await executePlanSteps(plan, 0, null, [...activeDataset.data], [...activeDataset.columns], workflowIntent, undefined, query);
+      await executePlanSteps(plan, runId, 0, null, [...activeDataset.data], [...activeDataset.columns], workflowIntent, undefined, query);
 
     } catch (error) {
-      console.error(error);
-      addMessage(AgentType.SYSTEM, "An error occurred during the workflow.");
+      if (!isWorkflowAbortedError(error)) {
+        console.error(error);
+        addMessage(AgentType.SYSTEM, "An error occurred during the workflow.");
+      }
     } finally {
+      setActiveWorkflowMode(null);
       setIsProcessing(false);
     }
   };
@@ -1465,10 +1606,24 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${ollamaConnected ? 'bg-green-500' : 'bg-red-500'}`} />
             <span className="text-xs text-slate-500">Ollama</span>
+            <button
+              onClick={handleChangeOllamaUrl}
+              className="px-1.5 py-0.5 text-[10px] rounded border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
+              title={`Change Ollama URL (current: ${ollamaUrlLabel})`}
+            >
+              URL
+            </button>
           </div>
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${mcpConnected ? 'bg-green-500' : 'bg-red-500'}`} />
             <span className="text-xs text-slate-500">MCP</span>
+            <button
+              onClick={handleChangeMcpUrl}
+              className="px-1.5 py-0.5 text-[10px] rounded border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
+              title={`Change MCP URLs (current backend: ${mcpUrlLabel})`}
+            >
+              URL
+            </button>
           </div>
         </div>
       </div>
@@ -1644,6 +1799,12 @@ const App: React.FC = () => {
         <ChatArea 
           messages={messages} 
           onSendMessage={handleUserQuery} 
+          onAbortWorkflow={handleAbortWorkflow}
+          canAbortWorkflow={isProcessing || !!suspendedState}
+          disableAddImage={isProcessing && activeWorkflowMode === 'DATASET'}
+          addImageDisabledHint={isProcessing && activeWorkflowMode === 'DATASET' ? 'Abort current workflow to begin an image query.' : undefined}
+          disableAddCsv={isProcessing && activeWorkflowMode === 'IMAGE'}
+          addCsvDisabledHint={isProcessing && activeWorkflowMode === 'IMAGE' ? 'Abort current workflow to begin a CSV query.' : undefined}
           onFileUpload={handleSingleFileUpload}
           onImageUpload={handleImageUpload}
           uploadedImages={uploadedImages.map(img => ({ fileName: img.fileName, uploadedAt: img.uploadedAt }))}

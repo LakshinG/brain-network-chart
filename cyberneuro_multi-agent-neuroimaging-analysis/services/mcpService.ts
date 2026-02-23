@@ -1,8 +1,52 @@
 
 import { McpTool, McpToolCallResult } from '../types';
-export const BACKEND_BASE_URL = 'http://localhost:8789';
-const BACKEND_WS_URL = BACKEND_BASE_URL.replace(/^http/, 'ws');
-export const MCP_API_URL = 'http://localhost:8010';
+
+const DEFAULT_BACKEND_BASE_URL = 'http://localhost:8789';
+const DEFAULT_MCP_API_URL = 'http://localhost:8010';
+const BACKEND_BASE_URL_STORAGE_KEY = 'neuroagent.backendBaseUrl';
+const MCP_API_URL_STORAGE_KEY = 'neuroagent.mcpApiUrl';
+
+const normalizeHttpUrl = (value: string) => value.trim().replace(/\/$/, '');
+const isValidHttpUrl = (value: string) => /^https?:\/\//i.test(value);
+
+const getStoredUrl = (key: string, fallback: string) => {
+  if (typeof window === 'undefined') return fallback;
+  const stored = window.localStorage.getItem(key);
+  return stored ? normalizeHttpUrl(stored) : fallback;
+};
+
+export let BACKEND_BASE_URL = getStoredUrl(BACKEND_BASE_URL_STORAGE_KEY, DEFAULT_BACKEND_BASE_URL);
+let BACKEND_WS_URL = BACKEND_BASE_URL.replace(/^http/, 'ws');
+export let MCP_API_URL = getStoredUrl(MCP_API_URL_STORAGE_KEY, DEFAULT_MCP_API_URL);
+
+export const getBackendBaseUrl = () => BACKEND_BASE_URL;
+export const getMcpApiUrl = () => MCP_API_URL;
+
+export const setMcpServiceUrls = (next: { backendBaseUrl?: string; mcpApiUrl?: string }) => {
+  if (next.backendBaseUrl !== undefined) {
+    const normalized = normalizeHttpUrl(next.backendBaseUrl);
+    if (!isValidHttpUrl(normalized)) {
+      throw new Error('MCP backend URL must start with http:// or https://');
+    }
+    BACKEND_BASE_URL = normalized;
+    BACKEND_WS_URL = BACKEND_BASE_URL.replace(/^http/, 'ws');
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(BACKEND_BASE_URL_STORAGE_KEY, BACKEND_BASE_URL);
+    }
+  }
+
+  if (next.mcpApiUrl !== undefined) {
+    const normalized = normalizeHttpUrl(next.mcpApiUrl);
+    if (!isValidHttpUrl(normalized)) {
+      throw new Error('MCP API URL must start with http:// or https://');
+    }
+    MCP_API_URL = normalized;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(MCP_API_URL_STORAGE_KEY, MCP_API_URL);
+    }
+  }
+};
+
 export class McpService {
   public isConnected = false;
   private ws: WebSocket | null = null;

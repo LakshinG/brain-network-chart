@@ -6,6 +6,12 @@ import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, 
 interface ChatAreaProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
+  onAbortWorkflow: () => void;
+  canAbortWorkflow: boolean;
+  disableAddCsv?: boolean;
+  disableAddImage?: boolean;
+  addCsvDisabledHint?: string;
+  addImageDisabledHint?: string;
   onFileUpload?: (file: File) => void;  // Optional for viz mode
   onLoadDemo?: () => void;               // Optional for viz mode
   isProcessing: boolean;
@@ -28,7 +34,7 @@ interface ChatAreaProps {
 }
 
 const ChatArea: React.FC<ChatAreaProps> = React.memo(({ 
-  messages, onSendMessage, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep,
+  messages, onSendMessage, onAbortWorkflow, canAbortWorkflow, disableAddCsv = false, disableAddImage = false, addCsvDisabledHint, addImageDisabledHint, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep,
   placeholder,
   datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload, onImageUpload,
   uploadedImages, activeImageId, onImageToggle, onImageRemove, onMergeDatasets, onSyncDataset
@@ -151,23 +157,25 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                       >
                         <PlayCircle className="w-3 h-3" /> Demo
                       </button>
-                      <label className="cursor-pointer text-xs flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded transition-colors shadow-sm">
+                      <label className={`text-xs flex items-center gap-1 px-2 py-1 rounded transition-colors shadow-sm ${disableAddCsv ? 'cursor-not-allowed bg-indigo-900 text-indigo-300' : 'cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white'}`} title={disableAddCsv ? (addCsvDisabledHint || 'Disabled during current workflow') : 'Add CSV'}>
                           <Plus className="w-3 h-3" /> Add CSV
                           <input 
                             type="file" 
                             multiple 
                             accept=".csv" 
                             className="hidden" 
+                            disabled={disableAddCsv}
                             onChange={(e) => onMultiFileUpload(e.target.files)} 
                           />
                       </label>
-                      <label className="cursor-pointer text-xs flex items-center gap-1 bg-cyan-600 hover:bg-cyan-500 text-white px-2 py-1 rounded transition-colors shadow-sm">
+                      <label className={`text-xs flex items-center gap-1 px-2 py-1 rounded transition-colors shadow-sm ${disableAddImage ? 'cursor-not-allowed bg-cyan-900 text-cyan-300' : 'cursor-pointer bg-cyan-600 hover:bg-cyan-500 text-white'}`} title={disableAddImage ? (addImageDisabledHint || 'Disabled during current workflow') : 'Add Image'}>
                           <ImagePlus className="w-3 h-3" /> Add Image
                           <input 
                             type="file" 
                             multiple 
                             accept="image/*" 
                             className="hidden" 
+                            disabled={disableAddImage}
                             onChange={(e) => {
                               onImageUpload(e.target.files);
                               e.currentTarget.value = '';
@@ -176,6 +184,12 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                       </label>
                    </div>
             </div>
+
+            {(disableAddCsv || disableAddImage) && (
+              <p className="mt-2 text-[11px] text-amber-300">
+                {disableAddImage ? (addImageDisabledHint || 'Abort current workflow to begin an image query.') : (addCsvDisabledHint || 'Abort current workflow to begin a CSV query.')}
+              </p>
+            )}
             
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto custom-scrollbar content-start">
@@ -246,19 +260,28 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
             </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="relative">
+        <form onSubmit={handleSubmit} className="flex items-center gap-2">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={isProcessing}
             placeholder={inputPlaceholder}
-            className="w-full bg-slate-800 text-slate-200 rounded-lg pl-4 pr-12 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 disabled:opacity-50 placeholder-slate-500"
+            className="flex-1 bg-slate-800 text-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 disabled:opacity-50 placeholder-slate-500"
           />
+          <button
+            type="button"
+            onClick={onAbortWorkflow}
+            disabled={!canAbortWorkflow}
+            className="p-2.5 bg-red-700 hover:bg-red-600 text-white rounded-md disabled:opacity-40 disabled:hover:bg-red-700 transition-colors"
+            title="Abort current workflow and restart from beginning"
+          >
+            Abort
+          </button>
           <button
             type="submit"
             disabled={!input.trim() || isProcessing}
-            className="absolute right-2 top-2 p-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors"
+            className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors"
           >
             <Send className="w-4 h-4" />
           </button>

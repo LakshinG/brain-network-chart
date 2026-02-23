@@ -4,13 +4,40 @@ import { McpTool, ChatMessage, AgentType } from "../types";
 import { PROMPTS } from "../constants";
 import { validatePlanColumns } from './internalTools';
 
-const OLLAMA_HOST = 'http://127.0.0.1:11434';
+const DEFAULT_OLLAMA_HOST = 'http://127.0.0.1:11434';
+const OLLAMA_HOST_STORAGE_KEY = 'neuroagent.ollamaHost';
+
+const normalizeHttpUrl = (value: string) => value.trim().replace(/\/$/, '');
+
+const getStoredOllamaHost = () => {
+  if (typeof window === 'undefined') return DEFAULT_OLLAMA_HOST;
+  const stored = window.localStorage.getItem(OLLAMA_HOST_STORAGE_KEY);
+  return stored ? normalizeHttpUrl(stored) : DEFAULT_OLLAMA_HOST;
+};
+
+let ollamaHost = getStoredOllamaHost();
 
 let generalModel = 'llama3'; 
 let neuroModel = 'llama3';
 const visionModel = 'dcarrascosa/medgemma-1.5-4b-it:F16';
 
-const ollama = new Ollama({ host: OLLAMA_HOST });
+let ollama = new Ollama({ host: ollamaHost });
+
+export const getOllamaHost = () => ollamaHost;
+
+export const setOllamaHost = (nextHost: string) => {
+  const normalized = normalizeHttpUrl(nextHost);
+  if (!/^https?:\/\//i.test(normalized)) {
+    throw new Error('Ollama URL must start with http:// or https://');
+  }
+
+  ollamaHost = normalized;
+  ollama = new Ollama({ host: ollamaHost });
+
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(OLLAMA_HOST_STORAGE_KEY, ollamaHost);
+  }
+};
 
 /**
  * Attempt to parse JSON from an LLM response, with repair heuristics
@@ -191,7 +218,7 @@ export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERA
   try {
     const response = await ollama.generate({
       model: generalModel,
-      keep_alive: -1,
+      keep_alive: 300,
       prompt: PROMPTS.ORCHESTRATOR_CLASSIFY(query),
       format: 'json',
       stream: false
@@ -216,7 +243,7 @@ export const runVisionAgent = async (query: string, imageBytesBase64: string): P
   try {
     const response: any = await ollama.generate({
       model: visionModel,
-      keep_alive: -1,
+      keep_alive: 300,
       prompt: PROMPTS.VISION_AGENT(query),
       images: [imageBytesBase64],
       format: 'json',
@@ -276,7 +303,7 @@ export const generateGeneralPlan = async (query: string, availableTools: McpTool
       prompt: PROMPTS.GENERAL_PLANNER(query, toolDescriptions, feedback || "", chatHistory),
       format: 'json',
       stream: false,
-      keep_alive: -1
+      keep_alive: 300
     });
     return robustJsonParse(response.response);
   } catch (e) {
@@ -309,7 +336,7 @@ export const generateNeuroPlan = async (query: string, dataContext: string, avai
       prompt: PROMPTS.NEURO_PLANNER(query, dataContext, allToolDescs, feedback || "", chatHistory),
       format: 'json',
       stream: false,
-      keep_alive: -1
+      keep_alive: 300
     });
     return robustJsonParse(response.response);
   } catch (e) {
@@ -339,7 +366,7 @@ export const validatePlan = async (plan: any, availableTools: McpTool[], existin
       prompt: PROMPTS.PLAN_VALIDATOR(JSON.stringify(toolManifest), JSON.stringify(plan, null, 2)),
       format: 'json',
       stream: false,
-      keep_alive: -1
+      keep_alive: 300
     });
     
     const result = robustJsonParse(response.response);
@@ -386,7 +413,7 @@ export const runExecutorAgent = async (
       prompt: PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || '', retryError, toolHint),
       format: 'json',
       stream: false,
-      keep_alive: -1
+      keep_alive: 300
     });
     return robustJsonParse(response.response);
   };
@@ -420,7 +447,7 @@ export const interpretToolResult = async (instruction: string, toolName: string,
       model: generalModel,
       prompt: PROMPTS.EXECUTOR_INTERPRET(instruction, toolName, outputStr),
       stream: false,
-      keep_alive: -1
+      keep_alive: 300
     });
     return stripThinkTags(response.response);
   } catch (e) {
@@ -436,7 +463,7 @@ export const generatePreprocessingMapping = async (column: string, values: strin
       model: neuroModel,
       prompt: PROMPTS.PREPROCESSOR_MAPPING(column, values),
       format: 'json',
-      keep_alive: -1,
+      keep_alive: 300,
       stream: false
     });
     return robustJsonParse(response.response);
@@ -456,7 +483,7 @@ export const generateResearchInsights = async (results: string, availableTools: 
       model: neuroModel,
       prompt: PROMPTS.RESEARCHER_INSIGHTS(results, toolsStr),
       format: 'json',
-      keep_alive: -1,
+      keep_alive: 300,
       stream: false
     });
     return robustJsonParse(response.response);
@@ -475,7 +502,7 @@ export const generateProposalReport = async (userQuery: string, analysisResults:
   try {
     const response = await ollama.generate({
       model: neuroModel,
-      keep_alive: -1,
+      keep_alive: 300,
       prompt: PROMPTS.PROPOSAL_REPORTER(userQuery, analysisResults, researcherNotes),
       stream: false
     });
