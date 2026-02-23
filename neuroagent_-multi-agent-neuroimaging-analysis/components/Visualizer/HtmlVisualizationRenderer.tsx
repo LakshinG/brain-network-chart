@@ -15,7 +15,7 @@ const EXPANDED_HEIGHT = 650;
 const DEFAULT_HTML = `<div class="visualizationCard">
   <div class="vc-header">
     <h3 class="vc-title">Sample Chart</h3>
-    <p class="vc-subtitle">Create a chart via chat</p>
+    <p class="vc-subtitle">Select a chart to edit it</p>
   </div>
   <div class="vc-body">
     <div id="chart"></div>
@@ -154,6 +154,16 @@ if (typeof Chart !== 'undefined') {
 <\/script>
 </head>
 <body>
+<script>
+// Global error handler — show script errors visually instead of blank chart
+window.onerror = function(msg, src, line, col, err) {
+  var body = document.querySelector('.vc-body') || document.body;
+  var div = document.createElement('div');
+  div.style.cssText = 'background:#1e1b4b;border:1px solid #ef4444;border-left:3px solid #ef4444;border-radius:0.5rem;padding:0.75rem 1rem;margin:0.75rem 0;color:#fca5a5;font-size:0.8rem;white-space:pre-wrap;font-family:monospace;';
+  div.textContent = '\\u26A0 Chart rendering error:\\n' + msg + (line ? ' (line ' + line + ')' : '');
+  body.appendChild(div);
+};
+<\/script>
 ${userHtml}
 <script>
 // Setup editable elements

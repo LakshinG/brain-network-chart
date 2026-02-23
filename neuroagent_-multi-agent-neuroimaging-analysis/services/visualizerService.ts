@@ -1,142 +1,148 @@
 // services/visualizerService.ts
-// Service to connect to the VisualizerAgent backend with streaming support
+// Service to edit Recharts chart code via LLM — works on exact JSX code strings
 
-export interface VisualizerEditRequest {
-  user_query: string;
-  html: string;
-  max_output_chars?: number;
-}
-
-export interface VisualizerEditResponse {
+export interface ChartEditResult {
   status: 'success' | 'error';
-  html?: string;
+  /** Modified Recharts JSX code string */
+  code?: string;
   message?: string;
-  warnings?: string[];
 }
 
 // Configuration
 const OLLAMA_URL = 'http://localhost:11434';
 
 // ============================================================================
-// MAIN FUNCTIONS
+// PROGRAMMATIC EDITS — handle common operations without LLM
 // ============================================================================
 
 /**
- * Edit visualization HTML with streaming progress updates
+ * Try to handle the user's edit request programmatically (no LLM needed).
+ * Returns the modified code string if handled, or null to fall through to LLM.
  */
-export async function editVisualizationHtmlWithStreaming(
+export function tryProgrammaticEdit(
+  query: string,
+  currentCode: string
+): string | null {
+  // Swap / switch / flip x and y axes
+  if (/(?:swap|switch|flip|exchange|reverse|invert)\s+(?:the\s+)?(?:x\s*(?:and|&|with|,)\s*y|y\s*(?:and|&|with|,)\s*x|axes)/i.test(query)) {
+    return swapAxesInCode(currentCode);
+  }
+  return null;
+}
+
+/**
+ * Programmatically swap x and y axes in Recharts JSX code.
+ * Swaps XAxis/YAxis label values the axis references.
+ */
+function swapAxesInCode(code: string): string | null {
+  // Extract current X and Y axis label values
+  const xLabelMatch = code.match(/<XAxis[\s\S]*?label=\{\{[^}]*value:\s*"([^"]*)"[^}]*\}\}/);
+  const yLabelMatch = code.match(/<YAxis[\s\S]*?label=\{\{[^}]*value:\s*"([^"]*)"[^}]*\}\}/);
+
+  if (!xLabelMatch || !yLabelMatch) return null;
+
+  const xLabel = xLabelMatch[1];
+  const yLabel = yLabelMatch[1];
+
+  // Replace label values by swapping them
+  let newCode = code;
+
+  // Swap X axis label to Y's value
+  newCode = newCode.replace(
+    /(<XAxis[\s\S]*?label=\{\{[^}]*value:\s*)"[^"]*"/,
+    `$1"${yLabel}"`
+  );
+
+  // Swap Y axis label to X's value
+  newCode = newCode.replace(
+    /(<YAxis[\s\S]*?label=\{\{[^}]*value:\s*)"[^"]*"/,
+    `$1"${xLabel}"`
+  );
+
+  // Swap name= attributes on XAxis/YAxis
+  const xNameMatch = code.match(/<XAxis[\s\S]*?name="([^"]*)"/);
+  const yNameMatch = code.match(/<YAxis[\s\S]*?name="([^"]*)"/);
+
+  if (xNameMatch && yNameMatch) {
+    const xName = xNameMatch[1];
+    const yName = yNameMatch[1];
+    newCode = newCode.replace(
+      /(<XAxis[\s\S]*?)name="[^"]*"/,
+      `$1name="${yName}"`
+    );
+    newCode = newCode.replace(
+      /(<YAxis[\s\S]*?)name="[^"]*"/,
+      `$1name="${xName}"`
+    );
+  }
+
+  // Swap "X vs Y" in title if present
+  const titleMatch = newCode.match(/(\w[\w\s]*?)\s+vs\s+(\w[\w\s]*?)(?=\s*[(<"])/);
+  if (titleMatch) {
+    const [fullMatch, a, b] = titleMatch;
+    newCode = newCode.replace(fullMatch, `${b.trim()} vs ${a.trim()}`);
+  }
+
+  // Also swap dataKey on the series data if they reference x/y
+  // Swap data references: data.series → needs x/y swap in data scope too
+  // This is handled by prepareDataScope at render time, so we swap
+  // the data reference: data[i].dataPoints with swapped x/y happens in scope
+
+  return newCode;
+}
+
+// ============================================================================
+// LLM-BASED CODE EDITING — sends exact Recharts JSX to LLM
+// ============================================================================
+
+const CODE_EDIT_SYSTEM_PROMPT = `You are a Recharts code editor. You receive the exact Recharts JSX code that renders a chart and the user's edit request. You must return the complete modified JSX code with ONLY the requested changes applied.
+
+CRITICAL RULES:
+1. Return ONLY the modified JSX code — no explanations, no markdown fences, no extra text before or after the code.
+2. Keep ALL existing code exactly as-is except for the specific change requested.
+3. Do NOT change data references (e.g. data.series[0].dataPoints, data.stats). These refer to runtime variables.
+4. Do NOT remove any existing components, props, or styling unless the user explicitly asks.
+5. The code is a single JSX expression (starts with <div> or similar). Keep it that way.
+6. Available Recharts components in scope: ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, Legend, ComposedChart, Line, ZAxis, Cell.
+7. The \`data\` variable is available in scope — it contains the chart's data. Do not define it.
+8. Use dark theme colors (slate backgrounds, light text) consistent with the existing code.
+9. For color changes, use hex codes like "#3b82f6".
+10. If you cannot fulfill the request, return the original code unchanged.
+
+IMPORTANT: The code references a \`data\` scope variable. Common data fields include:
+- data.title, data.xLabel, data.yLabel — chart text
+- data.displaySeries — array of {name, r, p, n, color, displayPoints, regressionLine}
+- data.xDomain, data.yDomain — axis domains
+- data.stats — bar chart data
+- data.chartData — line chart data
+- data.fill — primary fill color
+Do NOT redefine or shadow the \`data\` variable.
+
+EXAMPLES OF VALID CHANGES:
+- Changing title: replace {data.title} with a string like "New Title"
+- Changing fill colors on <Scatter>, <Bar>, <Line> components  
+- Changing axis label: replace {data.xLabel} with "New Label"
+- Adding a new <Line> or <Bar> component referencing existing data keys
+- Changing strokeWidth, fontSize, margin values
+- Adding or modifying <Legend>, <Tooltip>, grid properties
+
+Return ONLY the complete modified JSX code.`;
+
+/**
+ * Edit chart code via LLM with streaming progress.
+ */
+export async function editChartWithStreaming(
   userQuery: string,
-  currentHtml: string,
+  currentCode: string,
   model: string = 'qwen2.5-coder:32b',
   onProgress: (text: string, done: boolean) => void
-): Promise<VisualizerEditResponse> {
-  const SYSTEM_PROMPT = `You are a visualization expert. Create charts using Plotly.js or Chart.js.
-
-RULES:
-1. Output ONLY the HTML code - no explanations, no markdown
-2. Always wrap in: <div class="visualizationCard">...</div>
-3. Put <script> tags INSIDE the visualizationCard div
-4. Use window.PLOTLY_DARK for Plotly dark theme settings
-
-PLOTLY BAR CHART:
-<div class="visualizationCard">
-  <div class="vc-header">
-    <h3 class="vc-title">Brain Volumes</h3>
-  </div>
-  <div class="vc-body">
-    <div id="chart"></div>
-  </div>
-  <script>
-    Plotly.newPlot('chart', [{
-      x: ['Hippocampus', 'Amygdala', 'Thalamus'],
-      y: [2850, 1420, 3200],
-      type: 'bar',
-      marker: { color: ['#3b82f6', '#10b981', '#8b5cf6'] }
-    }], {
-      ...window.PLOTLY_DARK,
-      margin: { l: 50, r: 20, t: 20, b: 80 }
-    }, { responsive: true });
-  </script>
-</div>
-
-PLOTLY SCATTER:
-<div class="visualizationCard">
-  <div class="vc-header">
-    <h3 class="vc-title">Age vs MMSE</h3>
-  </div>
-  <div class="vc-body">
-    <div id="chart"></div>
-  </div>
-  <script>
-    Plotly.newPlot('chart', [{
-      x: [55, 60, 65, 70, 75, 80],
-      y: [29, 27, 24, 21, 18, 15],
-      mode: 'markers',
-      type: 'scatter',
-      marker: { color: '#3b82f6', size: 10 }
-    }], {
-      ...window.PLOTLY_DARK,
-      xaxis: { ...window.PLOTLY_DARK.xaxis, title: 'Age' },
-      yaxis: { ...window.PLOTLY_DARK.yaxis, title: 'MMSE' }
-    }, { responsive: true });
-  </script>
-</div>
-
-PLOTLY PIE:
-<div class="visualizationCard">
-  <div class="vc-header">
-    <h3 class="vc-title">Distribution</h3>
-  </div>
-  <div class="vc-body">
-    <div id="chart"></div>
-  </div>
-  <script>
-    Plotly.newPlot('chart', [{
-      values: [45, 35, 20],
-      labels: ['CN', 'MCI', 'AD'],
-      type: 'pie',
-      marker: { colors: ['#10b981', '#f59e0b', '#ef4444'] }
-    }], {
-      ...window.PLOTLY_DARK
-    }, { responsive: true });
-  </script>
-</div>
-
-CHART.JS BAR:
-<div class="visualizationCard">
-  <div class="vc-header">
-    <h3 class="vc-title">Volumes</h3>
-  </div>
-  <div class="vc-body">
-    <canvas id="chart"></canvas>
-  </div>
-  <script>
-    new Chart(document.getElementById('chart'), {
-      type: 'bar',
-      data: {
-        labels: ['A', 'B', 'C'],
-        datasets: [{
-          data: [10, 20, 30],
-          backgroundColor: ['#3b82f6', '#10b981', '#8b5cf6']
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } }
-      }
-    });
-  </script>
-</div>
-
-COLORS: #3b82f6 (blue), #10b981 (green), #f59e0b (amber), #ef4444 (red), #8b5cf6 (purple), #06b6d4 (cyan)
-
-Output ONLY the HTML.`;
-
+): Promise<ChartEditResult> {
   const userPrompt = `User request: ${userQuery}
 
-Current HTML:
-${currentHtml}`;
+Current Recharts JSX code:
+${currentCode}
+
+Return the complete modified JSX code with ONLY the requested change applied. Return ONLY the code.`;
 
   try {
     onProgress('🔄 Connecting to AI model...', false);
@@ -145,13 +151,13 @@ ${currentHtml}`;
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: model,
+        model,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: CODE_EDIT_SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },
         ],
         stream: true,
-        options: { num_predict: 15000 },
+        options: { num_predict: 8000 },
       }),
     });
 
@@ -180,10 +186,7 @@ ${currentHtml}`;
           const json = JSON.parse(line);
           if (json.message?.content) {
             fullResponse += json.message.content;
-            const displayText = fullResponse.length > 500 
-              ? '...' + fullResponse.slice(-500) 
-              : fullResponse;
-            onProgress(displayText, false);
+            onProgress(fullResponse.length > 300 ? '...' + fullResponse.slice(-300) : fullResponse, false);
           }
         } catch {
           // Skip non-JSON lines
@@ -193,13 +196,13 @@ ${currentHtml}`;
 
     onProgress('✅ Processing complete!', true);
 
-    const extractedHtml = extractVisualizationHtml(fullResponse);
-    
-    if (extractedHtml) {
-      return { status: 'success', html: extractedHtml };
-    } else {
-      return { status: 'error', message: 'Could not extract valid HTML from response' };
+    // Extract the JSX code from the response
+    const code = extractCodeFromResponse(fullResponse);
+    if (!code) {
+      return { status: 'error', message: 'Could not extract JSX code from LLM response' };
     }
+
+    return { status: 'success', code };
 
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -209,142 +212,128 @@ ${currentHtml}`;
 }
 
 /**
- * Non-streaming version
+ * Extract JSX code from LLM response.
+ * Handles: raw JSX, code fences, thinking tags, extra explanation text.
  */
-export async function editVisualizationHtml(
-  userQuery: string,
-  currentHtml: string,
-  model: string = 'qwen2.5-coder:32b'
-): Promise<VisualizerEditResponse> {
-  return new Promise((resolve) => {
-    editVisualizationHtmlWithStreaming(userQuery, currentHtml, model, () => {})
-      .then(resolve)
-      .catch(error => resolve({ status: 'error', message: error.message || 'Unknown error' }));
-  });
-}
+function extractCodeFromResponse(response: string): string | null {
+  // Strip thinking tags if present
+  let cleaned = response.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-/**
- * Alias for backwards compatibility
- */
-export async function editVisualizationHtmlDirect(
-  userQuery: string,
-  currentHtml: string,
-  model: string = 'qwen2.5-coder:32b'
-): Promise<VisualizerEditResponse> {
-  return editVisualizationHtml(userQuery, currentHtml, model);
-}
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-/**
- * Extract visualization HTML from LLM response
- */
-function extractVisualizationHtml(response: string): string | null {
-  // Try to find the visualizationCard div
-  const cardMatch = response.match(/<div\s+class=["']visualizationCard["'][^>]*>[\s\S]*?<\/div>\s*(?=<div\s+class=["']visualizationCard["']|$)/);
-  
-  if (cardMatch) {
-    let html = cardMatch[0];
-    const openDivs = (html.match(/<div/g) || []).length;
-    const closeDivs = (html.match(/<\/div>/g) || []).length;
-    if (openDivs > closeDivs) {
-      html += '</div>'.repeat(openDivs - closeDivs);
-    }
-    return html.trim();
+  // Try code fences first (```jsx, ```tsx, ```)
+  const fenceMatch = cleaned.match(/```(?:jsx|tsx|javascript|js)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) {
+    const code = fenceMatch[1].trim();
+    if (code.startsWith('<')) return code;
   }
 
-  // Fallback
-  const simpleMatch = response.match(/<div[^>]*class=["'][^"']*visualizationCard[^"']*["'][^>]*>[\s\S]+/);
-  if (simpleMatch) {
-    let html = simpleMatch[0];
-    const openDivs = (html.match(/<div/g) || []).length;
-    const closeDivs = (html.match(/<\/div>/g) || []).length;
-    if (openDivs > closeDivs) {
-      html += '</div>'.repeat(openDivs - closeDivs);
+  // Try to find the JSX directly: find the first <div or <ResponsiveContainer
+  const jsxStart = cleaned.search(/<(?:div|ResponsiveContainer)\b/);
+  if (jsxStart >= 0) {
+    // Find the matching closing tag
+    const jsxCode = cleaned.substring(jsxStart);
+
+    // Find the outermost tag
+    const tagMatch = jsxCode.match(/^<(\w+)/);
+    if (tagMatch) {
+      const tag = tagMatch[1];
+      // Count open/close tags to find the matching end
+      let depth = 0;
+      let i = 0;
+      while (i < jsxCode.length) {
+        if (jsxCode[i] === '<') {
+          // Self-closing tag
+          const selfClose = jsxCode.substring(i).match(/^<\w[^>]*\/>/);
+          if (selfClose) {
+            i += selfClose[0].length;
+            continue;
+          }
+          // Closing tag
+          const closeTag = jsxCode.substring(i).match(/^<\/(\w+)\s*>/);
+          if (closeTag) {
+            if (closeTag[1] === tag) depth--;
+            i += closeTag[0].length;
+            if (depth === 0) return jsxCode.substring(0, i);
+            continue;
+          }
+          // Opening tag
+          const openTag = jsxCode.substring(i).match(/^<(\w+)/);
+          if (openTag) {
+            if (openTag[1] === tag) depth++;
+            else {
+              // For other tags, just skip past >
+            }
+          }
+        }
+        i++;
+      }
+
+      // Fallback: return everything from the start tag
+      return jsxCode;
     }
-    return html.trim();
+  }
+
+  // Last resort: if the whole response looks like JSX
+  if (cleaned.startsWith('<')) {
+    return cleaned;
   }
 
   return null;
 }
 
 /**
- * Check if generated HTML is essentially empty or broken (no chart content)
+ * Edit chart code with retry on failure. Tries programmatic edit first, then LLM.
  */
-function isVisualizationHtmlEmpty(html: string): boolean {
-  const hasPlotly = /Plotly\.newPlot|Plotly\.react/i.test(html);
-  const hasChartJs = /new\s+Chart\s*\(/i.test(html);
-  const hasScript = /<script[\s>]/i.test(html);
-
-  // No script tag at all → definitely empty
-  if (!hasScript) return true;
-
-  // Has a script but no chart library call
-  if (!hasPlotly && !hasChartJs) {
-    // Check if script has any meaningful content
-    const scriptContent = html.match(/<script[^>]*>([\s\S]*?)<\/script>/i);
-    if (!scriptContent || scriptContent[1].trim().length < 50) return true;
-  }
-
-  return false;
-}
-
-/**
- * Edit visualization HTML with streaming and auto-retry on empty results.
- * Retries up to maxRetries times (default 2, so 3 total attempts).
- * On final failure, returns an error.
- */
-export async function editVisualizationHtmlWithRetry(
+export async function editChartCodeWithRetry(
   userQuery: string,
-  currentHtml: string,
+  currentCode: string,
   model: string,
   onProgress: (text: string, done: boolean) => void,
   maxRetries: number = 2
-): Promise<VisualizerEditResponse> {
+): Promise<ChartEditResult> {
+  // Try programmatic edit first
+  const programmatic = tryProgrammaticEdit(userQuery, currentCode);
+  if (programmatic) {
+    onProgress('✅ Applied edit.', true);
+    return { status: 'success', code: programmatic };
+  }
+
   const totalAttempts = maxRetries + 1;
-  let lastResult: VisualizerEditResponse = { status: 'error', message: 'Unknown error' };
+  let lastResult: ChartEditResult = { status: 'error', message: 'Unknown error' };
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     if (attempt > 1) {
-      onProgress(`⚠️ Empty/invalid visualization detected. Retrying... (attempt ${attempt}/${totalAttempts})`, false);
+      onProgress(`⚠️ Invalid response. Retrying... (attempt ${attempt}/${totalAttempts})`, false);
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    lastResult = await editVisualizationHtmlWithStreaming(
-      userQuery,
-      currentHtml,
-      model,
-      onProgress
-    );
+    lastResult = await editChartWithStreaming(userQuery, currentCode, model, onProgress);
 
-    // Network/connection errors → don't retry
     if (lastResult.status === 'error') {
       const msg = lastResult.message || '';
       if (msg.includes('Ollama error:') || msg.includes('No response stream')) {
         return lastResult;
       }
-      // Extraction errors (null HTML) → retry
-      console.warn(`[VisualizerAgent] Attempt ${attempt}/${totalAttempts}: extraction failed — ${msg}`);
+      console.warn(`[VisualizerAgent] Attempt ${attempt}/${totalAttempts}: ${msg}`);
       continue;
     }
 
-    // Success with valid (non-empty) HTML → done
-    if (lastResult.html && !isVisualizationHtmlEmpty(lastResult.html)) {
+    // Validate: code must start with a JSX tag
+    if (lastResult.code && lastResult.code.trim().startsWith('<')) {
       return lastResult;
     }
 
-    // Success but HTML is empty/broken → retry
-    console.warn(`[VisualizerAgent] Attempt ${attempt}/${totalAttempts}: produced empty visualization`);
+    console.warn(`[VisualizerAgent] Attempt ${attempt}/${totalAttempts}: response doesn't look like JSX`);
   }
 
-  // All retries exhausted
   return {
     status: 'error',
-    message: `Failed to generate a valid visualization after ${totalAttempts} attempts. The model produced empty or incomplete charts. Please try rephrasing your request or selecting a different model.`,
+    message: `Failed after ${totalAttempts} attempts. Please try rephrasing your request.`,
   };
 }
+
+// ============================================================================
+// UTILITY EXPORTS
+// ============================================================================
 
 /**
  * Get available Ollama models
@@ -358,62 +347,4 @@ export async function getAvailableModels(): Promise<string[]> {
   } catch {
     return [];
   }
-}
-
-/**
- * Check if a message should be routed to the visualizer
- */
-export function shouldRouteToVisualizer(message: string, hasVisualization: boolean): boolean {
-  const lowerMessage = message.toLowerCase();
-  
-  const strongVizKeywords = [
-    'create a chart', 'create chart', 'make a chart', 'make chart',
-    'create a plot', 'create plot', 'make a plot', 'make plot',
-    'create a graph', 'create graph', 'make a graph', 'make graph',
-    'scatter plot', 'bar chart', 'line chart', 'pie chart',
-    'histogram', 'heatmap', 'visualization',
-    'plotly', 'chart.js',
-    'create visualization', 'make visualization',
-    'draw a', 'plot a', 'graph showing', 'chart showing'
-  ];
-  
-  if (strongVizKeywords.some(keyword => lowerMessage.includes(keyword))) {
-    return true;
-  }
-  
-  if (hasVisualization) {
-    const editKeywords = [
-      'change the', 'update the', 'modify the', 'edit the',
-      'add a', 'remove the', 'make the', 'set the',
-      'title', 'color', 'label', 'legend',
-      'bigger', 'smaller', 'larger',
-      'insight', 'annotation'
-    ];
-    return editKeywords.some(keyword => lowerMessage.includes(keyword));
-  }
-  
-  return false;
-}
-
-/**
- * Alias for shouldRouteToVisualizer (backwards compatibility)
- */
-export function isVisualizationEditRequest(message: string, hasVisualization: boolean): boolean {
-  return shouldRouteToVisualizer(message, hasVisualization);
-}
-
-/**
- * Get the currently selected/active VIS_HTML visualization
- */
-export function getActiveHtmlVisualization(
-  visualizations: any[],
-  selectedId?: string
-): any | null {
-  if (selectedId) {
-    const selected = visualizations.find(v => v.messageId === selectedId);
-    if (selected && selected.type === 'VIS_HTML') {
-      return selected;
-    }
-  }
-  return visualizations.find(v => v.type === 'VIS_HTML') || null;
 }

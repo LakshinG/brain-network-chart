@@ -25,9 +25,9 @@ import {
 import { mcpClient } from './services/mcpService';
 import { INTERNAL_TOOLS, executeInternalTool } from './services/internalTools';
 import { 
-  editVisualizationHtmlWithRetry
+  editChartCodeWithRetry
 } from './services/visualizerService';
-import { chartDataToHtml } from './utils/chartToHtml';
+import { chartDataToCode, prepareDataScope } from './utils/chartToCode';
 import ChatArea from './components/Chat/ChatArea';
 import VisualizerArea from './components/Visualizer/VisualizerArea';
 import ResizablePanels from './components/ResizablePanels';
@@ -405,15 +405,6 @@ const App: React.FC = () => {
 
   const handleHtmlChange = (vizId: string, newHtml: string) => {
     updateVisualization(vizId, { html: newHtml });
-  };
-
-  // Convert a non-VIS_HTML chart to VIS_HTML using edited Plotly.js HTML from the code editor
-  const handleConvertToHtml = (vizId: string, newHtml: string) => {
-    setVisualizations(prev => prev.map(viz =>
-      viz.vizId === vizId 
-        ? { ...viz, type: VisualizationType.VIS_HTML, data: { html: newHtml, heightPx: 400 } }
-        : viz
-    ));
   };
 
   // Update chart config (axis labels, title, etc.) for inline property editing
@@ -1136,26 +1127,11 @@ const App: React.FC = () => {
     }
   };
 
-  // Helper: summarize chart data as a compact text description for the LLM
-  const describeChartData = (viz: ToolVisualization): string => {
-    const d = viz.data;
-    switch (viz.type) {
-      case VisualizationType.SCATTER_PLOT: {
-        const allPts = (d.series || []).flatMap((s: any) => s.dataPoints || []);
-        const seriesInfo = (d.series || []).map((s: any) => `${s.name}: r=${s.r?.toFixed(3)}, p=${s.p?.toFixed(4)}, n=${s.n}`).join('; ');
-        return `Scatter plot: X="${d.xCol}", Y="${d.yCol}"${d.groupCol ? `, grouped by "${d.groupCol}"` : ''}.\nSeries: [${seriesInfo}]\nTotal points: ${allPts.length}. Sample: ${JSON.stringify(allPts.slice(0, 8))}`;
-      }
-      case VisualizationType.BOX_PLOT:
-        return `Group comparison bar chart: value="${d.valueCol}", group="${d.groupCol}", p=${d.pVal}.\nGroup stats: ${JSON.stringify(d.stats)}`;
-      case VisualizationType.AGING_CURVE:
-        return `Aging/growth curve: phenotype="${d.phenotype}", elapsed=${d.elapsed_seconds?.toFixed(2)}s.\nCentile data length: ${d.data?.X?.length || 0}, overlay points: ${d.data?.age?.length || 0}`;
-      case VisualizationType.CLUSTERING_DASHBOARD:
-        return `Clustering dashboard: target="${d.targetCol}", nClusters=${d.nClusters}, silhouette=${d.silhouetteScore?.toFixed(3)}.\nPC points (first 8): ${JSON.stringify((d.pcPoints || []).slice(0, 8))}`;
-      case VisualizationType.STRATIFICATION_RESULT:
-        return `Stratification: target="${d.targetCol}", group="${d.groupCol}".\nGroups: ${JSON.stringify(d.newColumns)}`;
-      default:
-        return JSON.stringify(d).substring(0, 2000);
-    }
+  // Apply LLM-edited code to a visualization
+  const applyCodeEdit = (vizId: string, code: string) => {
+    setVisualizations(prev => prev.map(viz =>
+      viz.vizId === vizId ? { ...viz, customCode: code } : viz
+    ));
   };
 
   // Handle visualization editing
@@ -1165,157 +1141,60 @@ const App: React.FC = () => {
       ? visualizations.find(v => v.vizId === selectedVisualizationId)
       : null;
 
-    // ─── Case 1: Selected VIS_HTML → edit its HTML in place ───
-    if (selectedViz && selectedViz.type === VisualizationType.VIS_HTML) {
-      const selectedVizId = selectedViz.vizId;
-      if (!selectedVizId) {
-        addMessage(AgentType.SYSTEM, "Error: Selected visualization is missing an internal id.");
-        return false;
-      }
-
-      const currentHtml = selectedViz.data?.html;
-      if (!currentHtml) {
-        addMessage(AgentType.SYSTEM, "Error: Selected visualization has no HTML content.");
-        return false;
-      }
-
-      const editMsg = addMessage(VISUALIZER_AGENT, `🔄 Editing visualization...`, {
-        tool: 'visualizer_edit_html',
-        isVisualizerEdit: true,
-        targetVizId: selectedViz.vizId
-      });
-
-      const result = await editVisualizationHtmlWithRetry(
-        query,
-        currentHtml,
-        visualizerModel,
-        (progressText) => {
-          setMessages(prev => prev.map(m =>
-            m.id === editMsg.id ? { ...m, content: progressText } : m
-          ));
-        }
-      );
-
-      if (result.status === 'success' && result.html) {
-        updateVisualization(selectedVizId, {
-          html: result.html,
-          heightPx: selectedViz.data?.heightPx || 400
-        });
-
-        setMessages(prev => prev.map(m =>
-          m.id === editMsg.id
-            ? { ...m, content: `✅ Updated!\n\nApplied: "${query}"${result.warnings ? `\n\n⚠️ ${result.warnings.join(', ')}` : ''}` }
-            : m
-        ));
-
-        setHighlightedMessageId(selectedViz.messageId || null);
-        setTimeout(() => setHighlightedMessageId(null), 2000);
-        return true;
-      } else {
-        setMessages(prev => prev.map(m =>
-          m.id === editMsg.id ? { ...m, content: `❌ Failed: ${result.message}` } : m
-        ));
-        return false;
-      }
+    if (!selectedViz) {
+      addMessage(AgentType.SYSTEM, "Please select a chart from the visualization panel first, then describe the edit you'd like to make.");
+      return false;
     }
 
-    // ─── Case 2: Selected non-HTML chart → convert to Plotly HTML, then apply edit ───
-    if (selectedViz) {
-      // Generate actual Plotly.js HTML from the chart's data
-      const convertedHtml = chartDataToHtml(selectedViz);
-      const currentHtml = convertedHtml || `<div class="visualizationCard"><div class="vc-header"><h3 class="vc-title">${selectedViz.title}</h3></div><div class="vc-body"><div id="chart"></div></div></div>`;
-      const conversionPrompt = `Here is the EXACT current Plotly.js HTML of the chart titled "${selectedViz.title}". Modify it to satisfy the user's request. Only change what is needed, keep everything else intact.\n\nUser's change request: "${query}"`;
-
-      const editMsg = addMessage(VISUALIZER_AGENT, `🔄 Converting & editing "${selectedViz.title}"...`, {
-        tool: 'visualizer_edit_html',
-        isVisualizerEdit: true,
-        targetVizId: selectedViz.vizId
-      });
-
-      const result = await editVisualizationHtmlWithRetry(
-        conversionPrompt,
-        currentHtml,
-        visualizerModel,
-        (progressText) => {
-          setMessages(prev => prev.map(m =>
-            m.id === editMsg.id ? { ...m, content: progressText } : m
-          ));
-        }
-      );
-
-      if (result.status === 'success' && result.html) {
-        // Replace ONLY this specific chart with the new VIS_HTML version
-        setVisualizations(prev => prev.map(viz =>
-          viz.vizId === selectedViz.vizId
-            ? { ...viz, type: VisualizationType.VIS_HTML, data: { html: result.html, heightPx: 400 } }
-            : viz
-        ));
-
-        setMessages(prev => prev.map(m =>
-          m.id === editMsg.id
-            ? { ...m, content: `✅ Updated "${selectedViz.title}"!\n\nApplied: "${query}"` }
-            : m
-        ));
-
-        setHighlightedMessageId(selectedViz.messageId || null);
-        setTimeout(() => setHighlightedMessageId(null), 2000);
-        return true;
-      } else {
-        setMessages(prev => prev.map(m =>
-          m.id === editMsg.id ? { ...m, content: `❌ Failed: ${result.message}` } : m
-        ));
-        return false;
-      }
+    // Non-editable types
+    const nonEditable = [VisualizationType.DATA_TABLE, VisualizationType.MARKDOWN_REPORT,
+      VisualizationType.LITERATURE_LIST, VisualizationType.RESEARCH_REPORT, VisualizationType.NONE];
+    if (nonEditable.includes(selectedViz.type)) {
+      addMessage(AgentType.SYSTEM, `This visualization type (${selectedViz.type}) cannot be edited. Select a chart instead.`);
+      return false;
     }
 
-    // ─── Case 3: No viz selected → create from scratch ───
-    const starterHtml = `<div class="visualizationCard bg-slate-900 rounded-xl border border-slate-700 p-4">
-  <div class="vc-header">
-    <h3 class="vc-title text-slate-100 font-semibold text-base text-center">New Visualization</h3>
-    <p class="vc-subtitle text-slate-400 text-xs text-center mt-1">Created by VisualizerAgent</p>
-  </div>
-  <div class="vc-body mt-3">
-    <div id="chart" class="chart-container" style="width:100%;height:300px;"></div>
-  </div>
-</div>`;
-
-    const vizMsg = addMessage(VISUALIZER_AGENT, `🔄 Creating visualization...`, {
-      tool: 'visualizer_edit_html',
-      isVisualizerEdit: true
+    const editMsg = addMessage(VISUALIZER_AGENT, `🔄 Editing "${selectedViz.title}"...`, {
+      tool: 'visualizer_edit_chart',
+      isVisualizerEdit: true,
+      targetVizId: selectedViz.vizId
     });
 
-    const result = await editVisualizationHtmlWithRetry(
+    // Get the current code: either customCode (already edited) or generate from chart data
+    const currentCode = selectedViz.customCode || chartDataToCode(selectedViz.type, selectedViz.data, selectedViz.config);
+    if (!currentCode) {
+      setMessages(prev => prev.map(m =>
+        m.id === editMsg.id ? { ...m, content: `❌ Cannot generate code for this chart type (${selectedViz.type}).` } : m
+      ));
+      return false;
+    }
+
+    const result = await editChartCodeWithRetry(
       query,
-      starterHtml,
+      currentCode,
       visualizerModel,
       (progressText) => {
         setMessages(prev => prev.map(m =>
-          m.id === vizMsg.id ? { ...m, content: progressText } : m
+          m.id === editMsg.id ? { ...m, content: progressText } : m
         ));
       }
     );
 
-    if (result.status === 'success' && result.html) {
-      const newVizId = genVizId();
-      const newViz: ToolVisualization = {
-        type: VisualizationType.VIS_HTML,
-        title: 'Custom Visualization',
-        data: { html: result.html, heightPx: 400 },
-        vizId: newVizId,
-        messageId: vizMsg.id
-      };
-      addVisualization(newViz);
-      setSelectedVisualizationId(newVizId);
+    if (result.status === 'success' && result.code) {
+      applyCodeEdit(selectedViz.vizId!, result.code);
 
       setMessages(prev => prev.map(m =>
-        m.id === vizMsg.id
-          ? { ...m, content: `✅ Visualization created!\n\nApplied: "${query}"` }
+        m.id === editMsg.id
+          ? { ...m, content: `✅ Updated "${selectedViz.title}"!\n\nApplied: "${query}"` }
           : m
       ));
+
+      setHighlightedMessageId(selectedViz.messageId || null);
+      setTimeout(() => setHighlightedMessageId(null), 2000);
       return true;
     } else {
       setMessages(prev => prev.map(m =>
-        m.id === vizMsg.id ? { ...m, content: `❌ Failed: ${result.message}` } : m
+        m.id === editMsg.id ? { ...m, content: `❌ Failed: ${result.message}` } : m
       ));
       return false;
     }
@@ -1562,39 +1441,6 @@ const App: React.FC = () => {
         <div className="flex items-center gap-4">
           {/* <button
             onClick={() => {
-              const testViz: ToolVisualization = {
-                type: VisualizationType.VIS_HTML,
-                title: 'Editable Visualization',
-                data: {
-                  html: `<div class="visualizationCard bg-slate-900 rounded-xl border border-slate-700 p-4">
-  <div class="vc-header">
-    <h3 class="vc-title text-slate-100 font-semibold text-base text-center">Sample Chart</h3>
-    <p class="vc-subtitle text-slate-400 text-xs text-center mt-1">Edit me via chat!</p>
-  </div>
-  <div class="vc-body mt-3">
-    <div id="chart" class="chart-container" style="width:100%;height:280px;display:flex;align-items:center;justify-content:center;border:1px solid #334155;border-radius:0.5rem;color:#64748b;">
-      Chart placeholder - ask me to create a chart!
-    </div>
-  </div>
-</div>`,
-                  heightPx: 380
-                },
-                vizId: 'test-viz-' + Date.now(),
-                messageId: 'test-viz-msg-' + Date.now()
-              };
-              addVisualization(testViz);
-              setSelectedVisualizationId(testViz.vizId);
-              addMessage(AgentType.SYSTEM, "Created a test visualization. Click on it and type edit commands in the chat!");
-            }}
-            className="flex items-center gap-1 px-2 py-1 text-xs bg-emerald-900/50 hover:bg-emerald-800/50 border border-emerald-700 rounded text-emerald-300 transition-colors"
-            title="Create a test VIS_HTML visualization"
-          >
-            <Pencil className="w-3 h-3" />
-            + Test Viz
-          </button>
-
-          <button
-            onClick={() => {
               const mockVizs = getAllMockVisualizations();
               const ts = Date.now();
               let firstVizId = '';
@@ -1733,7 +1579,7 @@ const App: React.FC = () => {
           datasetName={activeDataset?.name} 
           onVizClick={handleVizClick}
           onHtmlChange={handleHtmlChange}
-          onConvertToHtml={handleConvertToHtml}
+          onCodeChange={applyCodeEdit}
           onConfigChange={handleConfigChange}
           activeDatasetIds={activeDatasetIds}
           selectedVisualizationId={selectedVisualizationId}
