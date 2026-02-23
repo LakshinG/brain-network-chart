@@ -2,3 +2,12 @@
 __pycache__/
 *.log
 .vscode/
+node_modules/
+dist/
+.venv/
+.vite/
+*.db
+*/*.db
+*/*/*.db
+*/*/*/*.db
+*/*/*/*/*.db
