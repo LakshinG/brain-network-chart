@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brain-network-chart"
+version = "0.1.0"
+description = "A Python project for brain-network-chart"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "Ziquan Wei", email = "ziquanw@email.unc.edu"}
+]
+dependencies = [
+    "pydantic-ai>=1.51.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "flake8>=4.0",
+    "mypy>=0.900"
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py38"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

@@ -6,8 +6,8 @@ import json, os
 from io import StringIO
 import logging
 
-
-UPLOAD_DIR = '/ram/USERS/ziquanw/brain-network-chart/uploaded_files'
+working_dir = os.getcwd()
+UPLOAD_DIR = f'{working_dir}/uploaded_files'
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(levelname)s] %(message)s')
 
 class StatsToolkit:

@@ -1,6 +1,9 @@
 # TLDR
-Run MCP server
-- `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`. `--port` needs to match the URL used in MCP client `cyberneuro_multi-agent-neuroimaging-analysis/backend/server.mjs`.
+- Install dependencies:
+  - `pip install uv`
+  - `uv sync`
+- Run MCP server:
+  - `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`. `--port` needs to match the URL used in MCP client `cyberneuro_multi-agent-neuroimaging-analysis/backend/server.mjs`.
 
 ## Features
 A Model Context Protocol (MCP) server for brain network analysis using advanced signal processing and graph-based hub detection. Includes tools for cross-frequency coupling (CFC) analysis, hub detection in single and multiple networks, and normative developmental trajectory analysis.

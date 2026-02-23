@@ -12,8 +12,9 @@
 
 ## MCP server
 - `cd mcp_server`
-- Install dependencies: `pip install -r requirements.txt`
-- `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`. `--port` needs to match the URL used in MCP client `cyberneuro_multi-agent-neuroimaging-analysis/backend/server.mjs`.
+- Install dependencies: See `mcp_server/README.md`
+- Change tmp file
+- `uvicorn mcp_server:http_app --host 0.0.0.0 --port 8010`. `--port` needs to match the URL used in MCP client `cyberneuro_multi-agent-neuroimaging-analysis/backend/server.mjs`
 
 ## Runtime Architecture
 
@@ -25,7 +26,10 @@ Node backend (`backend/server.mjs`)
 MCP Server(s)
 ```
 
-## Researcher robustness test
+## Example data
+See `uploaded_files`
+
+## Robustness test
 Details refer to `a2a-server/README_ROBUSTNESS_TEST.md`
 
 **Confusion Matrix**

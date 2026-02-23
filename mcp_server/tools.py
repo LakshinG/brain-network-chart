@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import Optional, Tuple, List
 from PIL import Image as _Image
 import io as _io
-
-_ROI_CSV = "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/roi_figs/code_name.csv"
-_ROI_FIG_DIR = "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/roi_figs"
-_LIFESPAN_MAT_DIR = "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat"
+working_dir = os.getcwd()
+UPLOAD_DIR = f'{working_dir}/uploaded_files'
+_ROI_CSV = f"{working_dir}/mcp_server/tool_utils/roi_figs/code_name.csv"
+_ROI_FIG_DIR = f"{working_dir}/mcp_server/tool_utils/roi_figs"
+_LIFESPAN_MAT_DIR = f"{working_dir}/mcp_server/tool_utils/curve_mat"
 _ROI_PALETTE = [
     "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#a855f7",
     "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16",
@@ -73,7 +74,6 @@ def composite_roi_images(roi_ids: List[str]) -> bytes:
     return buf.read()
 
 # Upload configuration
-UPLOAD_DIR = '/ram/USERS/ziquanw/brain-network-chart/uploaded_files'
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     print(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] [UPLOAD] Created upload directory: {UPLOAD_DIR}")
@@ -493,56 +493,56 @@ def load_mat_v73(path: str) -> dict:
 
 
 _FC_PHENOTYPES = {
-    "Global mean of FC": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_global_mean_of_FC.mat",
-    "Global system segregation of FC": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_global_system_segregation.mat",
-    "Visual system segregation (VIS)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_VIS_system_segregation.mat",
-    "Somatomotor system segregation (SM)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_SM_system_segregation.mat",
-    "Dorsal attention system segregation (DA)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_DA_system_segregation.mat",
-    "Ventral attention system segregation (VA)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_VA_system_segregation.mat",
-    "Limbic system segregation (LIM)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_LIM_system_segregation.mat",
-    "Frontoparietal system segregation (FP)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_FP_system_segregation.mat",
-    "Default mode system segregation (DM)": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/Data/Growth_curve_DM_system_segregation.mat",
-    "Grey matter volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/GMV.mat",
-    "White matter volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/WMV.mat",
-    "Subcortical grey matter volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/sGMV.mat",
-    "Ventricular volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/Ventricles.mat",
-    "Total cerebrum volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/TCV.mat",
-    "Total surface area": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/SA.mat",
-    "Mean cortical thickness": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/CT.mat",
-    # "Banks STS volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/bankssts.mat",
-    # "Caudal anterior cingulate volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/caudalanteriorcingulate.mat",
-    # "Caudal middle frontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/caudalmiddlefrontal.mat",
-    # "Cuneus volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/cuneus.mat",
-    # "Entorhinal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/entorhinal.mat",
-    # "Frontal pole volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/frontalpole.mat",
-    # "Fusiform volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/fusiform.mat",
-    # "Inferior parietal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/inferiorparietal.mat",
-    # "Inferior temporal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/inferiortemporal.mat",
-    # "Insula volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/insula.mat",
-    # "Isthmus cingulate volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/isthmuscingulate.mat",
-    # "Lateral occipital volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/lateraloccipital.mat",
-    # "Lateral orbitofrontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/lateralorbitofrontal.mat",
-    # "Lingual volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/lingual.mat",
-    # "Medial orbitofrontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/medialorbitofrontal.mat",
-    # "Middle temporal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/middletemporal.mat",
-    # "Paracentral volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/paracentral.mat",
-    # "Parahippocampal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/parahippocampal.mat",
-    # "Pars opercularis volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/parsopercularis.mat",
-    # "Pars orbitalis volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/parsorbitalis.mat",
-    # "Pars triangularis volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/parstriangularis.mat",
-    # "Pericalcarine volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/pericalcarine.mat",
-    # "Postcentral volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/postcentral.mat",
-    # "Posterior cingulate volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/posteriorcingulate.mat",
-    # "Precentral volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/precentral.mat",
-    # "Precuneus volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/precuneus.mat",
-    # "Rostral anterior cingulate volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/rostralanteriorcingulate.mat",
-    # "Rostral middle frontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/rostralmiddlefrontal.mat",
-    # "Superior frontal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/superiorfrontal.mat",
-    # "Superior parietal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/superiorparietal.mat",
-    # "Superior temporal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/superiortemporal.mat",
-    # "Supramarginal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/supramarginal.mat",
-    # "Temporal pole volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/temporalpole.mat",
-    # "Transverse temporal volume": "/ram/USERS/tao/code/gift/BrainChart-FC-Lifespan/brain_network_app/Lifespan/curve_mat/transversetemporal.mat",
+    "Global mean of FC": f"{working_dir}/mcp_server/tool_utils/curve_mat/Growth_curve_global_mean_of_FC.mat",
+    "Global system segregation of FC": f"{working_dir}/mcp_server/tool_utils/curve_mat/Growth_curve_global_system_segregation.mat",
+    "Visual system segregation (VIS)": f"{working_dir}/mcp_server/tool_utils/curve_mat/Growth_curve_VIS_system_segregation.mat",
+    "Somatomotor system segregation (SM)": f"{working_dir}/mcp_server/tool_utils/curve_mat/Growth_curve_SM_system_segregation.mat",
+    "Dorsal attention system segregation (DA)": f"{working_dir}/mcp_server/tool_utils/curve_mat/Growth_curve_DA_system_segregation.mat",
+    "Ventral attention system segregation (VA)": f"{working_dir}/mcp_server/tool_utils/curve_mat/Growth_curve_VA_system_segregation.mat",
+    "Limbic system segregation (LIM)": f"{working_dir}/mcp_server/tool_utils/curve_mat/Growth_curve_LIM_system_segregation.mat",
+    "Frontoparietal system segregation (FP)": f"{working_dir}/mcp_server/tool_utils/curve_mat/Growth_curve_FP_system_segregation.mat",
+    "Default mode system segregation (DM)": f"{working_dir}/mcp_server/tool_utils/curve_mat/Growth_curve_DM_system_segregation.mat",
+    "Grey matter volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/GMV.mat",
+    "White matter volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/WMV.mat",
+    "Subcortical grey matter volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/sGMV.mat",
+    "Ventricular volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/Ventricles.mat",
+    "Total cerebrum volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/TCV.mat",
+    "Total surface area": f"{working_dir}/mcp_server/tool_utils/curve_mat/SA.mat",
+    "Mean cortical thickness": f"{working_dir}/mcp_server/tool_utils/curve_mat/CT.mat",
+    # "Banks STS volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/bankssts.mat",
+    # "Caudal anterior cingulate volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/caudalanteriorcingulate.mat",
+    # "Caudal middle frontal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/caudalmiddlefrontal.mat",
+    # "Cuneus volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/cuneus.mat",
+    # "Entorhinal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/entorhinal.mat",
+    # "Frontal pole volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/frontalpole.mat",
+    # "Fusiform volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/fusiform.mat",
+    # "Inferior parietal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/inferiorparietal.mat",
+    # "Inferior temporal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/inferiortemporal.mat",
+    # "Insula volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/insula.mat",
+    # "Isthmus cingulate volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/isthmuscingulate.mat",
+    # "Lateral occipital volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/lateraloccipital.mat",
+    # "Lateral orbitofrontal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/lateralorbitofrontal.mat",
+    # "Lingual volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/lingual.mat",
+    # "Medial orbitofrontal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/medialorbitofrontal.mat",
+    # "Middle temporal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/middletemporal.mat",
+    # "Paracentral volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/paracentral.mat",
+    # "Parahippocampal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/parahippocampal.mat",
+    # "Pars opercularis volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/parsopercularis.mat",
+    # "Pars orbitalis volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/parsorbitalis.mat",
+    # "Pars triangularis volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/parstriangularis.mat",
+    # "Pericalcarine volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/pericalcarine.mat",
+    # "Postcentral volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/postcentral.mat",
+    # "Posterior cingulate volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/posteriorcingulate.mat",
+    # "Precentral volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/precentral.mat",
+    # "Precuneus volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/precuneus.mat",
+    # "Rostral anterior cingulate volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/rostralanteriorcingulate.mat",
+    # "Rostral middle frontal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/rostralmiddlefrontal.mat",
+    # "Superior frontal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/superiorfrontal.mat",
+    # "Superior parietal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/superiorparietal.mat",
+    # "Superior temporal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/superiortemporal.mat",
+    # "Supramarginal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/supramarginal.mat",
+    # "Temporal pole volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/temporalpole.mat",
+    # "Transverse temporal volume": f"{working_dir}/mcp_server/tool_utils/curve_mat/transversetemporal.mat",
 }
 
 
