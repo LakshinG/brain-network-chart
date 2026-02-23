@@ -1,7 +1,7 @@
 # from mcp.server.fastmcp import FastMCP
 from fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException
 import sys
 import io
@@ -12,6 +12,7 @@ import re
 import requests
 from urllib.parse import quote_plus
 import json
+import xml.etree.ElementTree as ET
 from requests.adapters import HTTPAdapter
 from threading import Lock
 from urllib3.util.retry import Retry
@@ -21,6 +22,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, Any, Callable
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
+from hub_detection import detect_hubs_from_graphs
 from tools import (
     tool_cfc_wavelet,
     tool_hub_detection,
@@ -32,6 +34,16 @@ from tools import (
     list_uploaded_files,
     delete_uploaded_file,
     get_file_path,
+    _read_table,
+    load_roi_list,
+    composite_roi_images,
+    load_bolds_full,
+    load_bolds_list,
+    load_adjs_from_path,
+    list_bold_paths,
+    load_adjs_from_npy,
+    list_available_phenotypes,
+    _ROI_FIG_DIR,
 )
 
 from fastapi import FastAPI
@@ -75,30 +87,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Rate limiting configuration
-RATE_LIMIT_REQUESTS = 10
+RATE_LIMIT_REQUESTS = 5
 RATE_LIMIT_WINDOW = 60  # seconds
 client_requests: Dict[str, list] = {}
 
 # Request/Response schemas
 class CFCWaveletRequest(BaseModel):
     data_path: str = Field(default="data_example_BOLD.csv", description="Path to BOLD CSV file")
-    window_size: int = Field(default=100, ge=10, le=1000, description="Sliding window size")
-    step_size: int = Field(default=90, ge=1, le=500, description="Window step size")
-    padding: bool = Field(default=True, description="Pad edges")
-    ratio: float = Field(default=0.8, ge=0.0, le=1.0, description="Edge weight threshold ratio")
-    wavelets_num: int = Field(default=10, ge=1, le=100, description="Number of wavelets")
-    beta: float = Field(default=1.0, ge=0.0, description="Regularization parameter")
-    gamma: float = Field(default=0.005, ge=0.0, description="Convergence threshold")
-    max_iter: int = Field(default=100, ge=1, le=1000, description="Max iterations")
-    node_select: int = Field(default=10, ge=1, description="Node selection parameter")
     
-    @field_validator('step_size')
-    @classmethod
-    def validate_step_size(cls, v, info: ValidationInfo):
-        if info.data.get('window_size') and v > info.data['window_size']:
-            raise ValueError('step_size must be <= window_size')
-        return v
-
 class HubDetectionRequest(BaseModel):
     data_path: str = Field(default="data_example_BOLD.csv", description="Path to BOLD CSV file")
     window_size: int = Field(default=100, ge=10, le=1000, description="Sliding window size")
@@ -139,10 +135,10 @@ class InternetSearchRequest(BaseModel):
     from_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter from publication year (inclusive)")
     to_year: Optional[int] = Field(None, ge=1800, le=2100, description="Filter to publication year (inclusive)")
 
-class OpenNeuroSearchRequest(BaseModel):
-    query: str = Field(..., min_length=1, description="Keyword query for OpenNeuro datasets")
-    max_results: int = Field(default=10, ge=1, le=50, description="Number of datasets to return (1-50)")
-    modality: Optional[str] = Field(None, description="Optional modality filter (best-effort; depends on OpenNeuro schema)")
+# class OpenNeuroSearchRequest(BaseModel):
+#     query: str = Field(..., min_length=1, description="Keyword query for OpenNeuro datasets")
+#     max_results: int = Field(default=10, ge=1, le=50, description="Number of datasets to return (1-50)")
+#     modality: Optional[str] = Field(None, description="Optional modality filter (best-effort; depends on OpenNeuro schema)")
 
 class ResponseSchema(BaseModel):
     status: str
@@ -366,6 +362,52 @@ def _pubmed_esummary(pmids: List[str]) -> Dict[str, Any]:
     if len(parts) == 1:
         return parts[0]
     return _merge_pubmed_esummary_json(parts)
+
+
+def _pubmed_efetch_abstracts(pmids: List[str]) -> Dict[str, str]:
+    """Fetch PubMed abstracts via efetch XML. Returns mapping: PMID -> abstract text."""
+    if not pmids:
+        return {}
+
+    url = f"{PUBMED_EUTILS_BASE}/efetch.fcgi"
+    params = {
+        "db": "pubmed",
+        "id": ",".join(pmids),
+        "retmode": "xml",
+        **_pubmed_base_params(),
+    }
+
+    r = _pubmed_session().get(url, params=params, timeout=40)
+    r.raise_for_status()
+
+    abstracts_by_pmid: Dict[str, str] = {}
+    root = ET.fromstring(r.text)
+
+    for article in root.findall(".//PubmedArticle"):
+        pmid_node = article.find(".//MedlineCitation/PMID")
+        if pmid_node is None or not (pmid_node.text or "").strip():
+            continue
+        pmid = (pmid_node.text or "").strip()
+
+        abstract_text_nodes = article.findall(".//MedlineCitation/Article/Abstract/AbstractText")
+        if not abstract_text_nodes:
+            abstracts_by_pmid[pmid] = ""
+            continue
+
+        parts: List[str] = []
+        for node in abstract_text_nodes:
+            section_text = "".join(node.itertext()).strip()
+            if not section_text:
+                continue
+            label = (node.attrib.get("Label") or "").strip()
+            if label:
+                parts.append(f"{label}: {section_text}")
+            else:
+                parts.append(section_text)
+
+        abstracts_by_pmid[pmid] = "\n".join(parts).strip()
+
+    return abstracts_by_pmid
 
 from urllib.parse import quote_plus
 
@@ -956,45 +998,29 @@ def _openneuro_try_queries(
 
 
 @server.tool(name="run_cfc_wavelet_analysis")
-@validate_parameters(
-    window_size={'min': 10, 'max': 1000, 'type': int},
-    step_size={'min': 30, 'max': 500, 'type': int},
-    ratio={'min': 0.0, 'max': 1.0, 'type': float},
-    wavelets_num={'min': 1, 'max': 100, 'type': int},
-    max_iter={'min': 1, 'max': 1000, 'type': int},
-)
 def run_cfc_wavelet_analysis(
     data_path: str = "data_example_BOLD.csv",
-    window_size: int = 100,
-    step_size: int = 90,
-    padding: bool = True,
-    ratio: float = 0.8,
-    wavelets_num: int = 10,
-    beta: float = 1.0,
-    gamma: float = 0.005,
-    max_iter: int = 100,
-    node_select: int = 10,
 ) -> dict:
     """
     Run cross-frequency coupling (CFC) analysis using harmonic wavelets.
     
     Parameters:
     - data_path: Path to BOLD CSV file
-    - window_size: Sliding window size (10-1000)
-    - step_size: Window step size (30-500)
-    - padding: Pad edges
-    - ratio: Edge weight threshold ratio (0.0-1.0)
-    - wavelets_num: Number of wavelets (1-100)
-    - beta: Regularization parameter
-    - gamma: Convergence threshold
-    - max_iter: Maximum iterations (1-1000)
-    - node_select: Node selection parameter
     
     Returns: Analysis results with console output and progress tracking
     """
     progress_log = []
     captured_output = []
     start_time = time.time()
+    window_size: int = 30
+    step_size: int = 15
+    padding: bool = True
+    ratio: float = 0.8
+    wavelets_num: int = 10
+    beta: float = 1.0
+    gamma: float = 0.1
+    max_iter: int = 100
+    node_select: int = 10
     
     try:
         logger.info(f"CFC analysis started: window_size={window_size}, step_size={step_size}")
@@ -1006,8 +1032,8 @@ def run_cfc_wavelet_analysis(
             raise FileNotFoundError(f"Data file not found: {e}")
         
         # Validate parameters consistency
-        if step_size > window_size:
-            raise ValueError(f"step_size ({step_size}) must be <= window_size ({window_size})")
+        # if step_size > window_size:
+        #     raise ValueError(f"step_size ({step_size}) must be <= window_size ({window_size})")
         
         config = AnalysisConfig()
         config.ratio = ratio
@@ -1017,22 +1043,52 @@ def run_cfc_wavelet_analysis(
         config.max_iter = max_iter
         config.node_select = node_select
         
-        progress_log.append({"step": "loading", "message": f"Loading BOLD data from {data_path}"})
-        with capture_output() as output:
-            bolds = load_bolds_from_csv(data_path, window_size=window_size, step_size=step_size, padding=padding)
-        captured_output.append(output.getvalue())
-        num_windows = bolds.shape[0]
-        progress_log.append({"step": "loaded", "message": f"Data loaded successfully: shape {list(bolds.shape)}"})
-        
-        progress_log.append({"step": "analyzing", "message": f"Starting CFC analysis on {num_windows} windows"})
-        with capture_output() as output:
-            cfcs = tool_cfc_wavelet(bolds, config)
-        captured_output.append(output.getvalue())
-        progress_log.append({"step": "analyzed", "message": f"CFC analysis complete: {len(cfcs)} windows processed"})
-        
+        import numpy as _np
+        all_cfcs = []
+        files_cfcs = []
+        files_avg_cfcs = []
+
+        is_npy = data_path.lower().endswith('.npy')
+
+        if is_npy:
+            fname = os.path.basename(data_path)
+            progress_log.append({"step": "loading", "message": f"Loading .npy adj from {fname}"})
+            adjs = load_adjs_from_npy(data_path)   # (num_windows, nodes, nodes)
+            progress_log.append({"step": "loaded", "message": f"Loaded {len(adjs)} adj matrices"})
+            progress_log.append({"step": "analyzing", "message": f"Running CFC on {fname}"})
+            with capture_output() as output:
+                cfcs_for_file = tool_cfc_wavelet(adjs, config, precomputed_fcs=True)
+            captured_output.append(output.getvalue())
+            all_cfcs = list(cfcs_for_file)
+            file_avg = _np.mean([_np.array(c) for c in cfcs_for_file], axis=0).tolist() if cfcs_for_file else []
+            files_cfcs = [{"filename": fname, "cfcs": cfcs_for_file}]
+            files_avg_cfcs = [{"filename": fname, "avg_cfc": file_avg}]
+        else:
+            progress_log.append({"step": "loading", "message": f"Resolving paths from {data_path}"})
+            file_paths = list_bold_paths(data_path)
+            progress_log.append({"step": "loaded", "message": f"Found {len(file_paths)} file(s)"})
+            for fname, fpath in file_paths:
+                progress_log.append({"step": "analyzing", "message": f"Running CFC on {fname}"})
+                with capture_output() as output:
+                    b = load_bolds_from_csv(fpath, window_size=window_size, step_size=step_size, padding=padding)
+                    cfcs_for_file = tool_cfc_wavelet(b, config)
+                captured_output.append(output.getvalue())
+                all_cfcs.extend(cfcs_for_file)
+                file_avg = _np.mean([_np.array(c) for c in cfcs_for_file], axis=0).tolist() if cfcs_for_file else []
+                files_cfcs.append({"filename": fname, "cfcs": cfcs_for_file})
+                files_avg_cfcs.append({"filename": fname, "avg_cfc": file_avg})
+
+        num_windows = len(all_cfcs)
+        if all_cfcs:
+            avg_cfc = _np.mean([_np.array(c) for c in all_cfcs], axis=0).tolist()
+        else:
+            avg_cfc = []
+
+        progress_log.append({"step": "analyzed", "message": f"CFC analysis complete: {num_windows} total windows"})
+
         elapsed = time.time() - start_time
         logger.info(f"CFC analysis completed in {elapsed:.2f}s")
-        
+
         return {
             "status": "success",
             "timestamp": datetime.now().isoformat(),
@@ -1040,11 +1096,14 @@ def run_cfc_wavelet_analysis(
             "window_size": window_size,
             "step_size": step_size,
             "num_windows": num_windows,
-            "shape": list(bolds.shape),
-            "cfcs_count": len(cfcs),
+            "cfcs_count": num_windows,
+            "cfcs": all_cfcs,
+            "avg_cfc": avg_cfc,
+            "files_cfcs": files_cfcs,
+            "files_avg_cfcs": files_avg_cfcs if len(files_cfcs) > 1 else [],
             "elapsed_seconds": elapsed,
             "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "progress": progress_log,
         }
     except FileNotFoundError as e:
         logger.error(f"File error: {str(e)}")
@@ -1055,7 +1114,7 @@ def run_cfc_wavelet_analysis(
             "error_type": "FileNotFoundError",
             "error": str(e),
             "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "progress": progress_log,
         }
     except ValueError as e:
         logger.error(f"Validation error: {str(e)}")
@@ -1066,7 +1125,7 @@ def run_cfc_wavelet_analysis(
             "error_type": "ValueError",
             "error": str(e),
             "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "progress": progress_log,
         }
     except Exception as e:
         logger.error(f"Unexpected error in CFC analysis: {str(e)}", exc_info=True)
@@ -1077,23 +1136,18 @@ def run_cfc_wavelet_analysis(
             "error_type": type(e).__name__,
             "error": str(e),
             "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "progress": progress_log,
         }
 
 
 @server.tool(name="run_hub_detection")
 @validate_parameters(
-    window_size={'min': 10, 'max': 1000, 'type': int},
-    step_size={'min': 1, 'max': 500, 'type': int},
     ratio={'min': 0.0, 'max': 1.0, 'type': float},
     k={'min': 1, 'max': 100, 'type': int},
     hub_num={'min': 1, 'type': int},
 )
 def run_hub_detection(
     data_path: str = "data_example_BOLD.csv",
-    window_size: int = 100,
-    step_size: int = 90,
-    padding: bool = True,
     ratio: float = 0.8,
     k: int = 2,
     hub_num: int = 10,
@@ -1101,66 +1155,50 @@ def run_hub_detection(
 ) -> dict:
     """
     Detect hub nodes in brain networks using graph analysis.
-    
+
     Parameters:
     - data_path: Path to BOLD CSV file
-    - window_size: Sliding window size (10-1000)
-    - step_size: Window step size (1-500)
-    - padding: Pad edges
     - ratio: Edge weight threshold (0.0-1.0)
     - k: Embedding dimension (1-100)
     - hub_num: Number of hubs to identify
     - use_group: Use group/Grassmann manifold method for multiple networks
-    
+
     Returns: Hub detection results with embeddings and selection matrices
     """
     progress_log = []
     captured_output = []
     start_time = time.time()
-    
+
     try:
-        logger.info(f"Hub detection started: window_size={window_size}, step_size={step_size}, k={k}, hub_num={hub_num}")
-        
-        # Resolve file path (checks uploaded_files first, then local directory)
-        try:
-            data_path = get_file_path(data_path)
-        except FileNotFoundError as e:
-            raise FileNotFoundError(f"Data file not found: {e}")
-        
-        # Validate parameters
-        if step_size > window_size:
-            raise ValueError(f"step_size ({step_size}) must be <= window_size ({window_size})")
-        
+        logger.info(f"Hub detection started: k={k}, hub_num={hub_num}")
+
         config = AnalysisConfig()
         config.ratio = ratio
         config.k = k
         config.hub_num = hub_num
         config.use_group = use_group
-        
+
         progress_log.append({"step": "loading", "message": f"Loading BOLD data from {data_path}"})
         with capture_output() as output:
-            bolds = load_bolds_from_csv(data_path, window_size=window_size, step_size=step_size, padding=padding)
+            adjs = load_adjs_from_path(data_path, config)
         captured_output.append(output.getvalue())
-        num_windows = bolds.shape[0]
-        progress_log.append({"step": "loaded", "message": f"Data loaded successfully: shape {list(bolds.shape)}"})
-        
-        progress_log.append({"step": "detecting", "message": f"Starting hub detection on {num_windows} windows (k={k}, hub_num={hub_num}, use_group={use_group})"})
+        num_windows = len(adjs)
+        progress_log.append({"step": "loaded", "message": f"Data loaded: {num_windows} adjacency matrices"})
+
+        progress_log.append({"step": "detecting", "message": f"Starting hub detection (k={k}, hub_num={hub_num}, use_group={use_group})"})
         with capture_output() as output:
-            results = tool_hub_detection(bolds, config)
+            results = detect_hubs_from_graphs(adjs, k=k, hub=hub_num, use_group=use_group)
         captured_output.append(output.getvalue())
         progress_log.append({"step": "detected", "message": f"Hub detection complete"})
-        
+
         elapsed = time.time() - start_time
         logger.info(f"Hub detection completed in {elapsed:.2f}s")
-        
+
         return {
             "status": "success",
             "timestamp": datetime.now().isoformat(),
             "data_path": data_path,
-            "window_size": window_size,
-            "step_size": step_size,
             "num_windows": num_windows,
-            "shape": list(bolds.shape),
             "k": k,
             "hub_num": hub_num,
             "use_group": use_group,
@@ -1168,6 +1206,7 @@ def run_hub_detection(
             "elapsed_seconds": elapsed,
             "console_output": "\n".join(captured_output),
             "progress": progress_log,
+            "roi_list": load_roi_list(),
         }
     except FileNotFoundError as e:
         logger.error(f"File error: {str(e)}")
@@ -1204,71 +1243,81 @@ def run_hub_detection(
         }
 
 
-@server.tool(name="get_growth_curve")
-def get_growth_curve(phenotype: str) -> dict:
-    """
-    Load growth curve data for a given phenotype.
+# @server.tool(name="get_aging_curve")
+# def get_aging_curve(phenotype: str) -> dict:
+#     """
+#     Load large scale aging curve database for a given phenotype.
     
-    Available phenotypes:
-    - Global mean of FC
-    - Global system segregation
-    - Visual system segregation (VIS)
-    - Somatomotor system segregation (SM)
-    - Dorsal attention system segregation (DA)
-    - Ventral attention system segregation (VA)
-    - Limbic system segregation (LIM)
-    - Frontoparietal system segregation (FP)
-    - Default mode system segregation (DM)
-    """
-    start_time = time.time()
-    try:
-        logger.info(f"Loading growth curve for phenotype: {phenotype}")
-        data = load_curve_data(phenotype)
-        elapsed = time.time() - start_time
-        logger.info(f"Growth curve loaded in {elapsed:.2f}s")
+#     Available phenotypes:
+#     - Global mean of FC
+#     - Global system segregation
+#     - Visual system segregation (VIS)
+#     - Somatomotor system segregation (SM)
+#     - Dorsal attention system segregation (DA)
+#     - Ventral attention system segregation (VA)
+#     - Limbic system segregation (LIM)
+#     - Frontoparietal system segregation (FP)
+#     - Default mode system segregation (DM)
+#     """
+#     start_time = time.time()
+#     try:
+#         logger.info(f"Loading growth curve for phenotype: {phenotype}")
+#         data = load_curve_data(phenotype)
+#         elapsed = time.time() - start_time
+#         logger.info(f"Growth curve loaded in {elapsed:.2f}s")
         
-        return {
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "phenotype": phenotype,
-            "data": data,
-            "elapsed_seconds": elapsed,
-        }
-    except KeyError as e:
-        logger.error(f"Phenotype not found: {phenotype}")
-        return {
-            "status": "error",
-            "timestamp": datetime.now().isoformat(),
-            "error_type": "KeyError",
-            "phenotype": phenotype,
-            "error": f"Phenotype not found: {phenotype}. Available: Global mean of FC, Visual system segregation (VIS), etc.",
-        }
-    except Exception as e:
-        logger.error(f"Error loading growth curve: {str(e)}", exc_info=True)
-        return {
-            "status": "error",
-            "timestamp": datetime.now().isoformat(),
-            "error_type": type(e).__name__,
-            "phenotype": phenotype,
-            "error": str(e),
-        }
+#         return {
+#             "status": "success",
+#             "timestamp": datetime.now().isoformat(),
+#             "phenotype": phenotype,
+#             "data": data,
+#             "elapsed_seconds": elapsed,
+#         }
+#     except KeyError as e:
+#         logger.error(f"Phenotype not found: {phenotype}")
+#         return {
+#             "status": "error",
+#             "timestamp": datetime.now().isoformat(),
+#             "error_type": "KeyError",
+#             "phenotype": phenotype,
+#             "error": f"Phenotype not found: {phenotype}. Available: Global mean of FC, Visual system segregation (VIS), etc.",
+#         }
+#     except Exception as e:
+#         logger.error(f"Error loading growth curve: {str(e)}", exc_info=True)
+#         return {
+#             "status": "error",
+#             "timestamp": datetime.now().isoformat(),
+#             "error_type": type(e).__name__,
+#             "phenotype": phenotype,
+#             "error": str(e),
+#         }
 
 
-@server.tool(name="run_normative_analysis")
-def run_normative_analysis(
+@server.tool(name="overlay_with_aging_curve", description=f"""
+To see the difference with normative model, overlay the uploaded data on top of aging curves for a specific phenotype.
+
+Parameters:
+- x_phenotype: Name of phenotype in the database to compare, select from {list_available_phenotypes()}
+- y_path: Path to uploaded CSV file with overlay data
+- age_col: Column name for age values in the CSV file
+- val_col: Column name for overlay values in the CSV file
+
+Returns: Combined x and y data for normative modeling
+             """)
+def overlay_with_aging_curve(
     x_phenotype: str,
     y_path: str,
     age_col: str,
     val_col: str,
 ) -> dict:
-    """
-    Run normative analysis comparing growth curves with overlay data.
+    f"""
+    To see the difference with normative model, overlay the uploaded data on top of aging curves for a specific phenotype.
     
     Parameters:
-    - x_phenotype: Name of phenotype/growth curve
-    - y_path: Path to CSV file with overlay data
-    - age_col: Column name for age values
-    - val_col: Column name for metric values
+    - x_phenotype: Name of phenotype in the database to compare, select from {list_available_phenotypes()}
+    - y_path: Path to uploaded CSV file with overlay data
+    - age_col: Column name for age values in the CSV file
+    - val_col: Column name for overlay values in the CSV file
     
     Returns: Combined x and y data for normative modeling
     """
@@ -1353,7 +1402,7 @@ def search_pubmed(
         "elapsed_seconds": ...,
         "query_used": "...",
         "count_returned": N,
-        "results": [ {pmid,title,journal,year,authors,url}, ... ],
+                "results": [ {pmid,title,journal,year,authors,abstract,url}, ... ],
         "suggested_keywords": [...],
         "progress": [...]
       }
@@ -1376,26 +1425,30 @@ def search_pubmed(
 
         if not pmids:
             elapsed = time.time() - start_time
-            return {
-                "status": "success",
-                "timestamp": datetime.now().isoformat(),
-                "elapsed_seconds": elapsed,
-                "query_used": q,
-                "count_returned": 0,
-                "results": [],
-                "suggested_keywords": [],
-                "console_output": "",
-                "progress": progress_log + [{"step": "done", "message": "No results found"}],
-            }
+            return {"results": []}
+            # return {
+            #     "status": "success",
+            #     "timestamp": datetime.now().isoformat(),
+            #     "elapsed_seconds": elapsed,
+            #     "query_used": q,
+            #     "count_returned": 0,
+            #     "results": [],
+            #     "suggested_keywords": [],
+            #     "console_output": "",
+            #     "progress": progress_log + [{"step": "done", "message": "No results found"}],
+            # }
 
         progress_log.append({"step": "summarize", "message": f"Fetching summaries for {len(pmids)} PMIDs"})
         summary = _pubmed_esummary(pmids)
+
+        progress_log.append({"step": "abstracts", "message": f"Fetching abstracts for {len(pmids)} PMIDs"})
+        abstracts_by_pmid = _pubmed_efetch_abstracts(pmids)
 
         result_obj = summary.get("result", {})
         uids = result_obj.get("uids", []) or []
 
         rows: List[Dict[str, Any]] = []
-        for uid in uids:
+        for uid in uids[:10]:
             item = result_obj.get(uid, {}) or {}
             title = (item.get("title") or "").strip()
             journal = (item.get("fulljournalname") or item.get("source") or "").strip()
@@ -1406,6 +1459,7 @@ def search_pubmed(
             # authors often a list of dicts with "name"
             authors_list = item.get("authors", []) or []
             authors = ", ".join([a.get("name", "").strip() for a in authors_list if a.get("name")])[:300]
+            abstract = abstracts_by_pmid.get(str(uid), "")
 
             row = {
                 "pmid": str(uid),
@@ -1413,6 +1467,7 @@ def search_pubmed(
                 "journal": journal,
                 "year": year,
                 "authors": authors,
+                "abstract": abstract,
                 "url": f"https://pubmed.ncbi.nlm.nih.gov/{uid}/",
             }
 
@@ -1433,15 +1488,15 @@ def search_pubmed(
 
         elapsed = time.time() - start_time
         return {
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "elapsed_seconds": elapsed,
-            "query_used": q,
-            "count_returned": len(rows),
+            # "status": "success",
+            # "timestamp": datetime.now().isoformat(),
+            # "elapsed_seconds": elapsed,
+            # "query_used": q,
+            # "count_returned": len(rows),
             "results": rows,
-            "suggested_keywords": suggested_keywords,
-            "console_output": "\n".join(captured_output),
-            "progress": progress_log,
+            # "suggested_keywords": suggested_keywords,
+            # "console_output": "\n".join(captured_output),
+            # "progress": progress_log,
         }
 
     except ValueError as e:
@@ -1717,118 +1772,118 @@ def internet_search(
             "progress": progress_log,
         }
 
-@server.tool(name="openneuro_search")
-def openneuro_search(query: str, max_results: int = 10, modality: str | None = None) -> dict:
-    """
-    OpenNeuro keyword search via GraphQL.
+# @server.tool(name="openneuro_search")
+# def openneuro_search(query: str, max_results: int = 10, modality: str | None = None) -> dict:
+#     """
+#     OpenNeuro keyword search via GraphQL.
 
-    Practical reality (as of your tests):
-    - OpenNeuro root field `search(q, ...)` exists but returns `null` for all queries, so we
-      always prefer `datasets(...)` listing + client-side scoring/filtering.
-    - `DatasetFilter` does not support keyword filtering.
-    - Dataset `name` alone is often not descriptive (e.g., ds000005), so we at least match on id+name.
-      (You can later expand to metadata/latestSnapshot once you introspect those subfields.)
-    """
-    progress_log: list[dict] = []
-    start_time = time.time()
+#     Practical reality (as of your tests):
+#     - OpenNeuro root field `search(q, ...)` exists but returns `null` for all queries, so we
+#       always prefer `datasets(...)` listing + client-side scoring/filtering.
+#     - `DatasetFilter` does not support keyword filtering.
+#     - Dataset `name` alone is often not descriptive (e.g., ds000005), so we at least match on id+name.
+#       (You can later expand to metadata/latestSnapshot once you introspect those subfields.)
+#     """
+#     progress_log: list[dict] = []
+#     start_time = time.time()
 
-    try:
-        q = (query or "").strip()
-        if not q:
-            raise ValueError("query must be a non-empty string")
+#     try:
+#         q = (query or "").strip()
+#         if not q:
+#             raise ValueError("query must be a non-empty string")
 
-        max_results = int(max_results)
-        if max_results < 1:
-            raise ValueError("max_results must be >= 1")
+#         max_results = int(max_results)
+#         if max_results < 1:
+#             raise ValueError("max_results must be >= 1")
 
-        # Keep tokens short and safe; cap to avoid overly strict matching
-        tokens = [t.lower() for t in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9\-]{2,}", q)]
-        tokens = tokens[:8]
+#         # Keep tokens short and safe; cap to avoid overly strict matching
+#         tokens = [t.lower() for t in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9\-]{2,}", q)]
+#         tokens = tokens[:8]
 
-        progress_log.append({"step": "search", "message": f"Searching OpenNeuro for: {q!r} (tokens={tokens})"})
-        if modality:
-            progress_log.append({"step": "filter", "message": f"Modality filter requested: {modality!r} (best-effort)"})
+#         progress_log.append({"step": "search", "message": f"Searching OpenNeuro for: {q!r} (tokens={tokens})"})
+#         if modality:
+#             progress_log.append({"step": "filter", "message": f"Modality filter requested: {modality!r} (best-effort)"})
 
-        field_name, arg_name, arg_names, return_type_ref, available_fields = _openneuro_pick_dataset_field()
-        if not field_name:
-            raise ValueError(
-                "OpenNeuro GraphQL schema did not expose a datasets/search field. "
-                f"Available root fields: {available_fields}"
-            )
+#         field_name, arg_name, arg_names, return_type_ref, available_fields = _openneuro_pick_dataset_field()
+#         if not field_name:
+#             raise ValueError(
+#                 "OpenNeuro GraphQL schema did not expose a datasets/search field. "
+#                 f"Available root fields: {available_fields}"
+#             )
 
-        progress_log.append({"step": "schema", "message": f"Picked OpenNeuro field={field_name!r} arg={arg_name!r}"})
+#         progress_log.append({"step": "schema", "message": f"Picked OpenNeuro field={field_name!r} arg={arg_name!r}"})
 
-        # IMPORTANT: OpenNeuro's `search()` resolver returns null in practice (verified).
-        # Force fallback to `datasets()` listing.
-        if field_name == "search":
-            progress_log.append({"step": "schema", "message": "OpenNeuro search() returns null; switching to datasets() listing"})
-            field_name = "datasets"
-            arg_name = None
+#         # IMPORTANT: OpenNeuro's `search()` resolver returns null in practice (verified).
+#         # Force fallback to `datasets()` listing.
+#         if field_name == "search":
+#             progress_log.append({"step": "schema", "message": "OpenNeuro search() returns null; switching to datasets() listing"})
+#             field_name = "datasets"
+#             arg_name = None
 
-        # If server-side search arg exists, we'd use it directly; but we force datasets listing above.
-        fetch_limit = min(200, max_results * 50)  # over-fetch to make local scoring meaningful
+#         # If server-side search arg exists, we'd use it directly; but we force datasets listing above.
+#         fetch_limit = min(200, max_results * 50)  # over-fetch to make local scoring meaningful
 
-        raw_rows = _openneuro_try_queries(
-            field_name=field_name,
-            arg_name=arg_name,              # should be None after the override
-            arg_names=arg_names,
-            return_type_ref=return_type_ref,
-            query_text=q,
-            max_results=fetch_limit,
-            progress_log=progress_log,
-            modality=modality,
-        )
+#         raw_rows = _openneuro_try_queries(
+#             field_name=field_name,
+#             arg_name=arg_name,              # should be None after the override
+#             arg_names=arg_names,
+#             return_type_ref=return_type_ref,
+#             query_text=q,
+#             max_results=fetch_limit,
+#             progress_log=progress_log,
+#             modality=modality,
+#         )
 
-        def haystack(row: Dict[str, Any]) -> str:
-            return " ".join([
-                (row.get("dataset_id") or ""),
-                (row.get("name") or ""),
-            ]).lower()
+#         def haystack(row: Dict[str, Any]) -> str:
+#             return " ".join([
+#                 (row.get("dataset_id") or ""),
+#                 (row.get("name") or ""),
+#             ]).lower()
 
-        def score(row: Dict[str, Any]) -> int:
-            h = haystack(row)
-            # score by # matched tokens (ANY-token match, not ALL)
-            return sum(1 for t in tokens if t in h)
+#         def score(row: Dict[str, Any]) -> int:
+#             h = haystack(row)
+#             # score by # matched tokens (ANY-token match, not ALL)
+#             return sum(1 for t in tokens if t in h)
 
-        # Local ranking/filtering
-        if tokens:
-            # Keep only rows that match at least one token
-            filtered = [r for r in raw_rows if score(r) > 0]
-            # Sort by score descending, then by name to stabilize ordering
-            filtered.sort(key=lambda r: (score(r), (r.get("name") or "").lower()), reverse=True)
-        else:
-            filtered = list(raw_rows)
+#         # Local ranking/filtering
+#         if tokens:
+#             # Keep only rows that match at least one token
+#             filtered = [r for r in raw_rows if score(r) > 0]
+#             # Sort by score descending, then by name to stabilize ordering
+#             filtered.sort(key=lambda r: (score(r), (r.get("name") or "").lower()), reverse=True)
+#         else:
+#             filtered = list(raw_rows)
 
-        results: List[Dict[str, Any]] = filtered[:max_results]
+#         results: List[Dict[str, Any]] = filtered[:max_results]
 
-        elapsed = time.time() - start_time
-        progress_log.append({"step": "done", "message": f"Returning {len(results)} datasets"})
+#         elapsed = time.time() - start_time
+#         progress_log.append({"step": "done", "message": f"Returning {len(results)} datasets"})
 
-        return {
-            "status": "success",
-            "timestamp": datetime.now().isoformat(),
-            "elapsed_seconds": elapsed,
-            "query_used": q,
-            "count_returned": len(results),
-            "results": results,
-            "console_output": "",
-            "progress": progress_log,
-        }
+#         return {
+#             "status": "success",
+#             "timestamp": datetime.now().isoformat(),
+#             "elapsed_seconds": elapsed,
+#             "query_used": q,
+#             "count_returned": len(results),
+#             "results": results,
+#             "console_output": "",
+#             "progress": progress_log,
+#         }
 
-    except Exception as e:
-        elapsed = time.time() - start_time
-        logger.error(f"OpenNeuro search error: {str(e)}", exc_info=True)
-        progress_log.append({"step": "error", "message": str(e)})
-        return {
-            "status": "error",
-            "timestamp": datetime.now().isoformat(),
-            "elapsed_seconds": elapsed,
-            "error_type": type(e).__name__,
-            "error": str(e),
-            "results": [],
-            "console_output": "",
-            "progress": progress_log,
-        }
+#     except Exception as e:
+#         elapsed = time.time() - start_time
+#         logger.error(f"OpenNeuro search error: {str(e)}", exc_info=True)
+#         progress_log.append({"step": "error", "message": str(e)})
+#         return {
+#             "status": "error",
+#             "timestamp": datetime.now().isoformat(),
+#             "elapsed_seconds": elapsed,
+#             "error_type": type(e).__name__,
+#             "error": str(e),
+#             "results": [],
+#             "console_output": "",
+#             "progress": progress_log,
+#         }
 
 @server.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
@@ -1851,69 +1906,77 @@ async def api_schema(request: Request) -> JSONResponse:
         "endpoints": {
             "run_cfc_wavelet_analysis": {
                 "method": "POST",
-                "description": "Cross-frequency coupling wavelet analysis",
-                "parameters": CFCWaveletRequest.model_json_schema(),
+                "description": """Run cross-frequency coupling (CFC) analysis using harmonic wavelets on brain functional connectivity data.
+Computes sliding-window adjacency matrices and applies wavelet decomposition to extract CFC features.
+Parameters:
+- data_path: Path to input data. """,
+                "parameters":  """Run cross-frequency coupling (CFC) analysis using harmonic wavelets on brain functional connectivity data.
+Computes sliding-window adjacency matrices and applies wavelet decomposition to extract CFC features.
+Parameters:
+- data_path: Path to input data. """,
             },
             "run_hub_detection": {
                 "method": "POST",
-                "description": "Hub detection in brain networks",
-                "parameters": HubDetectionRequest.model_json_schema(),
+                "description": """Detect hub nodes in brain functional connectivity networks using graph embedding analysis.
+Supports both single-subject and group-level Grassmann manifold methods.
+Parameters:
+- data_path: Path to input data.
+- ratio: Edge weight threshold for binarizing adjacency matrix (default: 0.8, range: 0.0-1.0)
+- k: Graph embedding dimension (default: 2, range: 1-100)
+- hub_num: Number of hub nodes to identify (default: 10)
+- use_group: Use group/Grassmann manifold method combining multiple networks (default: False)""",
+                "parameters": """Detect hub nodes in brain functional connectivity networks using graph embedding analysis.
+Supports both single-subject and group-level Grassmann manifold methods.
+Parameters:
+- data_path: Path to input data.
+- ratio: Edge weight threshold for binarizing adjacency matrix (default: 0.8, range: 0.0-1.0)
+- k: Graph embedding dimension (default: 2, range: 1-100)
+- hub_num: Number of hub nodes to identify (default: 10)
+- use_group: Use group/Grassmann manifold method combining multiple networks (default: False)""",
             },
-            "get_growth_curve": {
+            # "get_aging_curve": {
+            #     "method": "POST",
+            #     "description": "Load age-vs-phenotype data from the database of a large-scale lifespan cohort",
+            #     "parameters": {
+            #         "phenotype": {"type": "string", "description": "One phenotype name among all available phenotypes."}
+            #     }
+            # },
+            "overlay_with_aging_curve": {
                 "method": "POST",
-                "description": "Load growth curve data",
-                "parameters": {
-                    "phenotype": {"type": "string", "description": "Phenotype name"}
-                }
-            },
-            "run_normative_analysis": {
-                "method": "POST",
-                "description": "Normative developmental trajectory analysis",
-                "parameters": NormativeAnalysisRequest.model_json_schema(),
+                "description": f"""To see the difference with normative model, overlay the uploaded data on top of aging curves for a specific phenotype.
+Parameters:
+- x_phenotype: Name of phenotype in the database to compare, select from {list_available_phenotypes()}
+- y_path: Path to uploaded CSV file with overlay data
+- age_col: Column name for age values in the CSV file
+- val_col: Column name for overlay values in the CSV file
+Returns: Combined x and y data for normative modeling""",
+                "parameters": f"""To see the difference with normative model, overlay the uploaded data on top of aging curves for a specific phenotype.
+Parameters:
+- x_phenotype: Name of phenotype in the database to compare, select from {list_available_phenotypes()}
+- y_path: Path to uploaded CSV file with overlay data
+- age_col: Column name for age values in the CSV file
+- val_col: Column name for overlay values in the CSV file
+Returns: Combined x and y data for normative modeling""",
             },
             "search_pubmed": {
                 "method": "POST",
                 "description": "Search PubMed via NCBI E-utilities (esearch + esummary)",
                 "parameters": PubMedSearchRequest.model_json_schema(),
             },
-            "openalex_search": {
-                "method": "POST",
-                "description": "Scholarly discovery search via OpenAlex works",
-                "parameters": OpenAlexSearchRequest.model_json_schema(),
-            },
-            "crossref_enrich": {
-                "method": "POST",
-                "description": "Enrich/normalize bibliographic metadata by DOI via Crossref",
-                "parameters": CrossrefEnrichRequest.model_json_schema(),
-            },
-            "internet_search": {
-                "method": "POST",
-                "description": "Combined internet search (OpenAlex discovery + Crossref DOI enrichment)",
-                "parameters": InternetSearchRequest.model_json_schema(),
-            },
-            "openneuro_search": {
-                "method": "POST",
-                "description": "Search OpenNeuro datasets via GraphQL",
-                "parameters": OpenNeuroSearchRequest.model_json_schema(),
-            },
-            # "upload": {
+            # "openalex_search": {
             #     "method": "POST",
-            #     "description": "Upload a file for analysis (multipart/form-data)",
-            #     "parameters": {
-            #         "file": {"type": "file", "description": "Multipart file field named 'file'"}
-            #     }
+            #     "description": "Scholarly discovery search via OpenAlex works",
+            #     "parameters": OpenAlexSearchRequest.model_json_schema(),
             # },
-            # "list_files": {
-            #     "method": "GET",
-            #     "description": "List uploaded files",
-            #     "parameters": {}
+            # "crossref_enrich": {
+            #     "method": "POST",
+            #     "description": "Enrich/normalize bibliographic metadata by DOI via Crossref",
+            #     "parameters": CrossrefEnrichRequest.model_json_schema(),
             # },
-            # "delete_file": {
-            #     "method": "DELETE or POST",
-            #     "description": "Delete an uploaded file (JSON body: {\"filename\": \"...\"})",
-            #     "parameters": {
-            #         "filename": {"type": "string", "description": "Name of the uploaded file to delete"}
-            #     }
+            # "internet_search": {
+            #     "method": "POST",
+            #     "description": "Combined internet search (OpenAlex discovery + Crossref DOI enrichment)",
+            #     "parameters": InternetSearchRequest.model_json_schema(),
             # },
         },
         "rate_limiting": {
@@ -1923,6 +1986,96 @@ async def api_schema(request: Request) -> JSONResponse:
     }
     return JSONResponse(schema)
 
+
+@server.custom_route("/upload", methods=["POST"])
+@rate_limit
+async def upload_file(request: Request) -> JSONResponse:
+    """Upload a file to the server for analysis.
+    
+    Expects multipart form data with 'file' field.
+    """
+    try:
+        form = await request.form()
+        
+        if 'file' not in form:
+            raise HTTPException(status_code=400, detail="No file provided in request")
+        
+        uploaded_file = form['file']
+        
+        if not uploaded_file.filename:
+            raise HTTPException(status_code=400, detail="File has no name")
+        
+        # Read file content
+        file_content = await uploaded_file.read()
+        
+        if not file_content:
+            raise HTTPException(status_code=400, detail="File is empty")
+        
+        # Save file
+        file_path, file_info = save_uploaded_file(file_content, uploaded_file.filename)
+        
+        logger.info(f"File uploaded: {file_info['saved_filename']}")
+        
+        return JSONResponse({
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "file_info": file_info,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Upload error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@server.custom_route("/list_files", methods=["GET"])
+async def list_files(request: Request) -> JSONResponse:
+    """List all uploaded files."""
+    try:
+        files = list_uploaded_files()
+        logger.info(f"Listed {len(files)} uploaded files")
+        
+        return JSONResponse({
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "count": len(files),
+            "files": files,
+        })
+    except Exception as e:
+        logger.error(f"List files error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@server.custom_route("/delete_file", methods=["DELETE", "POST"])
+@rate_limit
+async def delete_file(request: Request) -> JSONResponse:
+    """Delete an uploaded file.
+    
+    Expects JSON with 'filename' field.
+    """
+    try:
+        if request.method == "DELETE":
+            data = await request.json()
+        else:
+            data = await request.json()
+        
+        filename = data.get("filename", "")
+        if not filename:
+            raise HTTPException(status_code=400, detail="Filename required")
+        
+        result = delete_uploaded_file(filename)
+        logger.info(f"File deleted: {filename}")
+        
+        return JSONResponse({
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "result": result,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete file error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
 @server.custom_route("/run_cfc_wavelet_analysis", methods=["POST"])
 @rate_limit
@@ -1935,15 +2088,6 @@ async def http_run_cfc_wavelet_analysis(request: Request) -> JSONResponse:
         
         result = run_cfc_wavelet_analysis(
             data_path=validated_data.data_path,
-            window_size=validated_data.window_size,
-            step_size=validated_data.step_size,
-            padding=validated_data.padding,
-            ratio=validated_data.ratio,
-            wavelets_num=validated_data.wavelets_num,
-            beta=validated_data.beta,
-            gamma=validated_data.gamma,
-            max_iter=validated_data.max_iter,
-            node_select=validated_data.node_select,
         )
         return JSONResponse(result)
     except ValueError as e:
@@ -1982,34 +2126,34 @@ async def http_run_hub_detection(request: Request) -> JSONResponse:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@server.custom_route("/get_growth_curve", methods=["POST"])
-@rate_limit
-async def http_get_growth_curve(request: Request) -> JSONResponse:
-    """HTTP endpoint for growth curve data."""
-    try:
-        data = await request.json()
-        phenotype = data.get("phenotype", "Global mean of FC")
+# @server.custom_route("/get_aging_curve", methods=["POST"])
+# @rate_limit
+# async def http_get_aging_curve(request: Request) -> JSONResponse:
+#     """HTTP endpoint for large scale aging curve database."""
+#     try:
+#         data = await request.json()
+#         phenotype = data.get("phenotype", "Global mean of FC")
         
-        if not phenotype:
-            raise HTTPException(status_code=400, detail="phenotype parameter required")
+#         if not phenotype:
+#             raise HTTPException(status_code=400, detail="phenotype parameter required")
         
-        result = get_growth_curve(phenotype=phenotype)
-        return JSONResponse(result)
-    except Exception as e:
-        logger.error(f"Request error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+#         result = get_aging_curve(phenotype=phenotype)
+#         return JSONResponse(result)
+#     except Exception as e:
+#         logger.error(f"Request error: {str(e)}")
+#         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@server.custom_route("/run_normative_analysis", methods=["POST"])
+@server.custom_route("/overlay_with_aging_curve", methods=["POST"])
 @rate_limit
-async def http_run_normative_analysis(request: Request) -> JSONResponse:
+async def http_overlay_with_aging_curve(request: Request) -> JSONResponse:
     """HTTP endpoint for normative analysis."""
     try:
         data = await request.json()
         # Validate using Pydantic model
         validated_data = NormativeAnalysisRequest(**data)
         
-        result = run_normative_analysis(
+        result = overlay_with_aging_curve(
             x_phenotype=validated_data.x_phenotype,
             y_path=validated_data.y_path,
             age_col=validated_data.age_col,
@@ -2045,12 +2189,12 @@ async def http_search_pubmed(request: Request) -> JSONResponse:
         logger.error(f"Request error: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@server.custom_route("/openalex_search", methods=["POST"])
-@rate_limit
-async def http_openalex_search(request: Request) -> JSONResponse:
-    data = await request.json()
-    v = OpenAlexSearchRequest(**data)
-    return JSONResponse(openalex_search(v.query, v.max_results, v.from_year, v.to_year))
+# @server.custom_route("/openalex_search", methods=["POST"])
+# @rate_limit
+# async def http_openalex_search(request: Request) -> JSONResponse:
+#     data = await request.json()
+#     v = OpenAlexSearchRequest(**data)
+#     return JSONResponse(openalex_search(v.query, v.max_results, v.from_year, v.to_year))
 
 
 @server.custom_route("/crossref_enrich", methods=["POST"])
@@ -2068,158 +2212,64 @@ async def http_internet_search(request: Request) -> JSONResponse:
     v = InternetSearchRequest(**data)
     return JSONResponse(internet_search(v.query, v.max_results, v.from_year, v.to_year))
 
-@server.custom_route("/openneuro_search", methods=["POST"])
-@rate_limit
-async def http_openneuro_search(request: Request) -> JSONResponse:
+
+# @server.tool(name="run_correlation")
+# def run_correlation(data_source: str, var1: str, var2: str) -> str:
+#     """
+#     Calculates Pearson correlation between two variables (Linear Relationship).
+#     Returns correlation coefficient, p-value, and significance.
+#     """
+#     result = StatsToolkit.correlation_analysis(data_source, var1, var2)
+#     return json.dumps(result)
+
+# @server.tool(name="run_group_comparison")
+# def run_group_comparison(data_source: str, group_col: str, metric_col: str, group_a: str, group_b: str, method: str = "ttest") -> str:
+#     """
+#     Compares two groups. Returns p-value AND Cohen's d Effect Size.
+#     Args:
+#         method: 'ttest' (standard) or 'mannwhitney' (use if data is non-normal/skewed).
+#     """
+#     result = StatsToolkit.compare_groups(data_source, group_col, metric_col, group_a, group_b, method)
+#     return json.dumps(result)
+
+# @server.tool(name="apply_fdr_correction")
+# def apply_fdr_correction(p_values: list[float]) -> str:
+#     """
+#     Applies False Discovery Rate (Benjamini-Hochberg) correction.
+#     MANDATORY when testing multiple brain regions to prevent false positives.
+#     """
+#     result = StatsToolkit.correct_p_values(p_values)
+#     return json.dumps(result)
+
+# @server.tool(name="detect_outliers")
+# def detect_outliers(data_source: str, column: str) -> str:
+#     """
+#     Scans a column for statistical outliers (Z-score > 3).
+#     Use this to clean data before running T-tests.
+#     """
+#     result = StatsToolkit.detect_outliers_zscore(data_source, column)
+#     return json.dumps(result)
+
+@server.custom_route("/roi_figs/composite", methods=["GET"])
+async def roi_composite(request: Request):
+    ids_str = request.query_params.get("ids", "")
+    roi_ids = [s.strip() for s in ids_str.split(",") if s.strip()]
+    if not roi_ids:
+        raise HTTPException(status_code=400, detail="ids required")
     try:
-        data = await request.json()
-        validated = OpenNeuroSearchRequest(**data)
-        return JSONResponse(openneuro_search(query=validated.query, max_results=validated.max_results, modality=validated.modality))
-    except ValueError as e:
-        logger.error(f"Validation error in /openneuro_search: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
-    except Exception as e:
-        logger.error(f"Request error in /openneuro_search: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-# @server.custom_route("/upload", methods=["POST"])
-# @rate_limit
-# async def upload_file(request: Request) -> JSONResponse:
-#     """Upload a file to the server for analysis.
-    
-#     Expects multipart form data with 'file' field.
-#     """
-#     try:
-#         form = await request.form()
-        
-#         if 'file' not in form:
-#             raise HTTPException(status_code=400, detail="No file provided in request")
-        
-#         uploaded_file = form['file']
-        
-#         if not uploaded_file.filename:
-#             raise HTTPException(status_code=400, detail="File has no name")
-        
-#         # Read file content
-#         file_content = await uploaded_file.read()
-        
-#         if not file_content:
-#             raise HTTPException(status_code=400, detail="File is empty")
-        
-#         # Save file
-#         file_path, file_info = save_uploaded_file(file_content, uploaded_file.filename)
-        
-#         logger.info(f"File uploaded: {file_info['saved_filename']}")
-        
-#         return JSONResponse({
-#             "status": "success",
-#             "timestamp": datetime.now().isoformat(),
-#             "file_info": file_info,
-#         })
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Upload error: {str(e)}")
-#         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        png_bytes = composite_roi_images(roi_ids)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return Response(png_bytes, media_type="image/png")
 
 
-# @server.custom_route("/list_files", methods=["GET"])
-# async def list_files(request: Request) -> JSONResponse:
-#     """List all uploaded files."""
-#     try:
-#         files = list_uploaded_files()
-#         logger.info(f"Listed {len(files)} uploaded files")
-        
-#         return JSONResponse({
-#             "status": "success",
-#             "timestamp": datetime.now().isoformat(),
-#             "count": len(files),
-#             "files": files,
-#         })
-#     except Exception as e:
-#         logger.error(f"List files error: {str(e)}")
-#         raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# @server.custom_route("/delete_file", methods=["DELETE", "POST"])
-# @rate_limit
-# async def delete_file(request: Request) -> JSONResponse:
-#     """Delete an uploaded file.
-    
-#     Expects JSON with 'filename' field.
-#     """
-#     try:
-#         if request.method == "DELETE":
-#             data = await request.json()
-#         else:
-#             data = await request.json()
-        
-#         filename = data.get("filename", "")
-#         if not filename:
-#             raise HTTPException(status_code=400, detail="Filename required")
-        
-#         result = delete_uploaded_file(filename)
-#         logger.info(f"File deleted: {filename}")
-        
-#         return JSONResponse({
-#             "status": "success",
-#             "timestamp": datetime.now().isoformat(),
-#             "result": result,
-#         })
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Delete file error: {str(e)}")
-#         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
-
-#stats tools
-
-@server.tool(name="run_correlation")
-def run_correlation(data_source: str, var1: str, var2: str) -> str:
-    """
-    Calculates Pearson correlation between two variables (Linear Relationship).
-    Returns correlation coefficient, p-value, and significance.
-    """
-    result = StatsToolkit.correlation_analysis(data_source, var1, var2)
-    return json.dumps(result)
-
-@server.tool(name="run_group_comparison")
-def run_group_comparison(data_source: str, group_col: str, metric_col: str, group_a: str, group_b: str, method: str = "ttest") -> str:
-    """
-    Compares two groups. Returns p-value AND Cohen's d Effect Size.
-    Args:
-        method: 'ttest' (standard) or 'mannwhitney' (use if data is non-normal/skewed).
-    """
-    result = StatsToolkit.compare_groups(data_source, group_col, metric_col, group_a, group_b, method)
-    return json.dumps(result)
-
-@server.tool(name="apply_fdr_correction")
-def apply_fdr_correction(p_values: list[float]) -> str:
-    """
-    Applies False Discovery Rate (Benjamini-Hochberg) correction.
-    MANDATORY when testing multiple brain regions to prevent false positives.
-    """
-    result = StatsToolkit.correct_p_values(p_values)
-    return json.dumps(result)
-
-@server.tool(name="detect_outliers")
-def detect_outliers(data_source: str, column: str) -> str:
-    """
-    Scans a column for statistical outliers (Z-score > 3).
-    Use this to clean data before running T-tests.
-    """
-    result = StatsToolkit.detect_outliers_zscore(data_source, column)
-    return json.dumps(result)
-
-@server.tool(name="check_data_normality")
-def check_data_normality(data_source: str, column: str) -> str:
-    """
-    Checks if data follows a Normal Distribution (Shapiro-Wilk test).
-    Use this BEFORE running a T-Test. 
-    If result is NOT normal, use Mann-Whitney test instead.
-    """
-    result = StatsToolkit.check_normality(data_source, column)
-    return json.dumps(result)
+# @server.custom_route("/roi_figs/{path:path}", methods=["GET"])
+# async def roi_figs(request: Request):
+#     path = request.path_params["path"]
+#     fp = os.path.join(_ROI_FIG_DIR, path)
+#     if not os.path.isfile(fp):
+#         raise HTTPException(status_code=404, detail="Image not found")
+#     return FileResponse(fp)
 
 # app = FastAPI()
 
@@ -2277,8 +2327,8 @@ if __name__ == "__main__":
     logger.info("  GET  /api/schema                 - API schema documentation")
     logger.info("  POST /run_cfc_wavelet_analysis   - CFC analysis")
     logger.info("  POST /run_hub_detection          - Hub detection")
-    logger.info("  POST /get_growth_curve           - Growth curve data")
-    logger.info("  POST /run_normative_analysis     - Normative analysis")
+    logger.info("  POST /get_aging_curve           - large scale aging curve database")
+    logger.info("  POST /overlay_with_aging_curve     - Normative analysis")
     logger.info("  POST /search_pubmed             - PubMed literature search")
     logger.info("  POST /upload                     - Upload file for analysis")
     logger.info("  GET  /list_files                 - List uploaded files")
@@ -2288,7 +2338,7 @@ if __name__ == "__main__":
     try:
         # server.run(transport="http", host="0.0.0.0", port=8010)
         # server.run(transport="streamable-http", mount_path='/ram/USERS/ziquanw/brain-network-chart/uploaded_files')
-        server.run(transport="http", host="0.0.0.0", port=8010)
+        server.run(transport="sse", host="0.0.0.0", port=8010)
         # uvicorn.run(
         #     app,
         #     host="127.0.0.1",
