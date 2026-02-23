@@ -1,5 +1,9 @@
 # CyberNeuro platform: Chat with Your Neuroimaging Data
 
+The release version is for the local deployment for both Frontend, Backend, and LLM service (Ollama). 
+
+**Check [gh-page branch](https://github.com/acmlab/brain-network-chart/tree/gh-page) for an online interactive demo with your own Ollama running locally.**
+
 ## Frontend
 - `cd cyberneuro_multi-agent-neuroimaging-analysis`
 - Install dependencies: `npm install`
