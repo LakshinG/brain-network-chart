@@ -73,6 +73,7 @@ const App: React.FC = () => {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [activeImageId, setActiveImageId] = useState<number | null>(null);
   const [activeWorkflowMode, setActiveWorkflowMode] = useState<WorkflowMode>(null);
+  const [showOllamaSetupToast, setShowOllamaSetupToast] = useState(false);
   const [ollamaUrlLabel, setOllamaUrlLabel] = useState(getOllamaHost());
   const [mcpUrlLabel, setMcpUrlLabel] = useState(getBackendBaseUrl());
 
@@ -113,6 +114,14 @@ const App: React.FC = () => {
     const selected = datasets.filter(d => activeDatasetIds.includes(d.id));
     return mergeDatasets(selected);
   }, [datasets, activeDatasetIds]);
+
+  useEffect(() => {
+    if (!ollamaConnected) {
+      setShowOllamaSetupToast(true);
+    } else {
+      setShowOllamaSetupToast(false);
+    }
+  }, [ollamaConnected]);
 
   // Sync active dataset to visualizations (Dynamic Data Context)
   useEffect(() => {
@@ -1628,24 +1637,6 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {!ollamaConnected && (
-        <div className="mt-3 rounded-md border border-amber-700/60 bg-amber-900/20 px-3 py-2 text-xs text-amber-100">
-          <p className="font-semibold">Ollama is unreachable (connection or CORS).</p>
-          <p className="mt-1 text-amber-200/90">
-            On the machine running Ollama, allow this origin and restart:
-          </p>
-          <p className="mt-1 font-mono text-[11px] text-amber-200/90">
-            sudo systemctl edit ollama
-          </p>
-          <p className="font-mono text-[11px] text-amber-200/90">
-            [Service] Environment="OLLAMA_HOST=0.0.0.0:11434" Environment="OLLAMA_ORIGINS={pageOrigin}"
-          </p>
-          <p className="font-mono text-[11px] text-amber-200/90">
-            sudo systemctl daemon-reload && sudo systemctl restart ollama
-          </p>
-        </div>
-      )}
-      
       {availableModels.length > 0 && (
         <div className="flex flex-col gap-2 text-xs">
           <div className="flex gap-2">
@@ -1829,8 +1820,45 @@ const App: React.FC = () => {
     </div>
   );
 
+  const ollamaSetupToast = (!ollamaConnected && showOllamaSetupToast) ? (
+    <div className="fixed top-4 right-4 z-50 w-[min(520px,calc(100vw-2rem))] rounded-lg border border-amber-700/80 bg-slate-900/95 p-4 text-xs text-amber-100 shadow-xl backdrop-blur">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-amber-200">Ollama connection/CORS failed</p>
+          <p className="mt-1 text-amber-300/90">Complete setup, then retry your query.</p>
+        </div>
+        <button
+          onClick={() => setShowOllamaSetupToast(false)}
+          className="rounded p-1 text-amber-400 hover:bg-amber-900/40 hover:text-amber-200"
+          title="Dismiss"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="space-y-2 text-[11px] leading-relaxed">
+        <p><span className="font-semibold">1) Install Ollama</span> from the official installer for your OS.</p>
+        <p><span className="font-semibold">2) Pull the model</span>: <span className="font-mono">ollama pull dcarrascosa/medgemma-1.5-4b-it:F16</span></p>
+        <div>
+          <p className="font-semibold">3) Configure CORS and restart Ollama</p>
+          <p className="mt-1 text-amber-300/90">Linux (systemd):</p>
+          <p className="font-mono">sudo systemctl edit ollama</p>
+          <p className="font-mono">[Service]</p>
+          <p className="font-mono">Environment="OLLAMA_HOST=0.0.0.0:11434"</p>
+          <p className="font-mono">Environment="OLLAMA_ORIGINS={pageOrigin}"</p>
+          <p className="font-mono">sudo systemctl daemon-reload && sudo systemctl restart ollama</p>
+          <p className="mt-1 text-amber-300/90">Windows (PowerShell):</p>
+          <p className="font-mono">[Environment]::SetEnvironmentVariable("OLLAMA_HOST","0.0.0.0:11434","User")</p>
+          <p className="font-mono">[Environment]::SetEnvironmentVariable("OLLAMA_ORIGINS","{pageOrigin}","User")</p>
+          <p>Then quit and reopen Ollama app.</p>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="h-screen w-full overflow-hidden bg-slate-950 text-slate-200">
+      {ollamaSetupToast}
       <ResizablePanels
         leftPanel={leftPanel}
         rightPanel={rightPanel}
