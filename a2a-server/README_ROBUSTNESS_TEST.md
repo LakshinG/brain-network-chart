@@ -53,6 +53,18 @@ This test evaluates the orchestrator's robustness by running 500 completely dive
 
 ---
 
+## ✅ Latest Result Summary
+
+Robustness test for user question -> Researcher PubMed search -> result
+
+Biomarker queries (tabular data):
+- Success rate = 93.6%
+- Average time per query = 19.33s
+
+Stored in: `biomarker_evaluation_results_500q_20260223_185943.json`
+
+---
+
 ## 🚀 Quick Start
 
 ### Run Small Test (10 queries, ~2-3 minutes):

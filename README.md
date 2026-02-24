@@ -42,21 +42,25 @@ See `uploaded_files`
 ## Robustness test
 Details refer to `a2a-server/README_ROBUSTNESS_TEST.md`
 
+Biomarker queries (tabular data):
+- Success rate = 93.6%
+- Average time per query = 19.33s
+
 **Confusion Matrix**
 ```
                  Predicted Positive    Predicted Negative
                  (Researcher Called)   (Researcher Skipped)
 Actual Positive  True Positive (TP)    False Negative (FN)
-(Should Call)    162                   13
+(Should Call)    165                   21
 
 Actual Negative  False Positive (FP)   True Negative (TN)
-(Shouldn't Call) 6                     293
+(Shouldn't Call) 0                     314
 ```
 
 **Metrics:**
-- **Precision** = TP/(TP+FP) = 162/(162+6) = 96.4%
-- **Recall** = TP/(TP+FN) = 162/(162+13) = 92.6%
-- **Accuracy** = (TP+TN)/(Total) = (162+293)/500 = 91.0%
+- **Precision** = TP/(TP+FP) = 165/(165+0) = 100.0%
+- **Recall** = TP/(TP+FN) = 165/(165+21) = 88.7%
+- **Accuracy** = (TP+TN)/(Total) = (165+314)/500 = 95.8%
 
 **Tool calling times**
 
