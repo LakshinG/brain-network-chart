@@ -1860,7 +1860,7 @@ const App: React.FC = () => {
   );
 
   const ollamaSetupToast = (!ollamaConnected && showOllamaSetupToast) ? (
-    <div className="fixed top-4 right-4 z-50 w-[min(520px,calc(100vw-2rem))] rounded-lg border border-amber-700/80 bg-slate-900/95 p-4 text-xs text-amber-100 shadow-xl backdrop-blur">
+    <div className="fixed top-4 right-4 z-50 w-[min(520px,calc(100vw-2rem))] rounded-lg border border-amber-700/80 bg-slate-900/60 p-4 text-xs text-amber-100 shadow-xl backdrop-blur">
       <div className="mb-2 flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-amber-200">Ollama connection/CORS failed</p>
@@ -1876,8 +1876,18 @@ const App: React.FC = () => {
       </div>
 
       <div className="space-y-2 text-[11px] leading-relaxed">
-        <p><span className="font-semibold">1) Install Ollama</span> from the official installer for your OS.</p>
-        <p><span className="font-semibold">2) Pull the model</span>: <span className="font-mono">ollama pull dcarrascosa/medgemma-1.5-4b-it:F16</span></p>
+        <p>
+          <span className="font-semibold">1) Install Ollama</span>: 
+          <a
+            href="https://ollama.com/download"
+            target="_blank"
+            rel="noreferrer"
+            className="ml-1 underline text-amber-200 hover:text-amber-100"
+          >
+            https://ollama.com/download
+          </a>
+        </p>
+        <p><span className="font-semibold">2) Pull a free cloud model</span>: <span className="font-mono">ollama pull gpt-oss:20b-cloud</span></p>
         <div>
           <p className="font-semibold">3) Configure CORS and restart Ollama</p>
           <p className="mt-1 text-amber-300/90">Linux (systemd):</p>

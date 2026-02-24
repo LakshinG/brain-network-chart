@@ -242,7 +242,7 @@ export interface VisionAgentResult {
 export const runVisionAgent = async (query: string, imageBytesBase64: string): Promise<VisionAgentResult> => {
   try {
     const response: any = await ollama.generate({
-      model: visionModel,
+      model: neuroModel,
       keep_alive: 300,
       prompt: PROMPTS.VISION_AGENT(query),
       images: [imageBytesBase64],
@@ -284,7 +284,7 @@ export const runVisionAgent = async (query: string, imageBytesBase64: string): P
   } catch (e) {
     console.error('Vision Agent Error:', e);
     return {
-      basicMedicalBiologicalInfo: `Vision Agent [${visionModel}]: Error ${e}.`,
+      basicMedicalBiologicalInfo: `Vision Agent [${neuroModel}]: Error ${e}.`,
       findings: []
     };
   }
