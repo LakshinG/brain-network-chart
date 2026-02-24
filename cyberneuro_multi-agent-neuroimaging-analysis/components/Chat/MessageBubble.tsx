@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AgentType, ChatMessage } from '../../types';
 import { AGENT_COLORS } from '../../constants';
 import { User, BrainCircuit, Bot, Microscope, Terminal, GitFork, Lightbulb, Settings, FileCog, RotateCcw, Check, X, ShieldCheck, FileText, ImageIcon } from 'lucide-react';
@@ -31,12 +31,12 @@ const getIcon = (role: AgentType) => {
 const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, onRestart }) => {
   const isUser = message.role === AgentType.USER;
   const colorClass = AGENT_COLORS[message.role] || AGENT_COLORS[AgentType.SYSTEM];
-  
+
   const isPlanner = message.role === AgentType.NEURO_PLANNER || message.role === AgentType.GENERAL_PLANNER;
   const isExecutor = message.role === AgentType.EXECUTOR;
 
   const canEdit = onRestart && (
-    (isExecutor && message.metadata?.params) || 
+    (isExecutor && message.metadata?.params) ||
     (isPlanner && message.metadata?.plan)
   );
 
@@ -51,6 +51,16 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
     return '';
   });
 
+  // Glow-flash animation state
+  const [isPulsing, setIsPulsing] = useState(false);
+  useEffect(() => {
+    if (isHighlighted) {
+      setIsPulsing(true);
+      const timer = setTimeout(() => setIsPulsing(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isHighlighted]);
+
   const handleRun = () => {
     try {
         const parsed = JSON.parse(editParams);
@@ -63,7 +73,11 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
 
   return (
     <div className={`flex w-full mb-4 ${isUser ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-      <div className={`max-w-[85%] flex flex-col ${isUser ? 'items-end' : 'items-start'} transition-all duration-300 ${isHighlighted ? 'ring-2 ring-indigo-400 rounded-2xl ring-offset-2 ring-offset-slate-900' : ''}`}>
+      <div className={`max-w-[85%] flex flex-col ${isUser ? 'items-end' : 'items-start'} transition-all duration-300 ${
+        isHighlighted
+          ? `ring-2 ring-indigo-400 rounded-2xl ring-offset-2 ring-offset-slate-900 ${isPulsing ? 'animate-glow-flash' : ''}`
+          : ''
+      }`}>
         <div className={`flex items-center gap-2 mb-1 px-1 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
           <div className={`p-1 rounded-full ${isUser ? 'bg-slate-600' : 'bg-slate-700'} text-slate-200`}>
              {getIcon(message.role)}
@@ -80,10 +94,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
-        
+
         <div className={`
-            px-4 py-3 rounded-2xl text-sm leading-relaxed border shadow-sm whitespace-pre-wrap 
-            ${colorClass} 
+            px-4 py-3 rounded-2xl text-sm leading-relaxed border shadow-sm whitespace-pre-wrap
+            ${colorClass}
             ${isUser ? 'rounded-tr-none' : 'rounded-tl-none'}
             ${isHighlighted ? 'shadow-indigo-500/20' : ''}
         `}>
@@ -91,7 +105,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
 
           {canEdit && !isEditing && (
              <div className="mt-3 pt-2 border-t border-slate-700/50 flex justify-end">
-                <button 
+                <button
                   onClick={() => setIsEditing(true)}
                   className="flex items-center gap-1 text-xs text-indigo-300 hover:text-indigo-200 bg-slate-900/40 px-2 py-1 rounded"
                 >
@@ -105,19 +119,19 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
                 <p className="text-xs text-slate-400 mb-1">
                     {isPlanner ? 'Edit Plan (JSON):' : 'Edit Tool Parameters (JSON):'}
                 </p>
-                <textarea 
+                <textarea
                     value={editParams}
                     onChange={(e) => setEditParams(e.target.value)}
                     className="w-full h-48 bg-slate-900 text-xs font-mono text-slate-300 p-2 rounded border border-slate-700 focus:outline-none focus:border-indigo-500"
                 />
                 <div className="flex justify-end gap-2 mt-2">
-                    <button 
+                    <button
                         onClick={() => setIsEditing(false)}
                         className="p-1 text-slate-400 hover:text-slate-200"
                     >
                         <X className="w-4 h-4" />
                     </button>
-                    <button 
+                    <button
                         onClick={handleRun}
                         className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1 rounded"
                     >

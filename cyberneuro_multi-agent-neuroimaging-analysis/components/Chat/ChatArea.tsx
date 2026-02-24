@@ -1,8 +1,71 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { ChatMessage, AgentType, Dataset } from '../../types';
+import { WorkflowHistory, WorkflowRecord } from '../../workflowTypes';
 import MessageBubble from './MessageBubble';
+import ThinkingOverlay from '../AgentProgress/ThinkingOverlay';
 import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw, ImagePlus } from 'lucide-react';
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Roles that stay visible in the outer chat stream.
+   Everything else is folded into the ThinkingOverlay.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const OUTER_CHAT_ROLES = new Set([
+  AgentType.USER,
+  AgentType.EXECUTOR,
+  AgentType.RESEARCHER,
+  AgentType.VISION,
+  AgentType.PROPOSAL_REPORTER,
+  AgentType.SYSTEM,
+]);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Render-item builder: interleave outer messages with ThinkingOverlay bars
+   ═══════════════════════════════════════════════════════════════════════════ */
+interface RenderItem {
+  type: 'message' | 'thinking';
+  message?: ChatMessage;
+  record?: WorkflowRecord;
+  workflowMessages?: ChatMessage[];
+}
+
+function buildRenderItems(
+  messages: ChatMessage[],
+  records: WorkflowRecord[]
+): RenderItem[] {
+  const items: RenderItem[] = [];
+  const recordsByStart = [...records].sort((a, b) => a.startIndex - b.startIndex);
+
+  let nextRecordIdx = 0;
+
+  for (let i = 0; i < messages.length; i++) {
+    while (nextRecordIdx < recordsByStart.length && recordsByStart[nextRecordIdx].startIndex <= i) {
+      const rec = recordsByStart[nextRecordIdx];
+      const end = rec.endIndex === -1 ? messages.length : rec.endIndex;
+      const wfMessages = messages.slice(rec.startIndex, end);
+      items.push({ type: 'thinking', record: rec, workflowMessages: wfMessages });
+      nextRecordIdx++;
+    }
+
+    const msg = messages[i];
+    if (OUTER_CHAT_ROLES.has(msg.role)) {
+      items.push({ type: 'message', message: msg });
+    }
+  }
+
+  while (nextRecordIdx < recordsByStart.length) {
+    const rec = recordsByStart[nextRecordIdx];
+    const end = rec.endIndex === -1 ? messages.length : rec.endIndex;
+    const wfMessages = messages.slice(rec.startIndex, end);
+    items.push({ type: 'thinking', record: rec, workflowMessages: wfMessages });
+    nextRecordIdx++;
+  }
+
+  return items;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Props — identical to gh-page original + workflow history
+   ═══════════════════════════════════════════════════════════════════════════ */
 interface ChatAreaProps {
   messages: ChatMessage[];
   onSendMessage: (text: string) => void;
@@ -12,8 +75,8 @@ interface ChatAreaProps {
   disableAddImage?: boolean;
   addCsvDisabledHint?: string;
   addImageDisabledHint?: string;
-  onFileUpload?: (file: File) => void;  // Optional for viz mode
-  onLoadDemo?: () => void;               // Optional for viz mode
+  onFileUpload?: (file: File) => void;
+  onLoadDemo?: () => void;
   isProcessing: boolean;
   hasData: boolean;
   highlightedMessageId: string | null;
@@ -31,20 +94,59 @@ interface ChatAreaProps {
   onImageRemove: (uploadedAt: number, e: React.MouseEvent) => void;
   onMergeDatasets: () => void;
   onSyncDataset: () => void;
+  // NEW: workflow history
+  history: WorkflowHistory;
 }
 
-const ChatArea: React.FC<ChatAreaProps> = React.memo(({ 
+const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   messages, onSendMessage, onAbortWorkflow, canAbortWorkflow, disableAddCsv = false, disableAddImage = false, addCsvDisabledHint, addImageDisabledHint, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep,
   placeholder,
   datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload, onImageUpload,
-  uploadedImages, activeImageId, onImageToggle, onImageRemove, onMergeDatasets, onSyncDataset
+  uploadedImages, activeImageId, onImageToggle, onImageRemove, onMergeDatasets, onSyncDataset,
+  history,
 }) => {
   const [input, setInput] = useState('');
+  const [expandedWorkflowId, setExpandedWorkflowId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageRefs = useRef<{[key: string]: HTMLDivElement | null}>({});
-  const prevMessageCountRef = useRef(messages.length);
+
+  // Navigation state for bubble → thinking overlay
+  const [pendingHighlightId, setPendingHighlightId] = useState<string | null>(null);
+  const [highlightedWorkflowId, setHighlightedWorkflowId] = useState<string | null>(null);
+
+  // Live elapsed timer for the active workflow
+  const [liveElapsed, setLiveElapsed] = useState(0);
+  const liveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const liveStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (history.activeId) {
+      if (!liveStartRef.current) liveStartRef.current = Date.now();
+      liveTimerRef.current = setInterval(() => {
+        if (liveStartRef.current) setLiveElapsed(Math.floor((Date.now() - liveStartRef.current) / 1000));
+      }, 1000);
+    } else {
+      if (liveTimerRef.current) { clearInterval(liveTimerRef.current); liveTimerRef.current = null; }
+      liveStartRef.current = null;
+    }
+    return () => { if (liveTimerRef.current) clearInterval(liveTimerRef.current); };
+  }, [history.activeId]);
+
+  useEffect(() => {
+    if (history.activeId) {
+      liveStartRef.current = Date.now();
+      setLiveElapsed(0);
+    }
+  }, [history.activeId]);
+
+  // Build render items
+  const renderItems = useMemo(
+    () => buildRenderItems(messages, history.records),
+    [messages, history.records]
+  );
+
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -54,16 +156,75 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   }, []);
 
   useEffect(() => {
-    if (!highlightedMessageId) {
+    if (!highlightedMessageId && !expandedWorkflowId) {
       scrollToBottom();
     }
-  }, [messages, highlightedMessageId, scrollToBottom]);
+  }, [messages, highlightedMessageId, expandedWorkflowId, scrollToBottom]);
 
   useEffect(() => {
-    if (highlightedMessageId && messageRefs.current[highlightedMessageId]) {
-        messageRefs.current[highlightedMessageId]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (highlightedMessageId && !expandedWorkflowId && messageRefs.current[highlightedMessageId]) {
+      messageRefs.current[highlightedMessageId]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightedMessageId, expandedWorkflowId]);
+
+  // Helper: find which workflow a message belongs to
+  const findWorkflowForMessageId = (msgId: string): WorkflowRecord | null => {
+    const msgIdx = messages.findIndex((m) => m.id === msgId);
+    if (msgIdx === -1) return null;
+    for (const rec of history.records) {
+      const end = rec.endIndex === -1 ? messages.length : rec.endIndex;
+      if (msgIdx >= rec.startIndex && msgIdx < end) return rec;
+    }
+    return null;
+  };
+
+  // Navigation: when highlightedMessageId changes, decide whether to highlight bar or scroll
+  useEffect(() => {
+    if (!highlightedMessageId) {
+      setHighlightedWorkflowId(null);
+      setPendingHighlightId(null);
+      return;
+    }
+
+    const msgIdx = messages.findIndex((m) => m.id === highlightedMessageId);
+    if (msgIdx === -1) return;
+    const msg = messages[msgIdx];
+    const targetWorkflow = findWorkflowForMessageId(highlightedMessageId);
+
+    if (!targetWorkflow) return;
+
+    if (expandedWorkflowId && expandedWorkflowId !== targetWorkflow.id) {
+      setExpandedWorkflowId(null);
+    }
+
+    if (!OUTER_CHAT_ROLES.has(msg.role)) {
+      if (expandedWorkflowId === targetWorkflow.id) {
+        return;
+      }
+      setHighlightedWorkflowId(targetWorkflow.id);
+      setPendingHighlightId(highlightedMessageId);
+    } else {
+      setHighlightedWorkflowId(targetWorkflow.id);
+      setPendingHighlightId(highlightedMessageId);
     }
   }, [highlightedMessageId]);
+
+  // Clear bar highlight after timeout
+  useEffect(() => {
+    if (!highlightedWorkflowId) return;
+    const timer = setTimeout(() => setHighlightedWorkflowId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [highlightedWorkflowId]);
+
+  const handleExpand = (workflowId: string) => {
+    setExpandedWorkflowId(workflowId);
+    setHighlightedWorkflowId(null);
+  };
+
+  const handleCollapse = () => {
+    setExpandedWorkflowId(null);
+    setPendingHighlightId(null);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,18 +240,16 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
     }
   };
 
-  // Determine if we should show the upload prompt
-  // Don't show if onFileUpload is not provided (viz mode) or if we already have data
-  const showUploadPrompt = !hasData && onFileUpload && onLoadDemo;
-
-  // Default placeholder based on context
-  const inputPlaceholder = placeholder 
-    || (hasData 
-      ? "Ask about the data (e.g., 'Correlation between Amyloid and Age?')" 
+  const inputPlaceholder = placeholder
+    || (hasData
+      ? "Ask about the data (e.g., 'Correlation between Amyloid and Age?')"
       : "Upload data first...");
 
+  // Dedup tracker for workflow rendering
+  const renderedWorkflows = new Set<string>();
+
   return (
-    <div className="flex flex-col h-full bg-slate-900 border-l border-slate-800">
+    <div className="flex flex-col h-full bg-slate-900 border-l border-slate-800 relative">
       <div className="flex-none p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur">
         <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-green-500"></span>
@@ -99,20 +258,55 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
         <p className="text-xs text-slate-400">Multi-Agent System Active</p>
       </div>
 
-      <div 
+      <div
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar scroll-smooth"
       >
-        {messages.map((msg) => (
-          <div key={msg.id} ref={(el) => { messageRefs.current[msg.id] = el; }}>
-            <MessageBubble 
-                message={msg} 
-                isHighlighted={msg.id === highlightedMessageId}
-                onRestart={onRestartStep}
-            />
-          </div>
-        ))}
-        {isProcessing && (
+        {renderItems.map((item, idx) => {
+          if (item.type === 'message' && item.message) {
+            return (
+              <div key={item.message.id} ref={(el) => { messageRefs.current[item.message!.id] = el; }}>
+                <MessageBubble
+                  message={item.message}
+                  isHighlighted={item.message.id === highlightedMessageId}
+                  onRestart={onRestartStep}
+                />
+              </div>
+            );
+          }
+
+          if (item.type === 'thinking' && item.record) {
+            if (renderedWorkflows.has(item.record.id)) return null;
+            renderedWorkflows.add(item.record.id);
+
+            const rec = item.record;
+            const isActiveWf = rec.id === history.activeId;
+            const wfMsgs = isActiveWf
+              ? messages.slice(rec.startIndex)
+              : item.workflowMessages!;
+
+            return (
+              <ThinkingOverlay
+                key={rec.id}
+                record={rec}
+                isActive={isActiveWf}
+                workflowMessages={wfMsgs}
+                highlightedMessageId={highlightedMessageId}
+                pendingHighlightId={pendingHighlightId}
+                onRestartStep={onRestartStep || (() => {})}
+                isExpanded={expandedWorkflowId === rec.id}
+                onRequestExpand={() => handleExpand(rec.id)}
+                onRequestCollapse={handleCollapse}
+                isBarHighlighted={highlightedWorkflowId === rec.id && expandedWorkflowId !== rec.id}
+                elapsedSeconds={isActiveWf ? liveElapsed : rec.elapsedSeconds}
+              />
+            );
+          }
+
+          return null;
+        })}
+
+        {isProcessing && !history.activeId && (
            <div className="flex items-center gap-2 ml-2 py-1">
              <svg className="animate-spin h-4 w-4 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -125,8 +319,8 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
       </div>
 
       <div className="flex-none p-4 bg-slate-900 border-t border-slate-800">
-        
-        {/* Compact File System */}
+
+        {/* Compact File System — preserved from gh-page */}
         <div className="mb-4">
             <div className="flex justify-between items-center mb-2">
                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
@@ -134,7 +328,7 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                   </h3>
                    <div className="flex gap-2">
                      {activeDatasetIds.length > 1 && (
-                        <button 
+                        <button
                             onClick={onMergeDatasets}
                             className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 bg-indigo-900/20 px-2 py-1 rounded border border-indigo-900/50"
                             title="Merge selected datasets into a new file"
@@ -143,7 +337,7 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                         </button>
                      )}
                      {hasData && (
-                        <button 
+                        <button
                             onClick={onSyncDataset}
                             className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded"
                             title="Force sync active context to server"
@@ -151,7 +345,7 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                             <RefreshCw className="w-3 h-3" /> Sync
                         </button>
                      )}
-                     <button 
+                     <button
                         onClick={onLoadDemo}
                         className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded"
                       >
@@ -159,22 +353,22 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                       </button>
                       <label className={`text-xs flex items-center gap-1 px-2 py-1 rounded transition-colors shadow-sm ${disableAddCsv ? 'cursor-not-allowed bg-indigo-900 text-indigo-300' : 'cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white'}`} title={disableAddCsv ? (addCsvDisabledHint || 'Disabled during current workflow') : 'Add CSV'}>
                           <Plus className="w-3 h-3" /> Add CSV
-                          <input 
-                            type="file" 
-                            multiple 
-                            accept=".csv" 
-                            className="hidden" 
+                          <input
+                            type="file"
+                            multiple
+                            accept=".csv"
+                            className="hidden"
                             disabled={disableAddCsv}
-                            onChange={(e) => onMultiFileUpload(e.target.files)} 
+                            onChange={(e) => onMultiFileUpload(e.target.files)}
                           />
                       </label>
                       <label className={`text-xs flex items-center gap-1 px-2 py-1 rounded transition-colors shadow-sm ${disableAddImage ? 'cursor-not-allowed bg-cyan-900 text-cyan-300' : 'cursor-pointer bg-cyan-600 hover:bg-cyan-500 text-white'}`} title={disableAddImage ? (addImageDisabledHint || 'Disabled during current workflow') : 'Add Image'}>
                           <ImagePlus className="w-3 h-3" /> Add Image
-                          <input 
-                            type="file" 
-                            multiple 
-                            accept="image/*" 
-                            className="hidden" 
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            className="hidden"
                             disabled={disableAddImage}
                             onChange={(e) => {
                               onImageUpload(e.target.files);
@@ -190,7 +384,7 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                 {disableAddImage ? (addImageDisabledHint || 'Abort current workflow to begin an image query.') : (addCsvDisabledHint || 'Abort current workflow to begin a CSV query.')}
               </p>
             )}
-            
+
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto custom-scrollbar content-start">
                   {datasets.length === 0 && (
@@ -201,19 +395,19 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                   {datasets.map(ds => {
                       const isActive = activeDatasetIds.includes(ds.id);
                       return (
-                          <div 
+                          <div
                           key={ds.id}
                           onClick={() => onDatasetToggle(ds.id)}
                           className={`
                               group flex items-center gap-2 px-3 py-1.5 rounded-md text-sm border cursor-pointer transition-all select-none
                               ${isActive
-                                  ? 'bg-indigo-900/40 border-indigo-500/50 text-indigo-200' 
+                                  ? 'bg-indigo-900/40 border-indigo-500/50 text-indigo-200'
                                   : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}
                           `}
                           >
                               {isActive && <CheckCircle2 className="w-3 h-3 text-indigo-400" />}
                               <span className="truncate max-w-[120px]">{ds.name}</span>
-                              <button 
+                              <button
                               onClick={(e) => onDatasetRemove(ds.id, e)}
                               className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
                               >
@@ -287,12 +481,12 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
           </button>
         </form>
         {onFileUpload && (
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileChange} 
-            accept=".csv" 
-            className="hidden" 
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept=".csv"
+            className="hidden"
           />
         )}
       </div>

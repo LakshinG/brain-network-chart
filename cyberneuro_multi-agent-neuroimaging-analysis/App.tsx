@@ -35,6 +35,7 @@ import VisualizerArea from './components/Visualizer/VisualizerArea';
 import ResizablePanels from './components/ResizablePanels';
 import { X, Pencil, Database } from 'lucide-react';
 import { getMockVisualization, getAllMockVisualizations } from './mockVisualizations';
+import { useWorkflow } from './hooks/useWorkflow';
 
 const VISUALIZER_AGENT = AgentType.EXECUTOR;
 const WORKFLOW_ABORTED_ERROR = '__WORKFLOW_ABORTED__';
@@ -90,6 +91,21 @@ const App: React.FC = () => {
   const [suspendedState, setSuspendedState] = useState<SuspendedState | null>(null);
   const workflowAbortRef = useRef(false);
   const workflowRunIdRef = useRef(0);
+
+  
+  // ── Workflow history (ThinkingOverlay) ──
+  const { history, wf } = useWorkflow();
+  const workflowStartRef = useRef<number>(0);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  const finalizeWorkflow = (phase: 'done' | 'error') => {
+    wf.setPhase(phase);
+    const elapsed = Math.floor((Date.now() - workflowStartRef.current) / 1000);
+    setTimeout(() => {
+      wf.finalize(messagesRef.current.length, elapsed);
+    }, 50);
+  };
 
   const startWorkflowRun = () => {
     workflowAbortRef.current = false;
@@ -292,6 +308,7 @@ const App: React.FC = () => {
     setSuspendedState(null);
     setActiveWorkflowMode(null);
     setIsProcessing(false);
+    finalizeWorkflow('error');
     addMessage(AgentType.SYSTEM, '⛔ Workflow aborted by user. Submit a new query to restart from the beginning.');
   };
 
@@ -882,6 +899,7 @@ const App: React.FC = () => {
 
     const stepsToRun = plan.analysis_steps.slice(startStepIndex);
     const allTools = [...INTERNAL_TOOLS, ...mcpTools];
+    const totalSteps = stepsToRun.length;
 
     let activeData = [...currentData];
     let activeCols = [...currentColumns];
@@ -889,6 +907,7 @@ const App: React.FC = () => {
     for (let i = 0; i < stepsToRun.length; i++) {
       throwIfWorkflowAborted(runId);
       const step = stepsToRun[i];
+      wf.setExecutionProgress(i, totalSteps);
       const instruction = step.instruction;
       
       const executorThinkingMsg = addMessage(
@@ -1103,7 +1122,10 @@ const App: React.FC = () => {
       throwIfWorkflowAborted(runId);
     }
 
+    wf.setExecutionProgress(totalSteps, totalSteps);
+
     if (intent === 'RESEARCH') {
+      wf.setPhase('researching');
       if (!isResearchReportEnabled) {
           addMessage(AgentType.SYSTEM, "Research Report generation skipped (disabled by user).");
       } else {
@@ -1201,6 +1223,7 @@ const App: React.FC = () => {
     } else {
       addMessage(AgentType.SYSTEM, "Task complete.");
     }
+    finalizeWorkflow('done');
   };
 
   const handleRestartFromStep = async (messageId: string, newParams: any) => {
@@ -1225,6 +1248,8 @@ const App: React.FC = () => {
         setIsProcessing(true);
         setActiveWorkflowMode('DATASET');
         const runId = startWorkflowRun();
+        workflowStartRef.current = Date.now();
+        wf.startNewQuery(`Re-plan: ${newPlan.rationale?.slice(0, 40) || 'Manual edit'}`, messages.length);
         
         if (isPlanValidationEnabled) {
             addMessage(AgentType.PLAN_VALIDATOR, "Validating manually updated plan...");
@@ -1232,11 +1257,13 @@ const App: React.FC = () => {
             
             if (!validation.valid) {
                 addMessage(AgentType.PLAN_VALIDATOR, `⚠️ Validation Error: ${validation.errors.join(', ')}\n\nSuggestion: ${validation.suggestions}`);
+                finalizeWorkflow('error');
                 setIsProcessing(false);
                 return;
             }
 
             addMessage(AgentType.PLAN_VALIDATOR, "Plan validated successfully. Resuming execution...");
+            wf.setPhase('executing');
         } else {
             addMessage(AgentType.SYSTEM, "Validation disabled. Resuming execution with manual plan...");
         }
@@ -1347,6 +1374,7 @@ const App: React.FC = () => {
     addMessage(AgentType.USER, query);
     setIsProcessing(true);
     const runId = startWorkflowRun();
+    workflowStartRef.current = Date.now();
 
     if (suspendedState) {
        if (!activeDataset) {
@@ -1383,6 +1411,7 @@ const App: React.FC = () => {
          setOllamaConnected(true);
       }
 
+      wf.startNewQuery(query, messagesRef.current.length);
       addMessage(AgentType.ORCHESTRATOR, "Evaluating query intent...");
       const intent = await classifyQuery(query);
       throwIfWorkflowAborted(runId);
@@ -1398,6 +1427,7 @@ const App: React.FC = () => {
 
       if (effectiveIntent === 'VISION') {
         setActiveWorkflowMode('IMAGE');
+        wf.setPhase('executing');
         const activeImage = activeImageId !== null
           ? uploadedImages.find(img => img.uploadedAt === activeImageId)
           : null;
@@ -1458,6 +1488,7 @@ const App: React.FC = () => {
             findings: visionResult.findings
           }
         );
+        finalizeWorkflow('done');
         return;
       }
 
@@ -1468,6 +1499,7 @@ const App: React.FC = () => {
 
       const workflowIntent: 'RESEARCH' | 'GENERAL' = effectiveIntent === 'RESEARCH' ? 'RESEARCH' : 'GENERAL';
       setActiveWorkflowMode('DATASET');
+      wf.setPhase('planning');
 
       const allTools = [...INTERNAL_TOOLS, ...mcpTools];
       let plan: any = { analysis_steps: [] };
@@ -1503,6 +1535,7 @@ const App: React.FC = () => {
         }
 
         if (isPlanValidationEnabled) {
+          wf.setPhase('validating');
           addMessage(AgentType.PLAN_VALIDATOR, "Verifying analysis steps...");
           const validation = await validatePlan(plan, allTools, activeDataset.columns);
           throwIfWorkflowAborted(runId);
@@ -1518,22 +1551,27 @@ const App: React.FC = () => {
             
             if (planningRetries >= MAX_PLANNING_RETRIES) {
               addMessage(AgentType.SYSTEM, "Critical: Planning failed to stabilize after multiple validation cycles. Stopping execution.");
+              finalizeWorkflow('error');
               setIsProcessing(false);
               return;
             }
+            wf.setPhase('planning');
           }
         } else {
           planIsValid = true;
           addMessage(AgentType.SYSTEM, "Plan Validation skipped (disabled). Proceeding to execution.");
+          
         }
       }
 
+      wf.setPhase('executing');
       await executePlanSteps(plan, runId, 0, null, [...activeDataset.data], [...activeDataset.columns], workflowIntent, undefined, query);
 
     } catch (error) {
       if (!isWorkflowAbortedError(error)) {
         console.error(error);
         addMessage(AgentType.SYSTEM, "An error occurred during the workflow.");
+        finalizeWorkflow('error');
       }
     } finally {
       setActiveWorkflowMode(null);
@@ -1824,6 +1862,7 @@ const App: React.FC = () => {
           onMultiFileUpload={handleFileUpload}
           onMergeDatasets={handleManualMerge}
           onSyncDataset={handleManualSync}
+          history={history}
         />
       </div>
     </div>
