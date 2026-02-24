@@ -1,0 +1,1326 @@
+{
+  "test_info": {
+    "test_type": "biomarker_query_evaluation",
+    "total_queries": 100,
+    "model": "MedAIBase/MedGemma1.5:4b",
+    "host": "yukon.acm.unc.edu:11434",
+    "test_data": "/ram/USERS/zhuoyu73/Andy/Amyloid_SUVR_Swapped.csv",
+    "timestamp": "20260223_140517"
+  },
+  "statistics": {
+    "total_queries": 100,
+    "successful_queries": 0,
+    "success_rate_percent": 0.0,
+    "researcher_triggered_count": 0,
+    "researcher_trigger_rate_percent": 0.0,
+    "validator_passed_count": 0,
+    "validator_pass_rate_percent": 0.0,
+    "avg_latency_seconds": 23.9,
+    "min_latency_seconds": 8.43,
+    "max_latency_seconds": 53.36,
+    "total_runtime_seconds": 2390.55,
+    "total_runtime_minutes": 39.84
+  },
+  "detailed_results": [
+    {
+      "query_idx": 0,
+      "query": "I want to see normative analysis results. for our fMRI study",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 23.17487072944641,
+      "timestamp": "2026-02-23T13:25:27.251853"
+    },
+    {
+      "query_idx": 1,
+      "query": "Run system segregation analysis and see if it's normal.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 9.438011407852173,
+      "timestamp": "2026-02-23T13:25:50.426733"
+    },
+    {
+      "query_idx": 2,
+      "query": "Do system segregation analysis plus literature review.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 22.91577649116516,
+      "timestamp": "2026-02-23T13:25:59.864749"
+    },
+    {
+      "query_idx": 3,
+      "query": "I need cross-frequency coupling with research context.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 45.21878147125244,
+      "timestamp": "2026-02-23T13:26:22.780530"
+    },
+    {
+      "query_idx": 4,
+      "query": "Execute wavelet decomposition with literature search. on this BOLD data",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 34.09589695930481,
+      "timestamp": "2026-02-23T13:27:07.999318"
+    },
+    {
+      "query_idx": 5,
+      "query": "Run wavelet decomposition plus check typical values.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 13.348686933517456,
+      "timestamp": "2026-02-23T13:27:42.095218"
+    },
+    {
+      "query_idx": 6,
+      "query": "Please execute normative analysis on our data. on the uploaded matrix",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 52.35093426704407,
+      "timestamp": "2026-02-23T13:27:55.443910"
+    },
+    {
+      "query_idx": 7,
+      "query": "Run hub detection and check against published data.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 9.963305711746216,
+      "timestamp": "2026-02-23T13:28:47.794849"
+    },
+    {
+      "query_idx": 8,
+      "query": "Run network hub identification and see if it's normal.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 9.617095708847046,
+      "timestamp": "2026-02-23T13:28:57.758159"
+    },
+    {
+      "query_idx": 9,
+      "query": "Execute functional connectivity then search for similar findings.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 45.41035985946655,
+      "timestamp": "2026-02-23T13:29:07.375258"
+    },
+    {
+      "query_idx": 10,
+      "query": "Do growth curve modeling analysis and see if it matches literature.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.06885075569153,
+      "timestamp": "2026-02-23T13:29:52.953327"
+    },
+    {
+      "query_idx": 11,
+      "query": "We need network hub identification that's been validated.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.4932222366333,
+      "timestamp": "2026-02-23T13:30:13.022181"
+    },
+    {
+      "query_idx": 12,
+      "query": "Do normative analysis and compare to standards.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 18.446927547454834,
+      "timestamp": "2026-02-23T13:30:33.515408"
+    },
+    {
+      "query_idx": 13,
+      "query": "Compute normative analysis for this roi.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 33.05741858482361,
+      "timestamp": "2026-02-23T13:30:51.962339"
+    },
+    {
+      "query_idx": 14,
+      "query": "Do CFC wavelet analysis and see what PubMed says.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 18.096275091171265,
+      "timestamp": "2026-02-23T13:31:25.019765"
+    },
+    {
+      "query_idx": 15,
+      "query": "Execute normative analysis with PubMed validation.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 39.44458627700806,
+      "timestamp": "2026-02-23T13:31:43.116044"
+    },
+    {
+      "query_idx": 16,
+      "query": "Do cross-frequency coupling and validate output.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 22.542400598526,
+      "timestamp": "2026-02-23T13:32:22.560634"
+    },
+    {
+      "query_idx": 17,
+      "query": "Do system segregation analysis and see what research shows.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 22.83467435836792,
+      "timestamp": "2026-02-23T13:32:45.103045"
+    },
+    {
+      "query_idx": 18,
+      "query": "Do normative analysis and see what research shows.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.856184005737305,
+      "timestamp": "2026-02-23T13:33:07.937722"
+    },
+    {
+      "query_idx": 19,
+      "query": "I want normative analysis results that are verified.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 21.991182804107666,
+      "timestamp": "2026-02-23T13:33:28.793909"
+    },
+    {
+      "query_idx": 20,
+      "query": "Run network hub identification and validate the findings.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 29.232242107391357,
+      "timestamp": "2026-02-23T13:33:50.909096"
+    },
+    {
+      "query_idx": 21,
+      "query": "I need functional connectivity with literature comparison. on week 2 data",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 22.598337173461914,
+      "timestamp": "2026-02-23T13:34:20.141341"
+    },
+    {
+      "query_idx": 22,
+      "query": "Run functional connectivity and check what the literature says.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 22.551156997680664,
+      "timestamp": "2026-02-23T13:34:42.739682"
+    },
+    {
+      "query_idx": 23,
+      "query": "Execute cross-frequency coupling with PubMed validation. on the uploaded matrix",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 22.400768041610718,
+      "timestamp": "2026-02-23T13:35:05.290842"
+    },
+    {
+      "query_idx": 24,
+      "query": "Run CFC wavelet analysis and validate with papers.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 34.491231203079224,
+      "timestamp": "2026-02-23T13:35:27.691620"
+    },
+    {
+      "query_idx": 25,
+      "query": "Do connectivity analysis and compare to other studies. using the CSV file",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 27.293264150619507,
+      "timestamp": "2026-02-23T13:36:02.182855"
+    },
+    {
+      "query_idx": 26,
+      "query": "Run CFC wavelet analysis and validate with papers.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 25.792358875274658,
+      "timestamp": "2026-02-23T13:36:29.476130"
+    },
+    {
+      "query_idx": 27,
+      "query": "I need wavelet decomposition compared to published work. for this scan",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.279659271240234,
+      "timestamp": "2026-02-23T13:36:55.268490"
+    },
+    {
+      "query_idx": 28,
+      "query": "Run functional connectivity and validate the findings.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 53.36051893234253,
+      "timestamp": "2026-02-23T13:37:15.548153"
+    },
+    {
+      "query_idx": 29,
+      "query": "I need hub detection validated by literature.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 17.41044592857361,
+      "timestamp": "2026-02-23T13:38:08.908677"
+    },
+    {
+      "query_idx": 30,
+      "query": "Run network hub identification and find similar research. for this scan",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 18.779370069503784,
+      "timestamp": "2026-02-23T13:38:26.452253"
+    },
+    {
+      "query_idx": 31,
+      "query": "Do normative analysis and see what research shows.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.616923093795776,
+      "timestamp": "2026-02-23T13:38:45.231626"
+    },
+    {
+      "query_idx": 32,
+      "query": "Execute CFC wavelet analysis with PubMed validation. on subject 001",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.910283088684082,
+      "timestamp": "2026-02-23T13:39:01.848555"
+    },
+    {
+      "query_idx": 33,
+      "query": "Do network hub identification plus PubMed lookup. on this BOLD data",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 29.39762568473816,
+      "timestamp": "2026-02-23T13:39:18.758843"
+    },
+    {
+      "query_idx": 34,
+      "query": "Do growth curve modeling plus PubMed lookup. for this scan",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 23.77461004257202,
+      "timestamp": "2026-02-23T13:39:48.156472"
+    },
+    {
+      "query_idx": 35,
+      "query": "Do wavelet decomposition and validate output.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 30.007004737854004,
+      "timestamp": "2026-02-23T13:40:11.931093"
+    },
+    {
+      "query_idx": 36,
+      "query": "I need normative analysis with research context.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 26.086093187332153,
+      "timestamp": "2026-02-23T13:40:41.938105"
+    },
+    {
+      "query_idx": 37,
+      "query": "We're testing normative analysis, run it please. on week 2 data",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 17.24771285057068,
+      "timestamp": "2026-02-23T13:41:08.024207"
+    },
+    {
+      "query_idx": 38,
+      "query": "Do hub detection analysis and see if it matches literature. on our dataset",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 17.703571319580078,
+      "timestamp": "2026-02-23T13:41:25.271922"
+    },
+    {
+      "query_idx": 39,
+      "query": "Do normative analysis plus literature review. using AAL atlas",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 23.010584831237793,
+      "timestamp": "2026-02-23T13:41:42.975496"
+    },
+    {
+      "query_idx": 40,
+      "query": "Execute system segregation analysis with statistical context.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.828540802001953,
+      "timestamp": "2026-02-23T13:42:05.987689"
+    },
+    {
+      "query_idx": 41,
+      "query": "Execute connectivity analysis with literature search.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 19.946426153182983,
+      "timestamp": "2026-02-23T13:42:22.816235"
+    },
+    {
+      "query_idx": 42,
+      "query": "We need connectivity analysis that's been validated.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 21.41659379005432,
+      "timestamp": "2026-02-23T13:42:42.762666"
+    },
+    {
+      "query_idx": 43,
+      "query": "Execute normative analysis and search for norms.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 15.203770637512207,
+      "timestamp": "2026-02-23T13:43:04.179266"
+    },
+    {
+      "query_idx": 44,
+      "query": "Do network hub identification then check evidence.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 24.94401717185974,
+      "timestamp": "2026-02-23T13:43:19.383040"
+    },
+    {
+      "query_idx": 45,
+      "query": "I need normative analysis validated by literature. on subject 001",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.373517274856567,
+      "timestamp": "2026-02-23T13:43:44.327060"
+    },
+    {
+      "query_idx": 46,
+      "query": "We need normative analysis that's been validated.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.567004203796387,
+      "timestamp": "2026-02-23T13:44:00.700583"
+    },
+    {
+      "query_idx": 47,
+      "query": "Execute connectivity analysis and compare to published norms. on subject 001",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.846300840377808,
+      "timestamp": "2026-02-23T13:44:17.267597"
+    },
+    {
+      "query_idx": 48,
+      "query": "Run wavelet decomposition and validate against research.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.236255407333374,
+      "timestamp": "2026-02-23T13:44:38.113900"
+    },
+    {
+      "query_idx": 49,
+      "query": "Do growth curve modeling and validate output.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 26.62645983695984,
+      "timestamp": "2026-02-23T13:44:54.350167"
+    },
+    {
+      "query_idx": 50,
+      "query": "Do CFC wavelet analysis and validate output.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 27.524908781051636,
+      "timestamp": "2026-02-23T13:45:20.978976"
+    },
+    {
+      "query_idx": 51,
+      "query": "Need normative analysis on our data, then someone should check it.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 21.893263339996338,
+      "timestamp": "2026-02-23T13:45:48.503898"
+    },
+    {
+      "query_idx": 52,
+      "query": "Can you run cross-frequency coupling and find research about it?",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 24.550175189971924,
+      "timestamp": "2026-02-23T13:46:10.397167"
+    },
+    {
+      "query_idx": 53,
+      "query": "Run connectivity analysis and validate against research. for this scan",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 19.809092044830322,
+      "timestamp": "2026-02-23T13:46:34.947345"
+    },
+    {
+      "query_idx": 54,
+      "query": "Do functional connectivity plus PubMed lookup. for this scan",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 30.346115112304688,
+      "timestamp": "2026-02-23T13:46:54.756441"
+    },
+    {
+      "query_idx": 55,
+      "query": "Do wavelet decomposition then search PubMed for validation. on this BOLD data",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.1104474067688,
+      "timestamp": "2026-02-23T13:47:25.102567"
+    },
+    {
+      "query_idx": 56,
+      "query": "Do connectivity analysis and compare to standards.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 24.801045417785645,
+      "timestamp": "2026-02-23T13:47:45.213017"
+    },
+    {
+      "query_idx": 57,
+      "query": "I need normative analysis with literature comparison.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 32.264283657073975,
+      "timestamp": "2026-02-23T13:48:10.014067"
+    },
+    {
+      "query_idx": 58,
+      "query": "Can you run connectivity analysis and find research about it? for our fMRI study",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 24.748915433883667,
+      "timestamp": "2026-02-23T13:48:42.278355"
+    },
+    {
+      "query_idx": 59,
+      "query": "Do connectivity analysis plus PubMed lookup.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 27.675128698349,
+      "timestamp": "2026-02-23T13:49:07.027274"
+    },
+    {
+      "query_idx": 60,
+      "query": "I need normative analysis metrics.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 36.403889894485474,
+      "timestamp": "2026-02-23T13:49:34.704624"
+    },
+    {
+      "query_idx": 61,
+      "query": "Do normative analysis and check what's typical.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 15.247049808502197,
+      "timestamp": "2026-02-23T13:50:11.108517"
+    },
+    {
+      "query_idx": 62,
+      "query": "Run CFC wavelet analysis plus check typical values.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 9.569645404815674,
+      "timestamp": "2026-02-23T13:50:26.355571"
+    },
+    {
+      "query_idx": 63,
+      "query": "I need CFC wavelet analysis plus evidence from research papers. on this BOLD data",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 27.7570378780365,
+      "timestamp": "2026-02-23T13:50:35.925220"
+    },
+    {
+      "query_idx": 64,
+      "query": "Run network hub identification and check against published data. on our dataset",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 8.934026718139648,
+      "timestamp": "2026-02-23T13:51:03.682278"
+    },
+    {
+      "query_idx": 65,
+      "query": "Do network hub identification and see what research shows.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 21.794679641723633,
+      "timestamp": "2026-02-23T13:51:12.616311"
+    },
+    {
+      "query_idx": 66,
+      "query": "Run normative analysis and show me the results. for this scan",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.97707986831665,
+      "timestamp": "2026-02-23T13:51:34.410995"
+    },
+    {
+      "query_idx": 67,
+      "query": "Run hub detection and check against published data.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 8.429512739181519,
+      "timestamp": "2026-02-23T13:51:51.388087"
+    },
+    {
+      "query_idx": 68,
+      "query": "I need connectivity analysis plus evidence from research papers. on our dataset",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.20925736427307,
+      "timestamp": "2026-02-23T13:51:59.817602"
+    },
+    {
+      "query_idx": 69,
+      "query": "Do connectivity analysis plus PubMed lookup. using AAL atlas",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.06899642944336,
+      "timestamp": "2026-02-23T13:52:20.026865"
+    },
+    {
+      "query_idx": 70,
+      "query": "Run normative analysis and validate with papers.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 24.47051978111267,
+      "timestamp": "2026-02-23T13:52:40.098602"
+    },
+    {
+      "query_idx": 71,
+      "query": "Execute cross-frequency coupling and compare to published norms.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 25.55192255973816,
+      "timestamp": "2026-02-23T13:53:04.569125"
+    },
+    {
+      "query_idx": 72,
+      "query": "Run normative analysis then find relevant papers. using AAL atlas",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 28.800124168395996,
+      "timestamp": "2026-02-23T13:53:30.121058"
+    },
+    {
+      "query_idx": 73,
+      "query": "Run system segregation analysis and validate with papers.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 34.11671686172485,
+      "timestamp": "2026-02-23T13:53:58.921189"
+    },
+    {
+      "query_idx": 74,
+      "query": "Do growth curve modeling and see what research shows.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.226690530776978,
+      "timestamp": "2026-02-23T13:54:33.038061"
+    },
+    {
+      "query_idx": 75,
+      "query": "Execute hub detection then search for similar findings.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 18.713903188705444,
+      "timestamp": "2026-02-23T13:54:53.264754"
+    },
+    {
+      "query_idx": 76,
+      "query": "Run CFC wavelet analysis and compare to population norms.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 21.0445339679718,
+      "timestamp": "2026-02-23T13:55:11.978661"
+    },
+    {
+      "query_idx": 77,
+      "query": "I need growth curve modeling with literature comparison.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.98032855987549,
+      "timestamp": "2026-02-23T13:55:33.023201"
+    },
+    {
+      "query_idx": 78,
+      "query": "Do network hub identification analysis and see if it matches literature. on week 2 data",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.95074224472046,
+      "timestamp": "2026-02-23T13:55:50.003539"
+    },
+    {
+      "query_idx": 79,
+      "query": "I've got data, can you do normative analysis? using AAL atlas",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 29.587233781814575,
+      "timestamp": "2026-02-23T13:56:10.954284"
+    },
+    {
+      "query_idx": 80,
+      "query": "Run cross-frequency coupling and validate the findings.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 25.613378286361694,
+      "timestamp": "2026-02-23T13:56:40.544115"
+    },
+    {
+      "query_idx": 81,
+      "query": "Execute cross-frequency coupling with PubMed validation.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 36.4216628074646,
+      "timestamp": "2026-02-23T13:57:06.157502"
+    },
+    {
+      "query_idx": 82,
+      "query": "Do CFC wavelet analysis and see what PubMed says.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 18.441165924072266,
+      "timestamp": "2026-02-23T13:57:42.579171"
+    },
+    {
+      "query_idx": 83,
+      "query": "Run normative analysis and check what the literature says. using the CSV file",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.45679783821106,
+      "timestamp": "2026-02-23T13:58:01.020341"
+    },
+    {
+      "query_idx": 84,
+      "query": "Run wavelet decomposition and check what the literature says. on this BOLD data",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 17.581462621688843,
+      "timestamp": "2026-02-23T13:58:17.477144"
+    },
+    {
+      "query_idx": 85,
+      "query": "Run network hub identification and validate the findings.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 24.791197061538696,
+      "timestamp": "2026-02-23T13:58:35.058611"
+    },
+    {
+      "query_idx": 86,
+      "query": "Do functional connectivity and validate output.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 41.934263944625854,
+      "timestamp": "2026-02-23T13:58:59.849813"
+    },
+    {
+      "query_idx": 87,
+      "query": "Run cross-frequency coupling and validate findings.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 30.57601523399353,
+      "timestamp": "2026-02-23T13:59:41.784083"
+    },
+    {
+      "query_idx": 88,
+      "query": "Run normative analysis plus check typical values.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 14.980549335479736,
+      "timestamp": "2026-02-23T14:00:12.360102"
+    },
+    {
+      "query_idx": 89,
+      "query": "Run connectivity analysis and see if it's normal.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 35.535911321640015,
+      "timestamp": "2026-02-23T14:00:27.340654"
+    },
+    {
+      "query_idx": 90,
+      "query": "Can we get normative analysis done and validated?",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 29.10778284072876,
+      "timestamp": "2026-02-23T14:01:02.879652"
+    },
+    {
+      "query_idx": 91,
+      "query": "Execute system segregation analysis with literature search.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 24.662742376327515,
+      "timestamp": "2026-02-23T14:01:31.987438"
+    },
+    {
+      "query_idx": 92,
+      "query": "I need network hub identification with literature comparison.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.996681690216064,
+      "timestamp": "2026-02-23T14:01:56.650184"
+    },
+    {
+      "query_idx": 93,
+      "query": "Run normative analysis with verification.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 35.83623504638672,
+      "timestamp": "2026-02-23T14:02:17.646872"
+    },
+    {
+      "query_idx": 94,
+      "query": "Do hub detection plus literature review.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 19.400529623031616,
+      "timestamp": "2026-02-23T14:02:53.483111"
+    },
+    {
+      "query_idx": 95,
+      "query": "Run normative analysis and find similar research.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 23.915157079696655,
+      "timestamp": "2026-02-23T14:03:12.883650"
+    },
+    {
+      "query_idx": 96,
+      "query": "We need growth curve modeling that's been validated.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 20.559399127960205,
+      "timestamp": "2026-02-23T14:03:36.798809"
+    },
+    {
+      "query_idx": 97,
+      "query": "Execute CFC wavelet analysis with statistical context.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 41.93668460845947,
+      "timestamp": "2026-02-23T14:03:57.358212"
+    },
+    {
+      "query_idx": 98,
+      "query": "Execute normative analysis and check correctness.",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 16.739490509033203,
+      "timestamp": "2026-02-23T14:04:39.294900"
+    },
+    {
+      "query_idx": 99,
+      "query": "Execute normative analysis processing. for our fMRI study",
+      "success": false,
+      "validator_passed": false,
+      "researcher_retrieved_papers": 0,
+      "researcher_triggered": false,
+      "errors": [
+        "Empty pipeline output"
+      ],
+      "latency_seconds": 21.748507976531982,
+      "timestamp": "2026-02-23T14:04:56.034393"
+    }
+  ]
+}

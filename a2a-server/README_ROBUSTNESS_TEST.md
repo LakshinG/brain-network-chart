@@ -53,6 +53,18 @@ This test evaluates the orchestrator's robustness by running 500 completely dive
 
 ---
 
+## ✅ Latest Result Summary
+
+Robustness test for user question -> Researcher PubMed search -> result
+
+Biomarker queries (tabular data):
+- Success rate = 93.6%
+- Average time per query = 19.33s
+
+Stored in: `biomarker_evaluation_results_500q_20260223_185943.json`
+
+---
+
 ## 🚀 Quick Start
 
 ### Run Small Test (10 queries, ~2-3 minutes):
@@ -158,23 +170,23 @@ The following keywords in a query **SHOULD** trigger the researcher:
   },
   "summary_stats": {
     "total": 500,
-    "successful": 485,
-    "success_rate": 0.97,
-    "researcher_correct": 455,
-    "researcher_accuracy": 0.91,
-    "avg_execution_time": 2.5,
-    "total_errors": 15
+    "successful": 500,
+    "success_rate": 1.0,
+    "researcher_correct": 479,
+    "researcher_accuracy": 0.958,
+    "avg_execution_time": 18.23,
+    "total_errors": 0
   },
   "researcher_analysis": {
-    "expected_triggers": 175,
-    "actual_triggers": 168,
-    "true_positives": 162,
-    "false_positives": 6,
-    "true_negatives": 293,
-    "false_negatives": 13,
-    "precision": 0.96,
-    "recall": 0.93,
-    "accuracy": 0.91
+    "expected_triggers": 186,
+    "actual_triggers": 165,
+    "true_positives": 165,
+    "false_positives": 0,
+    "true_negatives": 314,
+    "false_negatives": 21,
+    "precision": 1.0,
+    "recall": 0.8871,
+    "accuracy": 0.958
   },
   "detailed_results": [...]
 }
@@ -186,16 +198,16 @@ The following keywords in a query **SHOULD** trigger the researcher:
                  Predicted Positive    Predicted Negative
                  (Researcher Called)   (Researcher Skipped)
 Actual Positive  True Positive (TP)    False Negative (FN)
-(Should Call)    162                   13
+(Should Call)    165                   21
 
 Actual Negative  False Positive (FP)   True Negative (TN)
-(Shouldn't Call) 6                     293
+(Shouldn't Call) 0                     314
 ```
 
 **Metrics:**
-- **Precision** = TP/(TP+FP) = 162/(162+6) = 96.4%
-- **Recall** = TP/(TP+FN) = 162/(162+13) = 92.6%
-- **Accuracy** = (TP+TN)/(Total) = (162+293)/500 = 91.0%
+- **Precision** = TP/(TP+FP) = 165/(165+0) = 100.0%
+- **Recall** = TP/(TP+FN) = 165/(165+21) = 88.7%
+- **Accuracy** = (TP+TN)/(Total) = (165+314)/500 = 95.8%
 
 ---
 

@@ -1,0 +1,1631 @@
+{
+  "test_info": {
+    "n_queries": 100,
+    "model": "MedAIBase/MedGemma1.5:4b",
+    "host": "yukon.acm.unc.edu:11434",
+    "test_data": "/ram/USERS/zhuoyu73/Andy/Amyloid_SUVR_Swapped.csv",
+    "timestamp": "20260218_003343"
+  },
+  "summary_stats": {
+    "total": 100,
+    "successful": 100,
+    "success_rate": 1.0,
+    "researcher_correct": 94,
+    "researcher_accuracy": 0.94,
+    "avg_execution_time": 18.20581348657608,
+    "total_errors": 0
+  },
+  "researcher_analysis": {
+    "expected_triggers": 38,
+    "actual_triggers": 32,
+    "true_positives": 32,
+    "false_positives": 0,
+    "true_negatives": 62,
+    "false_negatives": 6,
+    "precision": 1.0,
+    "recall": 0.8421052631578947,
+    "accuracy": 0.94
+  },
+  "detailed_results": [
+    {
+      "query_num": 1,
+      "query": "Do cross-frequency coupling and ensure it's accurate.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "cross-frequency coupling",
+        "index": 1
+      },
+      "timestamp": "2026-02-18T00:03:12.911460",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 32.956141233444214
+    },
+    {
+      "query_num": 2,
+      "query": "Run network hub identification on the matrix. with 116 ROIs",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "network hub identification",
+        "index": 2
+      },
+      "timestamp": "2026-02-18T00:03:45.967912",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 10.834258556365967
+    },
+    {
+      "query_num": 3,
+      "query": "Run cross-frequency coupling and validate the findings.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "cross-frequency coupling",
+        "index": 3
+      },
+      "timestamp": "2026-02-18T00:03:56.902491",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 21.69268274307251
+    },
+    {
+      "query_num": 4,
+      "query": "Compute hub detection for this roi. on week 2 data",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "hub detection",
+        "index": 4
+      },
+      "timestamp": "2026-02-18T00:04:18.695484",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 12.645168542861938
+    },
+    {
+      "query_num": 5,
+      "query": "Do hub detection and see what PubMed says.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "hub detection",
+        "index": 5
+      },
+      "timestamp": "2026-02-18T00:04:31.440972",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 17.267777919769287
+    },
+    {
+      "query_num": 6,
+      "query": "Execute wavelet decomposition on the uploaded file. on this BOLD data",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 6
+      },
+      "timestamp": "2026-02-18T00:04:48.809067",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 18.377832174301147
+    },
+    {
+      "query_num": 7,
+      "query": "Run growth curve modeling and find normative data.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "growth curve modeling",
+        "index": 7
+      },
+      "timestamp": "2026-02-18T00:05:07.287236",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": false,
+      "errors": [],
+      "execution_time_seconds": 18.781842470169067
+    },
+    {
+      "query_num": 8,
+      "query": "Do wavelet decomposition on this file: our data file",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 8
+      },
+      "timestamp": "2026-02-18T00:05:26.169420",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 18.85842275619507
+    },
+    {
+      "query_num": 9,
+      "query": "Do connectivity analysis on this scan data.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "connectivity analysis",
+        "index": 9
+      },
+      "timestamp": "2026-02-18T00:05:45.128076",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 16.169013500213623
+    },
+    {
+      "query_num": 10,
+      "query": "Do CFC wavelet analysis analysis and see if it matches literature. on our dataset",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "CFC wavelet analysis",
+        "index": 10
+      },
+      "timestamp": "2026-02-18T00:06:01.397401",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 19.243651628494263
+    },
+    {
+      "query_num": 11,
+      "query": "Can we get hub detection done today?",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "hub detection",
+        "index": 11
+      },
+      "timestamp": "2026-02-18T00:06:20.741358",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 20.348928451538086
+    },
+    {
+      "query_num": 12,
+      "query": "Run wavelet decomposition and confirm it's correct.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 12
+      },
+      "timestamp": "2026-02-18T00:06:41.190610",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 15.190755128860474
+    },
+    {
+      "query_num": 13,
+      "query": "Run CFC wavelet analysis and compare to population norms.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "CFC wavelet analysis",
+        "index": 13
+      },
+      "timestamp": "2026-02-18T00:06:56.481636",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 26.269742727279663
+    },
+    {
+      "query_num": 14,
+      "query": "Can you compute CFC wavelet analysis? on this BOLD data",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "CFC wavelet analysis",
+        "index": 14
+      },
+      "timestamp": "2026-02-18T00:07:22.851702",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 19.47551202774048
+    },
+    {
+      "query_num": 15,
+      "query": "Run network hub identification and validate the findings.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "network hub identification",
+        "index": 15
+      },
+      "timestamp": "2026-02-18T00:07:42.427517",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 26.43421173095703
+    },
+    {
+      "query_num": 16,
+      "query": "Need connectivity analysis computation.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "connectivity analysis",
+        "index": 16
+      },
+      "timestamp": "2026-02-18T00:08:08.962007",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 13.316092729568481
+    },
+    {
+      "query_num": 17,
+      "query": "Execute connectivity analysis for this scan. using the CSV file",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "connectivity analysis",
+        "index": 17
+      },
+      "timestamp": "2026-02-18T00:08:22.378462",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 11.633670330047607
+    },
+    {
+      "query_num": 18,
+      "query": "Do wavelet decomposition then look up expected ranges. with 116 ROIs",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "wavelet decomposition",
+        "index": 18
+      },
+      "timestamp": "2026-02-18T00:08:34.112339",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 22.911584854125977
+    },
+    {
+      "query_num": 19,
+      "query": "Apply wavelet decomposition method please. on the uploaded matrix",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 19
+      },
+      "timestamp": "2026-02-18T00:08:57.124164",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 11.15186071395874
+    },
+    {
+      "query_num": 20,
+      "query": "I need wavelet decomposition for publication.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 20
+      },
+      "timestamp": "2026-02-18T00:09:08.376268",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 16.60653281211853
+    },
+    {
+      "query_num": 21,
+      "query": "Execute growth curve modeling and search for norms.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "growth curve modeling",
+        "index": 21
+      },
+      "timestamp": "2026-02-18T00:09:25.083097",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 53.313923597335815
+    },
+    {
+      "query_num": 22,
+      "query": "Can we get hub detection done and validated?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": true,
+        "tool": "hub detection",
+        "index": 22
+      },
+      "timestamp": "2026-02-18T00:10:18.497323",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": false,
+      "errors": [],
+      "execution_time_seconds": 12.781420469284058
+    },
+    {
+      "query_num": 23,
+      "query": "Run hub detection and show me the results.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "hub detection",
+        "index": 23
+      },
+      "timestamp": "2026-02-18T00:10:31.378946",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 17.197174310684204
+    },
+    {
+      "query_num": 24,
+      "query": "I need functional connectivity with quality check.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "functional connectivity",
+        "index": 24
+      },
+      "timestamp": "2026-02-18T00:10:48.676502",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 10.057144165039062
+    },
+    {
+      "query_num": 25,
+      "query": "Do connectivity analysis plus PubMed lookup.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "connectivity analysis",
+        "index": 25
+      },
+      "timestamp": "2026-02-18T00:10:58.834004",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 15.784276485443115
+    },
+    {
+      "query_num": 26,
+      "query": "Can you do cross-frequency coupling and verify results?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "cross-frequency coupling",
+        "index": 26
+      },
+      "timestamp": "2026-02-18T00:11:14.718586",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 14.481876611709595
+    },
+    {
+      "query_num": 27,
+      "query": "Run wavelet decomposition and compare to population norms.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "wavelet decomposition",
+        "index": 27
+      },
+      "timestamp": "2026-02-18T00:11:29.300715",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 31.64295744895935
+    },
+    {
+      "query_num": 28,
+      "query": "Run a quick growth curve modeling analysis. on this BOLD data",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "growth curve modeling",
+        "index": 28
+      },
+      "timestamp": "2026-02-18T00:12:01.043987",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 26.5452778339386
+    },
+    {
+      "query_num": 29,
+      "query": "Execute functional connectivity and make sure it's right.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "functional connectivity",
+        "index": 29
+      },
+      "timestamp": "2026-02-18T00:12:27.689623",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 12.012793779373169
+    },
+    {
+      "query_num": 30,
+      "query": "Do growth curve modeling and see what research shows.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "growth curve modeling",
+        "index": 30
+      },
+      "timestamp": "2026-02-18T00:12:39.802752",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 15.763852596282959
+    },
+    {
+      "query_num": 31,
+      "query": "Can we do normative analysis? for this scan",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "normative analysis",
+        "index": 31
+      },
+      "timestamp": "2026-02-18T00:12:55.666898",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 16.114935159683228
+    },
+    {
+      "query_num": 32,
+      "query": "Run hub detection then find relevant papers.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "hub detection",
+        "index": 32
+      },
+      "timestamp": "2026-02-18T00:13:11.882141",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 16.693565845489502
+    },
+    {
+      "query_num": 33,
+      "query": "I need functional connectivity with quality check.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "functional connectivity",
+        "index": 33
+      },
+      "timestamp": "2026-02-18T00:13:28.676007",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 12.463244915008545
+    },
+    {
+      "query_num": 34,
+      "query": "Can you run cross-frequency coupling on this dataset?",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "cross-frequency coupling",
+        "index": 34
+      },
+      "timestamp": "2026-02-18T00:13:41.239613",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 24.553693532943726
+    },
+    {
+      "query_num": 35,
+      "query": "Apply functional connectivity method please. for our fMRI study",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "functional connectivity",
+        "index": 35
+      },
+      "timestamp": "2026-02-18T00:14:05.893646",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 10.817441701889038
+    },
+    {
+      "query_num": 36,
+      "query": "Run CFC wavelet analysis then search for statistics. with 116 ROIs",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "CFC wavelet analysis",
+        "index": 36
+      },
+      "timestamp": "2026-02-18T00:14:16.811402",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 31.085181713104248
+    },
+    {
+      "query_num": 37,
+      "query": "Do cross-frequency coupling plus literature review.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "cross-frequency coupling",
+        "index": 37
+      },
+      "timestamp": "2026-02-18T00:14:47.996895",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 27.50960922241211
+    },
+    {
+      "query_num": 38,
+      "query": "We need connectivity analysis that's been validated.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": true,
+        "tool": "connectivity analysis",
+        "index": 38
+      },
+      "timestamp": "2026-02-18T00:15:15.606874",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": false,
+      "errors": [],
+      "execution_time_seconds": 11.497268676757812
+    },
+    {
+      "query_num": 39,
+      "query": "Can you run connectivity analysis and verify?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "connectivity analysis",
+        "index": 39
+      },
+      "timestamp": "2026-02-18T00:15:27.204456",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 11.38571047782898
+    },
+    {
+      "query_num": 40,
+      "query": "I need network hub identification with research context.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "network hub identification",
+        "index": 40
+      },
+      "timestamp": "2026-02-18T00:15:38.690434",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 26.958284854888916
+    },
+    {
+      "query_num": 41,
+      "query": "Run CFC wavelet analysis and validate the findings.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "CFC wavelet analysis",
+        "index": 41
+      },
+      "timestamp": "2026-02-18T00:16:05.749067",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 19.893759965896606
+    },
+    {
+      "query_num": 42,
+      "query": "I've got fMRI data - can we look at system segregation analysis and make sure it's reasonable?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "system segregation analysis",
+        "index": 42
+      },
+      "timestamp": "2026-02-18T00:16:25.743206",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 9.187979936599731
+    },
+    {
+      "query_num": 43,
+      "query": "Can we do network hub identification?",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "network hub identification",
+        "index": 43
+      },
+      "timestamp": "2026-02-18T00:16:35.031514",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 9.295713186264038
+    },
+    {
+      "query_num": 44,
+      "query": "Run wavelet decomposition on network data.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 44
+      },
+      "timestamp": "2026-02-18T00:16:44.427578",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 18.74336075782776
+    },
+    {
+      "query_num": 45,
+      "query": "Execute functional connectivity processing.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "functional connectivity",
+        "index": 45
+      },
+      "timestamp": "2026-02-18T00:17:03.271271",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 21.774402379989624
+    },
+    {
+      "query_num": 46,
+      "query": "Run functional connectivity and validate the findings.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "functional connectivity",
+        "index": 46
+      },
+      "timestamp": "2026-02-18T00:17:25.145913",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 10.48669695854187
+    },
+    {
+      "query_num": 47,
+      "query": "Run cross-frequency coupling then search for statistics.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "cross-frequency coupling",
+        "index": 47
+      },
+      "timestamp": "2026-02-18T00:17:35.733000",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 14.728713274002075
+    },
+    {
+      "query_num": 48,
+      "query": "I need wavelet decomposition with research support.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "wavelet decomposition",
+        "index": 48
+      },
+      "timestamp": "2026-02-18T00:17:50.562038",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 20.25927233695984
+    },
+    {
+      "query_num": 49,
+      "query": "I need growth curve modeling with research support.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "growth curve modeling",
+        "index": 49
+      },
+      "timestamp": "2026-02-18T00:18:10.921573",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 20.567453861236572
+    },
+    {
+      "query_num": 50,
+      "query": "Execute CFC wavelet analysis with statistical context. on week 2 data",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "CFC wavelet analysis",
+        "index": 50
+      },
+      "timestamp": "2026-02-18T00:18:31.589320",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": false,
+      "errors": [],
+      "execution_time_seconds": 18.768423557281494
+    },
+    {
+      "query_num": 51,
+      "query": "Can you do system segregation analysis and verify results?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "system segregation analysis",
+        "index": 51
+      },
+      "timestamp": "2026-02-18T00:18:50.461202",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 20.046831607818604
+    },
+    {
+      "query_num": 52,
+      "query": "Need wavelet decomposition on our data, then someone should check it.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 52
+      },
+      "timestamp": "2026-02-18T00:19:10.608384",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 11.692081689834595
+    },
+    {
+      "query_num": 53,
+      "query": "Do growth curve modeling and ensure it's accurate.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "growth curve modeling",
+        "index": 53
+      },
+      "timestamp": "2026-02-18T00:19:22.400811",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 10.458662033081055
+    },
+    {
+      "query_num": 54,
+      "query": "Can someone run CFC wavelet analysis?",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "CFC wavelet analysis",
+        "index": 54
+      },
+      "timestamp": "2026-02-18T00:19:32.959687",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 13.951107263565063
+    },
+    {
+      "query_num": 55,
+      "query": "Run system segregation analysis on network data.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "system segregation analysis",
+        "index": 55
+      },
+      "timestamp": "2026-02-18T00:19:47.011104",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 25.161223649978638
+    },
+    {
+      "query_num": 56,
+      "query": "I need network hub identification compared to published work. using the CSV file",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "network hub identification",
+        "index": 56
+      },
+      "timestamp": "2026-02-18T00:20:12.272702",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 21.570801973342896
+    },
+    {
+      "query_num": 57,
+      "query": "Do functional connectivity on this file: /ram/USERS/zhuoyu73/Andy/Amyloid_SUVR_Swapped.csv",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "functional connectivity",
+        "index": 57
+      },
+      "timestamp": "2026-02-18T00:20:33.943822",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 11.733818769454956
+    },
+    {
+      "query_num": 58,
+      "query": "Execute functional connectivity then search for similar findings.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "functional connectivity",
+        "index": 58
+      },
+      "timestamp": "2026-02-18T00:20:45.777946",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 36.84279942512512
+    },
+    {
+      "query_num": 59,
+      "query": "Run wavelet decomposition then look up what studies show.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "wavelet decomposition",
+        "index": 59
+      },
+      "timestamp": "2026-02-18T00:21:22.721046",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 17.327221155166626
+    },
+    {
+      "query_num": 60,
+      "query": "Execute normative analysis on the uploaded file.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "normative analysis",
+        "index": 60
+      },
+      "timestamp": "2026-02-18T00:21:40.148608",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 17.90861463546753
+    },
+    {
+      "query_num": 61,
+      "query": "Execute normative analysis on the uploaded file. using AAL atlas",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "normative analysis",
+        "index": 61
+      },
+      "timestamp": "2026-02-18T00:21:58.157604",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 18.45180368423462
+    },
+    {
+      "query_num": 62,
+      "query": "I need network hub identification for publication. on the uploaded matrix",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "network hub identification",
+        "index": 62
+      },
+      "timestamp": "2026-02-18T00:22:16.709750",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 9.543325662612915
+    },
+    {
+      "query_num": 63,
+      "query": "Run growth curve modeling then find relevant papers.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "growth curve modeling",
+        "index": 63
+      },
+      "timestamp": "2026-02-18T00:22:26.353463",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 18.82454824447632
+    },
+    {
+      "query_num": 64,
+      "query": "Apply cross-frequency coupling method please. for this scan",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "cross-frequency coupling",
+        "index": 64
+      },
+      "timestamp": "2026-02-18T00:22:45.278313",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 12.230452060699463
+    },
+    {
+      "query_num": 65,
+      "query": "Execute wavelet decomposition with quality control.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 65
+      },
+      "timestamp": "2026-02-18T00:22:57.609070",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 21.83843970298767
+    },
+    {
+      "query_num": 66,
+      "query": "Apply hub detection method please. on this BOLD data",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "hub detection",
+        "index": 66
+      },
+      "timestamp": "2026-02-18T00:23:19.547822",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 9.961732387542725
+    },
+    {
+      "query_num": 67,
+      "query": "Execute wavelet decomposition with PubMed validation.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "wavelet decomposition",
+        "index": 67
+      },
+      "timestamp": "2026-02-18T00:23:29.609850",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 30.887760162353516
+    },
+    {
+      "query_num": 68,
+      "query": "Do normative analysis and send results. on the uploaded matrix",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "normative analysis",
+        "index": 68
+      },
+      "timestamp": "2026-02-18T00:24:00.597956",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 10.48457384109497
+    },
+    {
+      "query_num": 69,
+      "query": "I've got fMRI data - can we look at connectivity analysis and make sure it's reasonable?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "connectivity analysis",
+        "index": 69
+      },
+      "timestamp": "2026-02-18T00:24:11.182834",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 11.410943984985352
+    },
+    {
+      "query_num": 70,
+      "query": "Do functional connectivity then find evidence in papers.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "functional connectivity",
+        "index": 70
+      },
+      "timestamp": "2026-02-18T00:24:22.694086",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 26.900785207748413
+    },
+    {
+      "query_num": 71,
+      "query": "Do hub detection plus literature review.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "hub detection",
+        "index": 71
+      },
+      "timestamp": "2026-02-18T00:24:49.695147",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 20.115280151367188
+    },
+    {
+      "query_num": 72,
+      "query": "Can you run wavelet decomposition and find research about it?",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "wavelet decomposition",
+        "index": 72
+      },
+      "timestamp": "2026-02-18T00:25:09.911095",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 32.61630725860596
+    },
+    {
+      "query_num": 73,
+      "query": "Do connectivity analysis and validate output.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "connectivity analysis",
+        "index": 73
+      },
+      "timestamp": "2026-02-18T00:25:42.627958",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 23.020448923110962
+    },
+    {
+      "query_num": 74,
+      "query": "Can you do functional connectivity and verify results?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "functional connectivity",
+        "index": 74
+      },
+      "timestamp": "2026-02-18T00:26:05.748687",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 10.33712649345398
+    },
+    {
+      "query_num": 75,
+      "query": "Do hub detection and check against norms.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "hub detection",
+        "index": 75
+      },
+      "timestamp": "2026-02-18T00:26:16.186117",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 23.458868265151978
+    },
+    {
+      "query_num": 76,
+      "query": "Do connectivity analysis and see what PubMed says. for this scan",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "connectivity analysis",
+        "index": 76
+      },
+      "timestamp": "2026-02-18T00:26:39.745296",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 15.799776077270508
+    },
+    {
+      "query_num": 77,
+      "query": "I need cross-frequency coupling with research support. for our fMRI study",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "cross-frequency coupling",
+        "index": 77
+      },
+      "timestamp": "2026-02-18T00:26:55.645463",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 32.18159508705139
+    },
+    {
+      "query_num": 78,
+      "query": "Run growth curve modeling and validate against research. on this BOLD data",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "growth curve modeling",
+        "index": 78
+      },
+      "timestamp": "2026-02-18T00:27:27.927305",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 18.409942150115967
+    },
+    {
+      "query_num": 79,
+      "query": "Run cross-frequency coupling and compare to population norms.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "cross-frequency coupling",
+        "index": 79
+      },
+      "timestamp": "2026-02-18T00:27:46.437564",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 21.792319297790527
+    },
+    {
+      "query_num": 80,
+      "query": "I've got fMRI data - can we look at CFC wavelet analysis and make sure it's reasonable?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "CFC wavelet analysis",
+        "index": 80
+      },
+      "timestamp": "2026-02-18T00:28:08.330165",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 10.390115022659302
+    },
+    {
+      "query_num": 81,
+      "query": "Do cross-frequency coupling and validate output.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "cross-frequency coupling",
+        "index": 81
+      },
+      "timestamp": "2026-02-18T00:28:18.820589",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 11.537217855453491
+    },
+    {
+      "query_num": 82,
+      "query": "Run growth curve modeling with verification.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "growth curve modeling",
+        "index": 82
+      },
+      "timestamp": "2026-02-18T00:28:30.458190",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 21.533855438232422
+    },
+    {
+      "query_num": 83,
+      "query": "Please execute hub detection on our data. using the CSV file",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "hub detection",
+        "index": 83
+      },
+      "timestamp": "2026-02-18T00:28:52.092305",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 17.666629791259766
+    },
+    {
+      "query_num": 84,
+      "query": "I want system segregation analysis results that are verified.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "system segregation analysis",
+        "index": 84
+      },
+      "timestamp": "2026-02-18T00:29:09.859240",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 9.830623626708984
+    },
+    {
+      "query_num": 85,
+      "query": "I need cross-frequency coupling with literature comparison. on subject 001",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "cross-frequency coupling",
+        "index": 85
+      },
+      "timestamp": "2026-02-18T00:29:19.790117",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 20.98405408859253
+    },
+    {
+      "query_num": 86,
+      "query": "Run cross-frequency coupling and confirm it's correct.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "cross-frequency coupling",
+        "index": 86
+      },
+      "timestamp": "2026-02-18T00:29:40.874462",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 9.338902711868286
+    },
+    {
+      "query_num": 87,
+      "query": "I need connectivity analysis with quality check.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "connectivity analysis",
+        "index": 87
+      },
+      "timestamp": "2026-02-18T00:29:50.313649",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 8.947382926940918
+    },
+    {
+      "query_num": 88,
+      "query": "Can you process this with wavelet decomposition? on week 2 data",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 88
+      },
+      "timestamp": "2026-02-18T00:29:59.361315",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 14.450767517089844
+    },
+    {
+      "query_num": 89,
+      "query": "I need wavelet decomposition metrics. on week 2 data",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "wavelet decomposition",
+        "index": 89
+      },
+      "timestamp": "2026-02-18T00:30:13.912378",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 25.98750066757202
+    },
+    {
+      "query_num": 90,
+      "query": "Need network hub identification on our data, then someone should check it.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "network hub identification",
+        "index": 90
+      },
+      "timestamp": "2026-02-18T00:30:40.000193",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 19.925211668014526
+    },
+    {
+      "query_num": 91,
+      "query": "Can you compute CFC wavelet analysis? using AAL atlas",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "CFC wavelet analysis",
+        "index": 91
+      },
+      "timestamp": "2026-02-18T00:31:00.025687",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 29.671489000320435
+    },
+    {
+      "query_num": 92,
+      "query": "Execute network hub identification with statistical context.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "network hub identification",
+        "index": 92
+      },
+      "timestamp": "2026-02-18T00:31:29.797450",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": false,
+      "errors": [],
+      "execution_time_seconds": 11.752479314804077
+    },
+    {
+      "query_num": 93,
+      "query": "I've got fMRI data - can we look at connectivity analysis and make sure it's reasonable?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "connectivity analysis",
+        "index": 93
+      },
+      "timestamp": "2026-02-18T00:31:41.650231",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 11.406037330627441
+    },
+    {
+      "query_num": 94,
+      "query": "Run system segregation analysis then find relevant papers.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "system segregation analysis",
+        "index": 94
+      },
+      "timestamp": "2026-02-18T00:31:53.156502",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 15.529582262039185
+    },
+    {
+      "query_num": 95,
+      "query": "Do cross-frequency coupling on this file: /ram/USERS/zhuoyu73/Andy/Amyloid_SUVR_Swapped.csv",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "cross-frequency coupling",
+        "index": 95
+      },
+      "timestamp": "2026-02-18T00:32:08.786412",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 14.504324436187744
+    },
+    {
+      "query_num": 96,
+      "query": "Can we get cross-frequency coupling done and validated?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": true,
+        "tool": "cross-frequency coupling",
+        "index": 96
+      },
+      "timestamp": "2026-02-18T00:32:23.391026",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": false,
+      "errors": [],
+      "execution_time_seconds": 11.463411569595337
+    },
+    {
+      "query_num": 97,
+      "query": "Run cross-frequency coupling on network data.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "cross-frequency coupling",
+        "index": 97
+      },
+      "timestamp": "2026-02-18T00:32:34.954711",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 16.64681077003479
+    },
+    {
+      "query_num": 98,
+      "query": "Please do normative analysis on the BOLD data.",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "normative analysis",
+        "index": 98
+      },
+      "timestamp": "2026-02-18T00:32:51.701831",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 11.056129455566406
+    },
+    {
+      "query_num": 99,
+      "query": "Run normative analysis then search for statistics.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "normative analysis",
+        "index": 99
+      },
+      "timestamp": "2026-02-18T00:33:02.858260",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 14.72683572769165
+    },
+    {
+      "query_num": 100,
+      "query": "Do system segregation analysis and check what's typical.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "system segregation analysis",
+        "index": 100
+      },
+      "timestamp": "2026-02-18T00:33:17.685377",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 25.741703987121582
+    }
+  ]
+}

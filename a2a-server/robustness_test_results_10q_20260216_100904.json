@@ -1,0 +1,191 @@
+{
+  "test_info": {
+    "n_queries": 10,
+    "model": "MedAIBase/MedGemma1.5:4b",
+    "host": "yukon.acm.unc.edu:11434",
+    "test_data": "/ram/USERS/zhuoyu73/Andy/Amyloid_SUVR_Swapped.csv",
+    "timestamp": "20260216_100904"
+  },
+  "summary_stats": {
+    "total": 10,
+    "successful": 10,
+    "success_rate": 1.0,
+    "researcher_correct": 10,
+    "researcher_accuracy": 1.0,
+    "avg_execution_time": 26.61159794330597,
+    "total_errors": 0
+  },
+  "researcher_analysis": {
+    "expected_triggers": 4,
+    "actual_triggers": 4,
+    "true_positives": 4,
+    "false_positives": 0,
+    "true_negatives": 6,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "accuracy": 1.0
+  },
+  "detailed_results": [
+    {
+      "query_num": 1,
+      "query": "Do hub detection and compare to other studies.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "hub detection",
+        "index": 1
+      },
+      "timestamp": "2026-02-16T10:04:37.628185",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 32.54410243034363
+    },
+    {
+      "query_num": 2,
+      "query": "I've got fMRI data - can we look at CFC wavelet analysis and make sure it's reasonable?",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "CFC wavelet analysis",
+        "index": 2
+      },
+      "timestamp": "2026-02-16T10:05:10.272628",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 19.923004150390625
+    },
+    {
+      "query_num": 3,
+      "query": "Can you run network hub identification and find research about it?",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "network hub identification",
+        "index": 3
+      },
+      "timestamp": "2026-02-16T10:05:30.295906",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 30.064992666244507
+    },
+    {
+      "query_num": 4,
+      "query": "Run wavelet decomposition then look up what studies show.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "wavelet decomposition",
+        "index": 4
+      },
+      "timestamp": "2026-02-16T10:06:00.461218",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 35.53153944015503
+    },
+    {
+      "query_num": 5,
+      "query": "Can we get network hub identification done today? on subject 001",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "network hub identification",
+        "index": 5
+      },
+      "timestamp": "2026-02-16T10:06:36.093074",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 22.736267566680908
+    },
+    {
+      "query_num": 6,
+      "query": "Do normative analysis and ensure it's accurate.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "normative analysis",
+        "index": 6
+      },
+      "timestamp": "2026-02-16T10:06:58.929708",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 30.92168354988098
+    },
+    {
+      "query_num": 7,
+      "query": "Do normative analysis and double-check the output.",
+      "metadata": {
+        "type": "mixed",
+        "should_trigger_researcher": false,
+        "tool": "normative analysis",
+        "index": 7
+      },
+      "timestamp": "2026-02-16T10:07:29.951837",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 23.34852933883667
+    },
+    {
+      "query_num": 8,
+      "query": "Execute functional connectivity processing. on subject 001",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "functional connectivity",
+        "index": 8
+      },
+      "timestamp": "2026-02-16T10:07:53.400772",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 41.32435607910156
+    },
+    {
+      "query_num": 9,
+      "query": "We need connectivity analysis - can you help? for this scan",
+      "metadata": {
+        "type": "simple_tool",
+        "should_trigger_researcher": false,
+        "tool": "connectivity analysis",
+        "index": 9
+      },
+      "timestamp": "2026-02-16T10:08:34.825486",
+      "success": true,
+      "researcher_triggered": false,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 14.364293575286865
+    },
+    {
+      "query_num": 10,
+      "query": "Do connectivity analysis then search PubMed for validation.",
+      "metadata": {
+        "type": "literature_focused",
+        "should_trigger_researcher": true,
+        "tool": "connectivity analysis",
+        "index": 10
+      },
+      "timestamp": "2026-02-16T10:08:49.290148",
+      "success": true,
+      "researcher_triggered": true,
+      "researcher_correct": true,
+      "errors": [],
+      "execution_time_seconds": 15.357210636138916
+    }
+  ]
+}

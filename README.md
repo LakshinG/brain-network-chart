@@ -92,27 +92,40 @@ Node backend (`backend/server.mjs`)
 MCP Server(s)
 ```
 
+## Examples questions:
+1. Click on `Demo` button.
+2. Type: Study on the correlation between Amyloid_lS_orbital_med and Tau_Global grouping by DX.
+3. Click on the visualization card to enter editing mode. Type: Change dot color to red.
+4. Click on download button to get SVG of the plot.
+5. Type: Clustering samples into k=3 clusters given their regional Amyloid. 
+
 ## Example data
 See `uploaded_files`
 
 ## Robustness test
 Details refer to `a2a-server/README_ROBUSTNESS_TEST.md`
 
+Biomarker queries (tabular data):
+- Success rate = 93.6%
+- Average time per query = 19.33s
+
+Note on metric differences: the 93.6% figure is the end-to-end biomarker pipeline success rate (full pipeline completion + validator pass), while the 95.8% figure below is the researcher-trigger decision accuracy in the robustness test. These measure different tasks on different datasets, so the values are not expected to match.
+
 **Confusion Matrix**
 ```
                  Predicted Positive    Predicted Negative
                  (Researcher Called)   (Researcher Skipped)
 Actual Positive  True Positive (TP)    False Negative (FN)
-(Should Call)    162                   13
+(Should Call)    165                   21
 
 Actual Negative  False Positive (FP)   True Negative (TN)
-(Shouldn't Call) 6                     293
+(Shouldn't Call) 0                     314
 ```
 
 **Metrics:**
-- **Precision** = TP/(TP+FP) = 162/(162+6) = 96.4%
-- **Recall** = TP/(TP+FN) = 162/(162+13) = 92.6%
-- **Accuracy** = (TP+TN)/(Total) = (162+293)/500 = 91.0%
+- **Precision** = TP/(TP+FP) = 165/(165+0) = 100.0%
+- **Recall** = TP/(TP+FN) = 165/(165+21) = 88.7%
+- **Accuracy** = (TP+TN)/(Total) = (165+314)/500 = 95.8%
 
 **Tool calling times**
 
@@ -128,3 +141,4 @@ Actual Negative  False Positive (FP)   True Negative (TN)
 ✅ hub detection                  - 38 queries (7.6%)
 ✅ growth curve modeling          - 35 queries (7.0%)
 ```
+
