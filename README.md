@@ -46,6 +46,8 @@ Biomarker queries (tabular data):
 - Success rate = 93.6%
 - Average time per query = 19.33s
 
+Note on metric differences: the 93.6% figure is the end-to-end biomarker pipeline success rate (full pipeline completion + validator pass), while the 95.8% figure below is the researcher-trigger decision accuracy in the robustness test. These measure different tasks on different datasets, so the values are not expected to match.
+
 **Confusion Matrix**
 ```
                  Predicted Positive    Predicted Negative
