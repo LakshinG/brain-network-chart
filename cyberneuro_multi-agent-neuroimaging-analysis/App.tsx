@@ -33,7 +33,7 @@ import { chartDataToCode, prepareDataScope } from './utils/chartToCode';
 import ChatArea from './components/Chat/ChatArea';
 import VisualizerArea from './components/Visualizer/VisualizerArea';
 import ResizablePanels from './components/ResizablePanels';
-import { X, Pencil, Database } from 'lucide-react';
+import { X, Pencil, Database, Download } from 'lucide-react';
 import { getMockVisualization, getAllMockVisualizations } from './mockVisualizations';
 import { useWorkflow } from './hooks/useWorkflow';
 
@@ -1875,32 +1875,35 @@ const App: React.FC = () => {
         </button>
       </div>
 
-      <div className="space-y-2 text-[11px] leading-relaxed">
-        <p>
-          <span className="font-semibold">1) Install Ollama</span>: 
-          <a
-            href="https://ollama.com/download"
-            target="_blank"
-            rel="noreferrer"
-            className="ml-1 underline text-amber-200 hover:text-amber-100"
-          >
-            https://ollama.com/download
-          </a>
-        </p>
-        <p><span className="font-semibold">2) Pull a free cloud model</span>: <span className="font-mono">ollama pull gpt-oss:20b-cloud</span></p>
-        <div>
-          <p className="font-semibold">3) Configure CORS and restart Ollama</p>
-          <p className="mt-1 text-amber-300/90">Linux (systemd):</p>
-          <p className="font-mono">sudo systemctl edit ollama</p>
-          <p className="font-mono">[Service]</p>
-          <p className="font-mono">Environment="OLLAMA_HOST=0.0.0.0:11434"</p>
-          <p className="font-mono">Environment="OLLAMA_ORIGINS={pageOrigin}"</p>
-          <p className="font-mono">sudo systemctl daemon-reload && sudo systemctl restart ollama</p>
-          <p className="mt-1 text-amber-300/90">Windows (PowerShell):</p>
-          <p className="font-mono">[Environment]::SetEnvironmentVariable("OLLAMA_HOST","0.0.0.0:11434","User")</p>
-          <p className="font-mono">[Environment]::SetEnvironmentVariable("OLLAMA_ORIGINS","{pageOrigin}","User")</p>
-          <p>Then quit and reopen Ollama app.</p>
-        </div>
+      <p className="mb-3 text-[11px] text-amber-300/90">
+        Download and run the setup script for your OS. It will install Ollama,
+        configure CORS, and pull the default model automatically.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <a
+          href={`${import.meta.env.BASE_URL}scripts/setup_ollama.bat`}
+          download
+          className="inline-flex items-center gap-1.5 rounded-md bg-amber-700/60 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-600/70 transition-colors"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Windows
+        </a>
+        <a
+          href={`${import.meta.env.BASE_URL}scripts/setup_ollama_macos.sh`}
+          download
+          className="inline-flex items-center gap-1.5 rounded-md bg-amber-700/60 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-600/70 transition-colors"
+        >
+          <Download className="h-3.5 w-3.5" />
+          macOS
+        </a>
+        <a
+          href={`${import.meta.env.BASE_URL}scripts/setup_ollama_linux.sh`}
+          download
+          className="inline-flex items-center gap-1.5 rounded-md bg-amber-700/60 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-600/70 transition-colors"
+        >
+          <Download className="h-3.5 w-3.5" />
+          Linux
+        </a>
       </div>
     </div>
   ) : null;
