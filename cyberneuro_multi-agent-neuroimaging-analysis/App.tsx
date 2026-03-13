@@ -1883,21 +1883,23 @@ const App: React.FC = () => {
 
       <p className="mb-3 text-[11px] text-amber-300/90">
         Download and run the setup script for your OS. It will install Ollama,
-        configure CORS, and pull the default model automatically.
+        configure CORS, log in, and pull the default model automatically.
       </p>
       <div className="flex flex-wrap gap-2">
         <a
           href={`${import.meta.env.BASE_URL}scripts/setup_ollama.bat`}
           download
           className="inline-flex items-center gap-1.5 rounded-md bg-amber-700/60 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-600/70 transition-colors"
+          title="Double-click the downloaded .bat file to run"
         >
           <Download className="h-3.5 w-3.5" />
           Windows
         </a>
         <a
-          href={`${import.meta.env.BASE_URL}scripts/setup_ollama_macos.sh`}
+          href={`${import.meta.env.BASE_URL}scripts/setup_ollama_macos.command`}
           download
           className="inline-flex items-center gap-1.5 rounded-md bg-amber-700/60 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-600/70 transition-colors"
+          title="Right-click → Open the downloaded .command file to run"
         >
           <Download className="h-3.5 w-3.5" />
           macOS
@@ -1906,11 +1908,15 @@ const App: React.FC = () => {
           href={`${import.meta.env.BASE_URL}scripts/setup_ollama_linux.sh`}
           download
           className="inline-flex items-center gap-1.5 rounded-md bg-amber-700/60 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-600/70 transition-colors"
+          title="Run: chmod +x setup_ollama_linux.sh && ./setup_ollama_linux.sh"
         >
           <Download className="h-3.5 w-3.5" />
           Linux
         </a>
       </div>
+      <p className="mt-2 text-[10px] text-amber-400/70">
+        macOS: right-click the file → Open. Linux: run <span className="font-mono">chmod +x</span> first, then double-click.
+      </p>
     </div>
   ) : null;
 
