@@ -7,7 +7,7 @@ echo ============================================================
 echo.
 
 :: ---- Step 1 - Install Ollama --------------------------------
-echo [Step 1/4] Installing Ollama...
+echo [Step 1/5] Installing Ollama...
 
 where ollama >nul 2>&1
 if !ERRORLEVEL! equ 0 (
@@ -38,7 +38,7 @@ echo   Ollama installed successfully.
 :step2
 :: ---- Step 2 - Configure environment variables ---------------
 echo.
-echo [Step 2/4] Configuring environment variables...
+echo [Step 2/5] Configuring environment variables...
 
 :: Persist to User-level registry
 powershell -NoProfile -Command ^
@@ -54,7 +54,7 @@ echo   OLLAMA_ORIGINS = https://acmlab.github.io
 
 :: ---- Step 3 - Restart Ollama --------------------------------
 echo.
-echo [Step 3/4] Restarting Ollama with new configuration...
+echo [Step 3/5] Restarting Ollama with new configuration...
 
 taskkill /f /im "Ollama.exe" >nul 2>&1
 taskkill /f /im "ollama app.exe" >nul 2>&1
@@ -70,7 +70,7 @@ set RETRIES=0
 :wait_loop
 if !RETRIES! geq 15 (
     echo   WARNING: Ollama did not respond within 30 seconds.
-    echo   Attempting model pull anyway...
+    echo   Attempting login anyway...
     goto :step4
 )
 timeout /t 2 /nobreak >nul
@@ -83,9 +83,21 @@ set /a RETRIES+=1
 goto :wait_loop
 
 :step4
-:: ---- Step 4 - Pull the default model ------------------------
+:: ---- Step 4 - Login to Ollama -------------------------------
 echo.
-echo [Step 4/4] Pulling model gpt-oss:20b-cloud (this may take a while)...
+echo [Step 4/5] Logging in to Ollama...
+echo   (If prompted, enter your Ollama credentials.)
+echo.
+ollama login
+
+if !ERRORLEVEL! neq 0 (
+    echo   WARNING: Login failed or was skipped. Model pull may fail
+    echo   if the model requires authentication.
+)
+
+:: ---- Step 5 - Pull the default model ------------------------
+echo.
+echo [Step 5/5] Pulling model gpt-oss:20b-cloud (this may take a while)...
 ollama pull gpt-oss:20b-cloud
 
 if !ERRORLEVEL! neq 0 (

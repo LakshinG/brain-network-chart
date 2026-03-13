@@ -9,7 +9,7 @@ echo
 # -----------------------------------------------------------
 # Step 1 - Install Ollama
 # -----------------------------------------------------------
-echo "[Step 1/4] Installing Ollama..."
+echo "[Step 1/5] Installing Ollama..."
 
 if command -v ollama &>/dev/null; then
     echo "  Ollama is already installed: $(ollama --version 2>/dev/null || echo 'unknown version')"
@@ -23,7 +23,7 @@ echo
 # -----------------------------------------------------------
 # Step 2 - Configure CORS environment variables
 # -----------------------------------------------------------
-echo "[Step 2/4] Configuring OLLAMA_HOST and OLLAMA_ORIGINS..."
+echo "[Step 2/5] Configuring OLLAMA_HOST and OLLAMA_ORIGINS..."
 
 OLLAMA_HOST_VAL="0.0.0.0:11434"
 OLLAMA_ORIGINS_VAL="https://acmlab.github.io"
@@ -60,7 +60,7 @@ echo
 # -----------------------------------------------------------
 # Step 3 - Restart Ollama
 # -----------------------------------------------------------
-echo "[Step 3/4] Restarting Ollama with new configuration..."
+echo "[Step 3/5] Restarting Ollama with new configuration..."
 
 pkill -x "Ollama" 2>/dev/null || true
 pkill -x "ollama" 2>/dev/null || true
@@ -88,9 +88,19 @@ done
 echo
 
 # -----------------------------------------------------------
-# Step 4 - Pull the default model
+# Step 4 - Login to Ollama
 # -----------------------------------------------------------
-echo "[Step 4/4] Pulling model gpt-oss:20b-cloud (this may take a while)..."
+echo "[Step 4/5] Logging in to Ollama..."
+echo "  (If prompted, enter your Ollama credentials.)"
+echo
+ollama login || echo "  WARNING: Login failed or was skipped."
+
+echo
+
+# -----------------------------------------------------------
+# Step 5 - Pull the default model
+# -----------------------------------------------------------
+echo "[Step 5/5] Pulling model gpt-oss:20b-cloud (this may take a while)..."
 ollama pull gpt-oss:20b-cloud || echo "  WARNING: Model pull failed. Make sure Ollama is running and try again."
 
 echo
