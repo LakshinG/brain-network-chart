@@ -94,6 +94,8 @@ interface ChatAreaProps {
   onImageRemove: (uploadedAt: number, e: React.MouseEvent) => void;
   onMergeDatasets: () => void;
   onSyncDataset: () => void;
+  disableSend?: boolean;
+  disableSendHint?: string;
   // NEW: workflow history
   history: WorkflowHistory;
 }
@@ -103,6 +105,7 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   placeholder,
   datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload, onImageUpload,
   uploadedImages, activeImageId, onImageToggle, onImageRemove, onMergeDatasets, onSyncDataset,
+  disableSend = false, disableSendHint,
   history,
 }) => {
   const [input, setInput] = useState('');
@@ -228,7 +231,7 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (input.trim() && !isProcessing) {
+    if (input.trim() && !isProcessing && !disableSend) {
       onSendMessage(input);
       setInput('');
     }
@@ -459,8 +462,8 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={isProcessing}
-            placeholder={inputPlaceholder}
+            disabled={isProcessing || disableSend}
+            placeholder={disableSend ? (disableSendHint || 'No models available — connect Ollama first') : inputPlaceholder}
             className="flex-1 bg-slate-800 text-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 disabled:opacity-50 placeholder-slate-500"
           />
           <button
@@ -474,7 +477,7 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
           </button>
           <button
             type="submit"
-            disabled={!input.trim() || isProcessing}
+            disabled={!input.trim() || isProcessing || disableSend}
             className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors"
           >
             <Send className="w-4 h-4" />

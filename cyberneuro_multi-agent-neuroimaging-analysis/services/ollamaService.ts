@@ -4,7 +4,7 @@ import { McpTool, ChatMessage, AgentType } from "../types";
 import { PROMPTS } from "../constants";
 import { validatePlanColumns } from './internalTools';
 
-const DEFAULT_OLLAMA_HOST = 'http://127.0.0.1:11434';
+const DEFAULT_OLLAMA_HOST = 'http://localhost:11434';
 const OLLAMA_HOST_STORAGE_KEY = 'neuroagent.ollamaHost';
 
 const normalizeHttpUrl = (value: string) => value.trim().replace(/\/$/, '');

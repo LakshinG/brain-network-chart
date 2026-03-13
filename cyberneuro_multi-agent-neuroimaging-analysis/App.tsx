@@ -1675,16 +1675,17 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {availableModels.length > 0 && (
-        <div className="flex flex-col gap-2 text-xs">
+      <div className="flex flex-col gap-2 text-xs">
           <div className="flex gap-2">
           <div className="flex flex-col gap-1 w-1/3">
             <label className="text-slate-500">General Model</label>
             <select 
-              value={selectedGeneralModel} 
+              value={availableModels.length > 0 ? selectedGeneralModel : ''} 
               onChange={handleGeneralModelChange}
-              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
+              disabled={availableModels.length === 0}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
             >
+              {availableModels.length === 0 && <option value="">No models</option>}
               {availableModels.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
@@ -1693,10 +1694,12 @@ const App: React.FC = () => {
           <div className="flex flex-col gap-1 w-1/3">
             <label className="text-slate-500">Neuro Model</label>
             <select 
-              value={selectedNeuroModel} 
+              value={availableModels.length > 0 ? selectedNeuroModel : ''} 
               onChange={handleNeuroModelChange}
-              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500"
+              disabled={availableModels.length === 0}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
             >
+              {availableModels.length === 0 && <option value="">No models</option>}
               {availableModels.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
@@ -1707,10 +1710,12 @@ const App: React.FC = () => {
               <Pencil className="w-3 h-3" /> Visualizer
             </label>
             <select 
-              value={visualizerModel} 
+              value={availableModels.length > 0 ? visualizerModel : ''} 
               onChange={(e) => setVisualizerModel(e.target.value)}
-              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-500"
+              disabled={availableModels.length === 0}
+              className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-cyan-500 disabled:opacity-50"
             >
+              {availableModels.length === 0 && <option value="">No models</option>}
               {availableModels.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
@@ -1753,7 +1758,6 @@ const App: React.FC = () => {
                 </label>
           </div>
         </div>
-      )}
 
       
       {selectedVisualizationId && (
@@ -1853,6 +1857,8 @@ const App: React.FC = () => {
           onMultiFileUpload={handleFileUpload}
           onMergeDatasets={handleManualMerge}
           onSyncDataset={handleManualSync}
+          disableSend={availableModels.length === 0}
+          disableSendHint="No models available — connect Ollama first"
           history={history}
         />
       </div>
