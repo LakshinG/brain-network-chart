@@ -33,12 +33,38 @@ import { chartDataToCode, prepareDataScope } from './utils/chartToCode';
 import ChatArea from './components/Chat/ChatArea';
 import VisualizerArea from './components/Visualizer/VisualizerArea';
 import ResizablePanels from './components/ResizablePanels';
-import { X, Pencil, Database, Download } from 'lucide-react';
+import { X, Pencil, Database, Copy } from 'lucide-react';
 import { getMockVisualization, getAllMockVisualizations } from './mockVisualizations';
 import { useWorkflow } from './hooks/useWorkflow';
 
 const VISUALIZER_AGENT = AgentType.EXECUTOR;
 const WORKFLOW_ABORTED_ERROR = '__WORKFLOW_ABORTED__';
+
+function CopyableCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="flex items-center gap-2 rounded-md bg-slate-800/80 border border-slate-600 px-2 py-1.5 font-mono text-[11px] text-slate-200">
+      <code className="flex-1 break-all">{command}</code>
+      <button
+        onClick={handleCopy}
+        className="flex-shrink-0 rounded p-1 text-amber-400 hover:bg-amber-900/40 hover:text-amber-200 transition-colors"
+        title="Copy"
+      >
+        <Copy className="h-3.5 w-3.5" />
+      </button>
+      {copied && <span className="text-[10px] text-green-400">Copied!</span>}
+    </div>
+  );
+}
 
 interface UploadedImage {
   fileName: string;
@@ -1882,41 +1908,23 @@ const App: React.FC = () => {
       </div>
 
       <p className="mb-3 text-[11px] text-amber-300/90">
-        Download and run the setup script for your OS. It will install Ollama,
-        configure CORS, log in, and pull the default model automatically.
+        Copy the command below, paste it into your terminal, and press Enter.
+        No file download — runs in memory, bypasses chmod and Gatekeeper.
       </p>
-      <div className="flex flex-wrap gap-2">
-        <a
-          href={`${import.meta.env.BASE_URL}scripts/setup_ollama.bat`}
-          download
-          className="inline-flex items-center gap-1.5 rounded-md bg-amber-700/60 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-600/70 transition-colors"
-          title="Double-click the downloaded .bat file to run"
-        >
-          <Download className="h-3.5 w-3.5" />
-          Windows
-        </a>
-        <a
-          href={`${import.meta.env.BASE_URL}scripts/setup_ollama_macos.command`}
-          download
-          className="inline-flex items-center gap-1.5 rounded-md bg-amber-700/60 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-600/70 transition-colors"
-          title="Right-click → Open the downloaded .command file to run"
-        >
-          <Download className="h-3.5 w-3.5" />
-          macOS
-        </a>
-        <a
-          href={`${import.meta.env.BASE_URL}scripts/setup_ollama_linux.sh`}
-          download
-          className="inline-flex items-center gap-1.5 rounded-md bg-amber-700/60 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-600/70 transition-colors"
-          title="Run: chmod +x setup_ollama_linux.sh && ./setup_ollama_linux.sh"
-        >
-          <Download className="h-3.5 w-3.5" />
-          Linux
-        </a>
+      <div className="space-y-3">
+        <div>
+          <p className="mb-1 text-[10px] text-amber-400/80">Windows (PowerShell)</p>
+          <CopyableCommand
+            command={`irm ${typeof window !== 'undefined' ? window.location.origin + import.meta.env.BASE_URL : ''}scripts/setup_ollama.ps1 | iex`}
+          />
+        </div>
+        <div>
+          <p className="mb-1 text-[10px] text-amber-400/80">macOS / Linux</p>
+          <CopyableCommand
+            command={`curl -fsSL ${typeof window !== 'undefined' ? window.location.origin + import.meta.env.BASE_URL : ''}scripts/setup_ollama.sh | sh`}
+          />
+        </div>
       </div>
-      <p className="mt-2 text-[10px] text-amber-400/70">
-        macOS: right-click the file → Open. Linux: run <span className="font-mono">chmod +x</span> first, then double-click.
-      </p>
     </div>
   ) : null;
 
