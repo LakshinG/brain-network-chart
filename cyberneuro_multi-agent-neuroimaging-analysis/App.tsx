@@ -3,7 +3,6 @@ import {
   AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool, SuspendedState, CorrelationResult, DatasetRow
 } from './types';
 import { MOCK_CSV_DATA } from './constants';
-import { parseCSV, mergeDatasets, datasetToCSV } from './utils/stats';
 import { 
   generateNeuroPlan,
   generateGeneralPlan,
@@ -150,12 +149,6 @@ const App: React.FC = () => {
     const message = error?.message || String(error);
     return message === WORKFLOW_ABORTED_ERROR;
   };
-
-  // Derived active dataset (merged)
-  const activeDataset = useMemo(() => {
-    const selected = datasets.filter(d => activeDatasetIds.includes(d.id));
-    return mergeDatasets(selected);
-  }, [datasets, activeDatasetIds]);
 
   useEffect(() => {
     if (!ollamaConnected) {
@@ -1881,7 +1874,7 @@ const App: React.FC = () => {
           onDatasetToggle={toggleDataset}
           onDatasetRemove={removeDataset}
           onMultiFileUpload={handleFileUpload}
-          onMergeDatasets={handleManualMerge}
+  
           onSyncDataset={handleManualSync}
           disableSend={availableModels.length === 0}
           disableSendHint="No models available — connect Ollama first"
