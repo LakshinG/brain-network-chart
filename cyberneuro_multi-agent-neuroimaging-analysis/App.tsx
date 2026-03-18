@@ -254,26 +254,17 @@ const App: React.FC = () => {
       uploadActiveDataset(true);
   };
 
-  const handleManualMerge = () => {
+  const handleManualMerge = async () => {
       if (activeDatasetIds.length < 2) {
           addMessage(AgentType.SYSTEM, "Please select 2 or more datasets to merge.");
           return;
       }
       if (!activeDataset) return;
 
-      const newId = `merged-${Date.now()}`;
-      // Create a persistent copy of the currently computed 'activeDataset'
-      const newDataset: Dataset = {
-          ...activeDataset,
-          id: newId,
-          name: `Merged (${activeDatasetIds.length} files)`,
-          serverFilename: undefined // Explicitly undefined so it gets uploaded on selection
-      };
-
-      setDatasets(prev => [...prev, newDataset]);
-      // Switch selection to the new merged dataset
-      setActiveDatasetIds([newId]);
-      addMessage(AgentType.SYSTEM, `Merged ${activeDatasetIds.length} datasets into "${newDataset.name}" and added to file list.`);
+      // Automatically construct a query for the data manipulator agent to process
+      const selectedNames = datasets.filter(d => activeDatasetIds.includes(d.id)).map(d => d.name);
+      const query = `Merge datasets ${selectedNames.join(' and ')}`;
+      await handleUserQuery(query);
   };
 
   const handleChangeOllamaUrl = async () => {
@@ -1459,6 +1450,73 @@ const App: React.FC = () => {
           ? `Identified intent: ${intent}`
           : `Identified intent: ${intent}. No dataset loaded but image context exists, routing to: ${effectiveIntent}`
       );
+
+      if (effectiveIntent === 'DATA_MANIPULATION') {
+        setActiveWorkflowMode('DATASET');
+        wf.setPhase('executing');
+        addMessage(AgentType.DATA_MANIPULATOR, "Analyzing datasets for manipulation...");
+
+        try {
+          const availableFiles = datasets.map(d => d.name);
+          const response = await fetch('http://localhost:8015/manipulate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_query: query,
+              available_files: availableFiles
+            })
+          });
+
+          if (!response.ok) {
+            throw new Error(`Data Manipulator Agent responded with ${response.status}`);
+          }
+
+          const manipulationResult = await response.json();
+          addMessage(AgentType.DATA_MANIPULATOR, `Decision: ${manipulationResult.explanation}`, {
+            tool: manipulationResult.tool_to_call,
+            parameters: manipulationResult.parameters
+          });
+
+          if (manipulationResult.tool_to_call === 'merge_datasets') {
+            addMessage(AgentType.SYSTEM, "Executing merge based on agent instructions...");
+
+            const filePaths = manipulationResult.parameters.file_paths || [];
+            const outputFilename = manipulationResult.parameters.output_filename || `Merged_${Date.now()}`;
+
+            const datasetsToMerge = datasets.filter(d => filePaths.includes(d.name));
+
+            if (datasetsToMerge.length < 2) {
+              addMessage(AgentType.SYSTEM, "Agent could not find at least two valid datasets to merge. Please check your dataset names.");
+            } else {
+               const newId = `merged-${Date.now()}`;
+               const mergedDatasetRaw = mergeDatasets(datasetsToMerge);
+
+               if (mergedDatasetRaw) {
+                 const newDataset: Dataset = {
+                     ...mergedDatasetRaw,
+                     id: newId,
+                     name: outputFilename,
+                     serverFilename: undefined
+                 };
+
+                 setDatasets(prev => [...prev, newDataset]);
+                 setActiveDatasetIds([newId]);
+                 addMessage(AgentType.SYSTEM, `Merged ${datasetsToMerge.length} datasets into "${newDataset.name}" successfully.`);
+               }
+            }
+          } else if (manipulationResult.tool_to_call === 'error') {
+            addMessage(AgentType.SYSTEM, `Error from Data Manipulator: ${manipulationResult.explanation}`);
+          } else {
+            addMessage(AgentType.SYSTEM, `Unknown tool requested by Data Manipulator: ${manipulationResult.tool_to_call}`);
+          }
+        } catch (e: any) {
+          console.error("Data Manipulator Error:", e);
+          addMessage(AgentType.SYSTEM, `Failed to connect to Data Manipulator Agent (Port 8015): ${e.message}`);
+        }
+
+        finalizeWorkflow('done');
+        return;
+      }
 
       if (effectiveIntent === 'VISION') {
         setActiveWorkflowMode('IMAGE');
