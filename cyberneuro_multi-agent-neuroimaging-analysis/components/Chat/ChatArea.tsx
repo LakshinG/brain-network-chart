@@ -3,7 +3,7 @@ import { ChatMessage, AgentType, Dataset } from '../../types';
 import { WorkflowHistory, WorkflowRecord } from '../../workflowTypes';
 import MessageBubble from './MessageBubble';
 import ThinkingOverlay from '../AgentProgress/ThinkingOverlay';
-import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw, ImagePlus } from 'lucide-react';
+import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw, ImagePlus, Download } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Roles that stay visible in the outer chat stream.
@@ -87,6 +87,7 @@ interface ChatAreaProps {
   activeDatasetIds: string[];
   onDatasetToggle: (id: string) => void;
   onDatasetRemove: (id: string, e: React.MouseEvent) => void;
+  onDatasetDownload?: (id: string, e: React.MouseEvent) => void;
   onMultiFileUpload: (files: FileList | null) => void;
   onImageUpload: (files: FileList | null) => void;
   uploadedImages: { fileName: string; uploadedAt: number }[];
@@ -104,7 +105,7 @@ interface ChatAreaProps {
 const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   messages, onSendMessage, onAbortWorkflow, canAbortWorkflow, disableAddCsv = false, disableAddImage = false, addCsvDisabledHint, addImageDisabledHint, onFileUpload, onLoadDemo, isProcessing, hasData, highlightedMessageId, onRestartStep,
   placeholder,
-  datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onMultiFileUpload, onImageUpload,
+  datasets, activeDatasetIds, onDatasetToggle, onDatasetRemove, onDatasetDownload, onMultiFileUpload, onImageUpload,
   uploadedImages, activeImageId, onImageToggle, onImageRemove, onMergeDatasets, onSyncDataset,
   disableSend = false, disableSendHint,
   history,
@@ -411,9 +412,19 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                           >
                               {isActive && <CheckCircle2 className="w-3 h-3 text-indigo-400" />}
                               <span className="truncate max-w-[120px]">{ds.name}</span>
+                              {onDatasetDownload && (
+                                  <button
+                                  onClick={(e) => onDatasetDownload(ds.id, e)}
+                                  className="opacity-0 group-hover:opacity-100 hover:text-indigo-400 transition-opacity"
+                                  title="Download CSV"
+                                  >
+                                      <Download className="w-3 h-3" />
+                                  </button>
+                              )}
                               <button
                               onClick={(e) => onDatasetRemove(ds.id, e)}
                               className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
+                              title="Remove"
                               >
                                   <Trash2 className="w-3 h-3" />
                               </button>

@@ -627,6 +627,22 @@ const App: React.FC = () => {
       setActiveDatasetIds(prev => prev.filter(did => did !== id));
   };
 
+  const downloadDataset = (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const ds = datasets.find(d => d.id === id);
+      if (!ds) return;
+      const csvStr = datasetToCSV(ds);
+      const blob = new Blob([csvStr], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = ds.name.endsWith('.csv') ? ds.name : `${ds.name}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+  };
+
   const toggleDataset = (id: string) => {
     setActiveDatasetIds(prev => {
         if (prev.includes(id)) {
@@ -1942,6 +1958,7 @@ const App: React.FC = () => {
           activeDatasetIds={activeDatasetIds}
           onDatasetToggle={toggleDataset}
           onDatasetRemove={removeDataset}
+          onDatasetDownload={downloadDataset}
           onMultiFileUpload={handleFileUpload}
           onMergeDatasets={handleManualMerge}
           onSyncDataset={handleManualSync}
