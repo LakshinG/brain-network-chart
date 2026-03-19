@@ -3,7 +3,7 @@ import { ChatMessage, AgentType, Dataset } from '../../types';
 import { WorkflowHistory, WorkflowRecord } from '../../workflowTypes';
 import MessageBubble from './MessageBubble';
 import ThinkingOverlay from '../AgentProgress/ThinkingOverlay';
-import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw, ImagePlus, Download } from 'lucide-react';
+import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw, ImagePlus, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import {runBidsConversion, BidsConvertResultItem} from '../DicomProcess/BidsConversionForm';
 /* ═══════════════════════════════════════════════════════════════════════════
    Roles that stay visible in the outer chat stream.
@@ -110,6 +110,7 @@ function BidsConversionForm({ onResult }: { onResult: (item: BidsConvertResultIt
   const [outputDir, setOutputDir] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [isExpanded, setIsExpanded] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -122,24 +123,74 @@ function BidsConversionForm({ onResult }: { onResult: (item: BidsConvertResultIt
   }
 
   return (
-    <form onSubmit={handleSubmit} className="section">
-      <div className="section-title">DICOM → BIDS Conversion</div>
-      <div className="form-row">
-        <label className="form-label">DICOM Source Directory (server path)</label>
-        <input className="form-input" value={dataDir} onChange={e => setDataDir(e.target.value)} required placeholder="/data/ADNI_raw" />
-      </div>
-      <div className="form-row">
-        <label className="form-label">BIDS Output Directory (server path)</label>
-        <input className="form-input" value={outputDir} onChange={e => setOutputDir(e.target.value)} required placeholder="/data/bids_output" />
-      </div>
-      <div className="example-hint">
-        Auto-classifies and converts DICOM to BIDS using dicom2bids_agent; shows validation report on completion
-      </div>
-      {error && <div className="error-msg">{error}</div>}
-      <button className="btn btn-primary" type="submit" disabled={loading || !dataDir || !outputDir}>
-        {loading ? 'Converting (may take several minutes)…' : 'Start Conversion'}
+    <div className="border-t border-slate-800">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full p-4 bg-slate-900 hover:bg-slate-800/50 transition-colors flex items-center justify-between text-left"
+      >
+        <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+          DICOM → BIDS Conversion
+        </h3>
+        {isExpanded ? (
+          <ChevronUp className="w-4 h-4 text-slate-400" />
+        ) : (
+          <ChevronDown className="w-4 h-4 text-slate-400" />
+        )}
       </button>
-    </form>
+
+      {isExpanded && (
+        <div className="p-4 bg-slate-900 border-t border-slate-800">
+          <p className="text-xs text-slate-400 mb-4">
+            Auto-classifies and converts DICOM to BIDS using dicom2bids_agent; shows validation report on completion
+          </p>
+
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">
+                DICOM Source Directory (server path)
+              </label>
+              <input
+                type="text"
+                className="w-full bg-slate-800 text-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 placeholder-slate-500"
+                value={dataDir}
+                onChange={e => setDataDir(e.target.value)}
+                required
+                placeholder="/data/ADNI_raw"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1">
+                BIDS Output Directory (server path)
+              </label>
+              <input
+                type="text"
+                className="w-full bg-slate-800 text-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 placeholder-slate-500"
+                value={outputDir}
+                onChange={e => setOutputDir(e.target.value)}
+                required
+                placeholder="/data/bids_output"
+              />
+            </div>
+
+            {error && (
+              <div className="text-xs text-red-400 bg-red-900/20 border border-red-900/50 rounded-md px-3 py-2">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || !dataDir || !outputDir}
+              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:hover:bg-slate-700 text-white font-medium py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Converting (may take several minutes)…' : 'Start Conversion'}
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
   )
 }
 
