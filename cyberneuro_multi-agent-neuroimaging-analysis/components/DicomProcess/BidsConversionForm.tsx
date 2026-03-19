@@ -32,7 +32,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 export async function runBidsConversion(data_dir: string, output_dir: string): Promise<BidsConversionResult> {
-  const res = await fetch('http://localhost:8005/run_bids_conversion', {
+  const res = await fetch('http://localhost:8004/run_bids_conversion', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ data_dir, output_dir }),
