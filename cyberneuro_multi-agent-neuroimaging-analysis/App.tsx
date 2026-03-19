@@ -3,6 +3,7 @@ import {
   AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool, SuspendedState, CorrelationResult, DatasetRow
 } from './types';
 import { MOCK_CSV_DATA } from './constants';
+import { BidsConvertResultItem } from './components/DicomProcess/BidsConversionForm';
 import { 
   generateNeuroPlan,
   generateGeneralPlan,
@@ -416,6 +417,15 @@ const App: React.FC = () => {
     // Ensure every visualization has a unique vizId
     const withId = viz.vizId ? viz : { ...viz, vizId: genVizId() };
     setVisualizations(prev => [withId, ...prev]);
+  };
+
+  const handleBidsConvertResult = (item: BidsConvertResultItem) => {
+    addVisualization({
+      type: VisualizationType.BIDS_CONVERSION,
+      title: `BIDS Conversion: ${item.data.output_dir}`,
+      data: item.data,
+      timestamp: item.timestamp,
+    });
   };
 
   const escapeHtml = (value: string) => value
@@ -1962,6 +1972,7 @@ const App: React.FC = () => {
           disableSend={availableModels.length === 0}
           disableSendHint="No models available — connect Ollama first"
           history={history}
+          onBidsConvertResult={handleBidsConvertResult}
         />
       </div>
     </div>

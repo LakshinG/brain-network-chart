@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { ToolVisualization, VisualizationType, GroupComparisonResult } from '../../types';
 import { ScatterPlot, StatsBarChart, AgingCurveChart, ClusteringDashboard, StratificationChart, SVMBoundaryChart, ChartConfig, VisionBBoxesChart } from './Charts';
 import { CFCWaveletCard, HubDetectionCard } from './Charts';
+import BidsConversionCard from '../DicomProcess/BidsConversionCard';
 import { HtmlVisualizationRenderer } from './HtmlVisualizationRenderer';
 import DynamicChartRenderer from './DynamicChartRenderer';
 import CodeEditorModal from './CodeEditorModal';
@@ -323,6 +324,7 @@ const VisualizationCard: React.FC<{
           {visualization.type === VisualizationType.LITERATURE_LIST && <BookOpen className="w-4 h-4 text-amber-400" />}
           {visualization.type === VisualizationType.DATA_TABLE && <FileText className="w-4 h-4 text-emerald-400" />}
           {visualization.type === VisualizationType.RESEARCH_REPORT && <FileCheck2 className="w-4 h-4 text-indigo-400" />}
+          {visualization.type === VisualizationType.BIDS_CONVERSION && <FileCheck2 className="w-4 h-4 text-orange-400" />}
           <span className="font-semibold text-slate-200">{visualization.title}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -540,6 +542,12 @@ const VisualizationCard: React.FC<{
                 onHtmlChange={onHtmlChange}
               />
             )}
+          </div>
+        )}
+
+        {visualization.type === VisualizationType.BIDS_CONVERSION && (
+          <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
+            <BidsConversionCard data={visualization.data} timestamp={visualization.data.timestamp} />
           </div>
         )}
         </>)}

@@ -4,7 +4,7 @@ import { WorkflowHistory, WorkflowRecord } from '../../workflowTypes';
 import MessageBubble from './MessageBubble';
 import ThinkingOverlay from '../AgentProgress/ThinkingOverlay';
 import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw, ImagePlus, Download } from 'lucide-react';
-
+import {runBidsConversion, BidsConvertResultItem} from '../DicomProcess/BidsConversionForm';
 /* ═══════════════════════════════════════════════════════════════════════════
    Roles that stay visible in the outer chat stream.
    Everything else is folded into the ThinkingOverlay.
@@ -63,7 +63,6 @@ function buildRenderItems(
 
   return items;
 }
-
 /* ═══════════════════════════════════════════════════════════════════════════
    Props — identical to gh-page original + workflow history
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -100,6 +99,48 @@ interface ChatAreaProps {
   disableSendHint?: string;
   // NEW: workflow history
   history: WorkflowHistory;
+  onBidsConvertResult: (item: BidsConvertResultItem) => void;
+}
+
+function uid() { return Math.random().toString(36).slice(2) }
+function timestamp() { return new Date().toLocaleTimeString() }
+// ── BIDS Conversion ──────────────────────────────────────────
+function BidsConversionForm({ onBidsConvertResult }: ChatAreaProps) {
+  const [dataDir, setDataDir] = useState('')
+  const [outputDir, setOutputDir] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true); setError('')
+    try {
+      const data = await runBidsConversion(dataDir, outputDir)
+      onBidsConvertResult({ id: uid(), type: 'bids_conversion', timestamp: timestamp(), data })
+    } catch (e) { setError(String(e)) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="section">
+      <div className="section-title">DICOM → BIDS Conversion</div>
+      <div className="form-row">
+        <label className="form-label">DICOM Source Directory (server path)</label>
+        <input className="form-input" value={dataDir} onChange={e => setDataDir(e.target.value)} required placeholder="/data/ADNI_raw" />
+      </div>
+      <div className="form-row">
+        <label className="form-label">BIDS Output Directory (server path)</label>
+        <input className="form-input" value={outputDir} onChange={e => setOutputDir(e.target.value)} required placeholder="/data/bids_output" />
+      </div>
+      <div className="example-hint">
+        Auto-classifies and converts DICOM to BIDS using dicom2bids_agent; shows validation report on completion
+      </div>
+      {error && <div className="error-msg">{error}</div>}
+      <button className="btn btn-primary" type="submit" disabled={loading || !dataDir || !outputDir}>
+        {loading ? 'Converting (may take several minutes)…' : 'Start Conversion'}
+      </button>
+    </form>
+  )
 }
 
 const ChatArea: React.FC<ChatAreaProps> = React.memo(({
@@ -505,7 +546,9 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
           />
         )}
       </div>
+      <BidsConversionForm onResult={onBidsConvertResult} />
     </div>
+    
   );
 });
 

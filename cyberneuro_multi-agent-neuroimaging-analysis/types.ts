@@ -82,7 +82,8 @@ export enum VisualizationType {
   VIS_HTML = 'VIS_HTML',
   CLUSTERING_DASHBOARD = 'CLUSTERING_DASHBOARD',
   STRATIFICATION_RESULT = 'STRATIFICATION_RESULT',
-  SVM_BOUNDARY = 'SVM_BOUNDARY'
+  SVM_BOUNDARY = 'SVM_BOUNDARY',
+  BIDS_CONVERSION = 'BIDS_CONVERSION'
 }
 
 export interface ToolVisualization {
@@ -94,6 +95,7 @@ export interface ToolVisualization {
   messageId?: string;   // links back to the chat message that created it
   datasetId?: string;
   customCode?: string;  // LLM-edited Recharts JSX code — when set, rendered dynamically instead of static component
+  timestamp?: string;     // ISO timestamp for when the visualization was created — used for sorting and display
 }
 
 // NEW: Type for VIS_HTML data
