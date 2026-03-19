@@ -15,6 +15,7 @@ const OUTER_CHAT_ROLES = new Set([
   AgentType.RESEARCHER,
   AgentType.VISION,
   AgentType.PROPOSAL_REPORTER,
+  AgentType.DATA_MANIPULATOR,
   AgentType.SYSTEM,
 ]);
 
