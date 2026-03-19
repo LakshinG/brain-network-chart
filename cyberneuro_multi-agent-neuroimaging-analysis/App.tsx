@@ -1413,7 +1413,7 @@ const App: React.FC = () => {
        try {
            const { plan, stepIndex, data, columns, intent, originalUserQuery } = suspendedState;
            setSuspendedState(null);
-           await executePlanSteps(plan, runId, stepIndex, null, data, columns, intent, query, originalUserQuery);
+           await executePlanSteps(plan, runId, stepIndex, null, data, columns, intent as 'RESEARCH' | 'GENERAL', query, originalUserQuery);
        } catch (error) {
            if (!isWorkflowAbortedError(error)) {
            addMessage(AgentType.SYSTEM, "Error resuming execution.");
