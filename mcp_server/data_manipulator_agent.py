@@ -3,6 +3,7 @@ import re
 import uvicorn
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from agent_client import OllamaLLM
 
@@ -166,6 +167,14 @@ class MockOllamaLLM:
         return '{"tool_to_call": "merge_datasets", "parameters": {"file_paths": ["test1.csv", "test2.csv"], "output_filename": "merged.csv"}, "explanation": "Simulation Mode"}'
 
 app = FastAPI(title="Data Manipulator Agent Server")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize the LLM Client
 try:
