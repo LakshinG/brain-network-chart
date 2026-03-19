@@ -128,11 +128,8 @@ class DataManipulatorAgent:
                             # Remove duplicate columns if they arose from concat
                             merged_df = merged_df.loc[:, ~merged_df.columns.duplicated()]
 
-                        # Handle NaNs
-                        merged_df.fillna("", inplace=True)
-
-                        # Convert back to CSV string to send to frontend
-                        parsed_result.merged_csv_data = merged_df.to_csv(index=False)
+                        # Convert back to CSV string to send to frontend (na_rep outputs empty string for NaNs)
+                        parsed_result.merged_csv_data = merged_df.to_csv(index=False, na_rep="")
                         parsed_result.explanation += " Merge executed successfully on the backend."
                     except Exception as merge_err:
                         parsed_result.tool_to_call = "error"
