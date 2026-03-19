@@ -115,11 +115,18 @@ function BidsConversionForm({ onResult }: { onResult: (item: BidsConvertResultIt
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true); setError('')
-    try {
-      const data = await runBidsConversion(dataDir, outputDir)
-      onResult({ id: uid(), type: 'bids_conversion', timestamp: timestamp(), data })
-    } catch (e) { setError(String(e)) }
-    finally { setLoading(false) }
+
+    const params = new URLSearchParams({ data_dir: dataDir, output_dir: outputDir })
+    onResult({
+      id: uid(), type: 'bids_conversion', timestamp: timestamp(),
+      data: {
+        status: 'pending', data_dir: dataDir, output_dir: outputDir,
+        n_nii: 0, n_errors: 0, n_warnings: 0, elapsed_seconds: 0,
+        console_output: '', progress: [], report_html: null, return_code: -1,
+        pending: true, stream_url: `/run_bids_conversion_stream?${params}`,
+      },
+    })
+    setLoading(false)
   }
 
   return (
