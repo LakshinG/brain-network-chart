@@ -63,15 +63,37 @@ class DataManipulatorAgent:
                 file_paths = parsed_result.parameters.get("file_paths", [])
                 join_column = parsed_result.parameters.get("join_column", "")
 
+                # Robust matching: If the LLM returned nothing, but we only have 2 files in the context, just use them.
+                if not file_paths and len(raw_datasets) >= 2:
+                    file_paths = list(raw_datasets.keys())
+                elif not isinstance(file_paths, list):
+                    file_paths = [file_paths]
+
                 # Fetch data from the provided raw_datasets mapped from the frontend
                 dfs = []
                 for fp in file_paths:
+                    matched_key = None
+                    # Exact match
                     if fp in raw_datasets:
+                        matched_key = fp
+                    else:
+                        # Fuzzy match (substring)
+                        for raw_k in raw_datasets.keys():
+                            if fp.lower() in raw_k.lower() or raw_k.lower() in fp.lower():
+                                matched_key = raw_k
+                                break
+
+                    if matched_key:
                         # Convert frontend dict records back to pandas dataframe
-                        df = pd.DataFrame(raw_datasets[fp])
+                        df = pd.DataFrame(raw_datasets[matched_key])
                         dfs.append(df)
                     else:
                         parsed_result.explanation += f" (Warning: File '{fp}' not found in uploaded dataset context)"
+
+                # Fallback: if we still didn't find at least 2 datasets, but the context has exactly 2, just use them.
+                if len(dfs) < 2 and len(raw_datasets) == 2:
+                    dfs = [pd.DataFrame(data) for data in raw_datasets.values()]
+                    parsed_result.explanation += " (Fallback: Merged all available files because specific matches failed.)"
 
                 if len(dfs) >= 2:
                     try:
