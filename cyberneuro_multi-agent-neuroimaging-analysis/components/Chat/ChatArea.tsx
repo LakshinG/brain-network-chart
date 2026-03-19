@@ -105,7 +105,7 @@ interface ChatAreaProps {
 function uid() { return Math.random().toString(36).slice(2) }
 function timestamp() { return new Date().toLocaleTimeString() }
 // ── BIDS Conversion ──────────────────────────────────────────
-function BidsConversionForm({ onBidsConvertResult }: ChatAreaProps) {
+function BidsConversionForm({ onResult }: { onResult: (item: BidsConvertResultItem) => void }) {
   const [dataDir, setDataDir] = useState('')
   const [outputDir, setOutputDir] = useState('')
   const [loading, setLoading] = useState(false)
@@ -116,7 +116,7 @@ function BidsConversionForm({ onBidsConvertResult }: ChatAreaProps) {
     setLoading(true); setError('')
     try {
       const data = await runBidsConversion(dataDir, outputDir)
-      onBidsConvertResult({ id: uid(), type: 'bids_conversion', timestamp: timestamp(), data })
+      onResult({ id: uid(), type: 'bids_conversion', timestamp: timestamp(), data })
     } catch (e) { setError(String(e)) }
     finally { setLoading(false) }
   }
@@ -150,6 +150,7 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   uploadedImages, activeImageId, onImageToggle, onImageRemove, onMergeDatasets, onSyncDataset,
   disableSend = false, disableSendHint,
   history,
+  onBidsConvertResult,
 }) => {
   const [input, setInput] = useState('');
   const [expandedWorkflowId, setExpandedWorkflowId] = useState<string | null>(null);
