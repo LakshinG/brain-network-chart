@@ -2218,25 +2218,35 @@ import os
 @server.tool(name="merge_datasets")
 def merge_csv_datasets(file_paths: list[str], output_filename: str = "merged_dataset.csv") -> str:
     """
-    Merges multiple CSV files. If a common ID column is found (e.g., 'ID', 'subject'), 
-    it performs a full outer join. Otherwise, it stacks the datasets vertically.
+    Merges multiple CSV files. Dynamically finds a common ID column 
+    to perform a full outer join. Otherwise, it stacks the datasets vertically.
     """
     if not file_paths:
         return "Error: No files provided."
     
     # Load all CSVs into DataFrames
+    import pandas as pd
+    import os
     dfs = [pd.read_csv(f) for f in file_paths]
     if len(dfs) == 1:
         return "Only one file provided. No merge needed."
 
-    # Look for a common ID column
-    potential_ids = ['ID', 'id', 'Subject', 'subject', 'RID', 'rid', 'Participant_ID', 'participant_id', 'Case', 'case']
-    id_col = None
+    # Dynamically find columns that exist in ALL provided files
+    common_cols = set(dfs[0].columns)
+    for df in dfs[1:]:
+        common_cols.intersection_update(df.columns)
     
-    for cand in potential_ids:
-        if all(cand in df.columns for df in dfs):
-            id_col = cand
-            break
+    # Prioritize columns that look like IDs, otherwise use the first common column
+    id_col = None
+    if common_cols:
+        # Check if any common column has 'id', 'case', 'subject', etc. in its name
+        for col in common_cols:
+            if any(keyword in col.lower() for keyword in ['id', 'case', 'subject', 'rid']):
+                id_col = col
+                break
+        # If no obvious ID name is found, just use the first shared column we found
+        if not id_col:
+            id_col = list(common_cols)[0]
 
     # Merge or Concatenate
     if id_col:
@@ -2244,23 +2254,24 @@ def merge_csv_datasets(file_paths: list[str], output_filename: str = "merged_dat
         for df in dfs[1:]:
             merged_df = pd.merge(merged_df, df, on=id_col, how='outer')
             
-        # Move ID column to the front
+        # Move ID column to the front for readability
         cols = merged_df.columns.tolist()
         cols.insert(0, cols.pop(cols.index(id_col)))
         merged_df = merged_df[cols]
     else:
-        # Fallback: Stack them vertically
+        # Absolute Fallback: Only stack if they literally share ZERO columns
         merged_df = pd.concat(dfs, ignore_index=True)
 
     # Cleanup: Fill missing values with empty strings
     merged_df = merged_df.fillna("")
 
-    # Save to disk (Assuming the 'uploaded_files' directory exists as per the repo structure)
+    # Save to disk
     os.makedirs("uploaded_files", exist_ok=True)
     output_path = os.path.join("uploaded_files", output_filename)
     merged_df.to_csv(output_path, index=False)
     
     return f"Successfully merged {len(file_paths)} datasets into {output_filename}. Used ID column: {id_col if id_col else 'None (Stacked)'}"
+
 # @server.tool(name="run_correlation")
 # def run_correlation(data_source: str, var1: str, var2: str) -> str:
 #     """

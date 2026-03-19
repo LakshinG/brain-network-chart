@@ -213,7 +213,7 @@ export const buildConversationContext = (messages: ChatMessage[], limit: number 
   }).join('\n\n');
 };
 
-export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERAL' | 'VISION'> => {
+export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERAL' | 'VISION' | 'DATA_MANIPULATION'> => {
   console.log('[Orchestrator Agent] Input:', PROMPTS.ORCHESTRATOR_CLASSIFY(query));
   try {
     const response = await ollama.generate({
@@ -224,7 +224,7 @@ export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERA
       stream: false
     });
     const json = robustJsonParse(response.response);
-    return (json.category === 'RESEARCH' || json.category === 'GENERAL' || json.category === 'VISION') ? json.category : 'RESEARCH';
+    return (json.category === 'RESEARCH' || json.category === 'GENERAL' || json.category === 'VISION' || json.category === 'DATA_MANIPULATION') ? json.category : 'RESEARCH';
   } catch (e) {
     console.error("Orchestrator Error:", e);
     return 'RESEARCH';
