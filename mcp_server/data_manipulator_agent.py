@@ -1,6 +1,7 @@
 import json
 import re
 import uvicorn
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from agent_client import OllamaLLM
@@ -9,24 +10,27 @@ class ManipulationRequest(BaseModel):
     """Input payload from the frontend or planner agent"""
     user_query: str
     available_files: list[str] = Field(..., description="List of dataset file paths currently available to the user.")
+    raw_datasets: dict = Field(default={}, description="A mapping of filename to a list of dicts (the actual data).")
 
 class ManipulationResult(BaseModel):
     """Output sent back to the network to execute the tool"""
     tool_to_call: str = Field(..., description="The exact name of the MCP tool to execute (e.g., 'merge_datasets').")
     parameters: dict = Field(..., description="The JSON parameters to pass into the tool.")
     explanation: str = Field(..., description="Brief explanation of what the agent decided to do.")
+    merged_csv_data: str = Field(default="", description="The raw CSV data if a merge was performed successfully.")
 
 class DataManipulatorAgent:
     def __init__(self, llm_client):
         self.llm = llm_client
 
-    def plan_manipulation(self, user_query: str, available_files: list[str]) -> ManipulationResult:
+    def plan_manipulation(self, user_query: str, available_files: list[str], raw_datasets: dict) -> ManipulationResult:
 
         system_prompt = (
             "You are a Senior Data Engineering Agent.\n"
             "Your Job: Listen to the user's request and decide how to manipulate their datasets.\n"
             "Currently, you have access to the following tools:\n"
-            "1. 'merge_datasets' (Parameters: file_paths (list of strings), output_filename (string))\n"
+            "1. 'merge_datasets' (Parameters: file_paths (list of strings), output_filename (string), join_column (string))\n"
+            "   - Use 'join_column' if the user specifies a column to merge on (e.g., 'ID', 'Subject'). Provide an empty string if unknown.\n"
             "You must return ONLY a JSON object."
         )
 
@@ -42,7 +46,8 @@ class DataManipulatorAgent:
             "tool_to_call": "merge_datasets",
             "parameters": {{
                 "file_paths": ["file_A.csv", "file_B.csv"],
-                "output_filename": "merged_output.csv"
+                "output_filename": "merged_output.csv",
+                "join_column": "ID"
             }},
             "explanation": "Merging file A and B based on the user request."
         }}
@@ -51,7 +56,66 @@ class DataManipulatorAgent:
         # Call the LLM
         try:
             raw_response = self.llm.generate_text(user_prompt, system=system_prompt)
-            return self._clean_and_parse(raw_response)
+            parsed_result = self._clean_and_parse(raw_response)
+
+            # Execute the merge immediately on the backend if merge_datasets was selected
+            if parsed_result.tool_to_call == "merge_datasets":
+                file_paths = parsed_result.parameters.get("file_paths", [])
+                join_column = parsed_result.parameters.get("join_column", "")
+
+                # Fetch data from the provided raw_datasets mapped from the frontend
+                dfs = []
+                for fp in file_paths:
+                    if fp in raw_datasets:
+                        # Convert frontend dict records back to pandas dataframe
+                        df = pd.DataFrame(raw_datasets[fp])
+                        dfs.append(df)
+                    else:
+                        parsed_result.explanation += f" (Warning: File '{fp}' not found in uploaded dataset context)"
+
+                if len(dfs) >= 2:
+                    try:
+                        # Try to infer a join column
+                        potential_ids = ['ID', 'id', 'Subject', 'subject', 'RID', 'rid', 'Participant_ID', 'participant_id', 'Case', 'case']
+
+                        valid_join_col = None
+                        if join_column and all(join_column in df.columns for df in dfs):
+                            valid_join_col = join_column
+                        else:
+                            for cand in potential_ids:
+                                if all(cand in df.columns for df in dfs):
+                                    valid_join_col = cand
+                                    break
+
+                        if valid_join_col:
+                            # Merge using inner/outer join based on the column
+                            merged_df = dfs[0]
+                            for df in dfs[1:]:
+                                merged_df = pd.merge(merged_df, df, on=valid_join_col, how='outer', suffixes=('', '_dup'))
+                                # remove duplicate columns
+                                cols_to_drop = [c for c in merged_df.columns if c.endswith('_dup')]
+                                merged_df.drop(columns=cols_to_drop, inplace=True)
+
+                            # Move ID column to front
+                            cols = [valid_join_col] + [c for c in merged_df.columns if c != valid_join_col]
+                            merged_df = merged_df[cols]
+                        else:
+                            # Fallback: concatenate
+                            merged_df = pd.concat(dfs, axis=1)
+                            # Remove duplicate columns if they arose from concat
+                            merged_df = merged_df.loc[:, ~merged_df.columns.duplicated()]
+
+                        # Handle NaNs
+                        merged_df.fillna("", inplace=True)
+
+                        # Convert back to CSV string to send to frontend
+                        parsed_result.merged_csv_data = merged_df.to_csv(index=False)
+                        parsed_result.explanation += " Merge executed successfully on the backend."
+                    except Exception as merge_err:
+                        parsed_result.tool_to_call = "error"
+                        parsed_result.explanation = f"Backend merge failed: {str(merge_err)}"
+
+            return parsed_result
         except Exception as e:
             return ManipulationResult(
                 tool_to_call="error",
@@ -104,7 +168,7 @@ async def manipulate_endpoint(request: ManipulationRequest):
     Usage: POST http://localhost:8015/manipulate
     """
     print(f"Received data manipulation request: {request.user_query}")
-    result = agent.plan_manipulation(request.user_query, request.available_files)
+    result = agent.plan_manipulation(request.user_query, request.available_files, request.raw_datasets)
     return result
 
 if __name__ == "__main__":

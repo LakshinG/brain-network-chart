@@ -1458,12 +1458,18 @@ const App: React.FC = () => {
 
         try {
           const availableFiles = datasets.map(d => d.name);
+          const rawDatasets: Record<string, any[]> = {};
+          datasets.forEach(d => {
+             rawDatasets[d.name] = d.data;
+          });
+
           const response = await fetch('http://localhost:8015/manipulate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               user_query: query,
-              available_files: availableFiles
+              available_files: availableFiles,
+              raw_datasets: rawDatasets
             })
           });
 
@@ -1485,24 +1491,22 @@ const App: React.FC = () => {
 
             const datasetsToMerge = datasets.filter(d => filePaths.includes(d.name));
 
-            if (datasetsToMerge.length < 2) {
-              addMessage(AgentType.SYSTEM, "Agent could not find at least two valid datasets to merge. Please check your dataset names.");
-            } else {
-               const newId = `merged-${Date.now()}`;
-               const mergedDatasetRaw = mergeDatasets(datasetsToMerge);
-
-               if (mergedDatasetRaw) {
+            if (manipulationResult.merged_csv_data) {
+                 const { columns, data } = parseCSV(manipulationResult.merged_csv_data);
+                 const newId = `merged-${Date.now()}`;
                  const newDataset: Dataset = {
-                     ...mergedDatasetRaw,
                      id: newId,
                      name: outputFilename,
+                     columns,
+                     data,
                      serverFilename: undefined
                  };
 
                  setDatasets(prev => [...prev, newDataset]);
                  setActiveDatasetIds([newId]);
-                 addMessage(AgentType.SYSTEM, `Merged ${datasetsToMerge.length} datasets into "${newDataset.name}" successfully.`);
-               }
+                 addMessage(AgentType.SYSTEM, `Data Manipulator successfully merged datasets into "${newDataset.name}".`);
+            } else {
+              addMessage(AgentType.SYSTEM, "Agent attempted to merge but no data was returned.");
             }
           } else if (manipulationResult.tool_to_call === 'error') {
             addMessage(AgentType.SYSTEM, `Error from Data Manipulator: ${manipulationResult.explanation}`);
