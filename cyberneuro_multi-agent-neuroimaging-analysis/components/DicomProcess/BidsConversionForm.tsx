@@ -14,7 +14,7 @@ export interface BidsConversionResult {
   stream_url?: string;
 }
 
-export type BidsConvertResultItem = { id: string; type: 'bids_conversion'; timestamp: string; data: BidsConversionResult };
+export type BidsConvertResultItem = { id: string; type: 'bids_conversion'; timestamp: string; data: BidsConversionResult; onComplete?: () => void };
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {

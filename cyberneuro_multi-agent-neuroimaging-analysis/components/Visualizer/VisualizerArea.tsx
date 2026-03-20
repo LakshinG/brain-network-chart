@@ -547,7 +547,7 @@ const VisualizationCard: React.FC<{
 
         {visualization.type === VisualizationType.BIDS_CONVERSION && (
           <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
-            <BidsConversionCard data={visualization.data} timestamp={visualization.data.timestamp} />
+            <BidsConversionCard data={visualization.data} timestamp={visualization.data.timestamp} onComplete={visualization.data.onComplete} />
           </div>
         )}
         </>)}

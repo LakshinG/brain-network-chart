@@ -125,6 +125,7 @@ function BidsConversionForm({ onResult }: { onResult: (item: BidsConvertResultIt
         console_output: '', progress: [], report_html: null, return_code: -1,
         pending: true, stream_url: `/run_bids_conversion_stream?${params}`,
       },
+      onComplete: () => setLoading(false),
     })
     setLoading(false)
   }
