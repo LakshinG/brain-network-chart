@@ -254,26 +254,17 @@ const App: React.FC = () => {
       uploadActiveDataset(true);
   };
 
-  const handleManualMerge = () => {
+  const handleManualMerge = async () => {
       if (activeDatasetIds.length < 2) {
           addMessage(AgentType.SYSTEM, "Please select 2 or more datasets to merge.");
           return;
       }
       if (!activeDataset) return;
 
-      const newId = `merged-${Date.now()}`;
-      // Create a persistent copy of the currently computed 'activeDataset'
-      const newDataset: Dataset = {
-          ...activeDataset,
-          id: newId,
-          name: `Merged (${activeDatasetIds.length} files)`,
-          serverFilename: undefined // Explicitly undefined so it gets uploaded on selection
-      };
-
-      setDatasets(prev => [...prev, newDataset]);
-      // Switch selection to the new merged dataset
-      setActiveDatasetIds([newId]);
-      addMessage(AgentType.SYSTEM, `Merged ${activeDatasetIds.length} datasets into "${newDataset.name}" and added to file list.`);
+      // Automatically construct a query for the data manipulator agent to process
+      const selectedNames = datasets.filter(d => activeDatasetIds.includes(d.id)).map(d => d.name);
+      const query = `Merge datasets ${selectedNames.join(' and ')}`;
+      await handleUserQuery(query);
   };
 
   const handleChangeOllamaUrl = async () => {
@@ -634,6 +625,22 @@ const App: React.FC = () => {
       e.stopPropagation();
       setDatasets(prev => prev.filter(d => d.id !== id));
       setActiveDatasetIds(prev => prev.filter(did => did !== id));
+  };
+
+  const downloadDataset = (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const ds = datasets.find(d => d.id === id);
+      if (!ds) return;
+      const csvStr = datasetToCSV(ds);
+      const blob = new Blob([csvStr], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = ds.name.endsWith('.csv') ? ds.name : `${ds.name}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
   };
 
   const toggleDataset = (id: string) => {
@@ -1422,7 +1429,7 @@ const App: React.FC = () => {
        try {
            const { plan, stepIndex, data, columns, intent, originalUserQuery } = suspendedState;
            setSuspendedState(null);
-           await executePlanSteps(plan, runId, stepIndex, null, data, columns, intent, query, originalUserQuery);
+           await executePlanSteps(plan, runId, stepIndex, null, data, columns, intent as 'RESEARCH' | 'GENERAL', query, originalUserQuery);
        } catch (error) {
            if (!isWorkflowAbortedError(error)) {
            addMessage(AgentType.SYSTEM, "Error resuming execution.");
@@ -1459,6 +1466,77 @@ const App: React.FC = () => {
           ? `Identified intent: ${intent}`
           : `Identified intent: ${intent}. No dataset loaded but image context exists, routing to: ${effectiveIntent}`
       );
+
+      if (effectiveIntent === 'DATA_MANIPULATION') {
+        setActiveWorkflowMode('DATASET');
+        wf.setPhase('executing');
+        addMessage(AgentType.DATA_MANIPULATOR, "Analyzing datasets for manipulation...");
+
+        try {
+          const availableFiles = datasets.map(d => d.name);
+          const rawDatasets: Record<string, any[]> = {};
+          datasets.forEach(d => {
+             rawDatasets[d.name] = d.data;
+          });
+
+          const response = await fetch('http://localhost:8015/manipulate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_query: query,
+              available_files: availableFiles,
+              raw_datasets: rawDatasets
+            })
+          });
+
+          if (!response.ok) {
+            throw new Error(`Data Manipulator Agent responded with ${response.status}`);
+          }
+
+          const manipulationResult = await response.json();
+          addMessage(AgentType.DATA_MANIPULATOR, `Decision: ${manipulationResult.explanation}`, {
+            tool: manipulationResult.tool_to_call,
+            parameters: manipulationResult.parameters
+          });
+
+          if (manipulationResult.tool_to_call === 'merge_datasets') {
+            addMessage(AgentType.SYSTEM, "Executing merge based on agent instructions...");
+
+            const filePaths = manipulationResult.parameters.file_paths || [];
+            const outputFilename = manipulationResult.parameters.output_filename || `Merged_${Date.now()}`;
+
+            const datasetsToMerge = datasets.filter(d => filePaths.includes(d.name));
+
+            if (manipulationResult.merged_csv_data) {
+                 const { columns, data } = parseCSV(manipulationResult.merged_csv_data);
+                 const newId = `merged-${Date.now()}`;
+                 const newDataset: Dataset = {
+                     id: newId,
+                     name: outputFilename,
+                     columns,
+                     data,
+                     serverFilename: undefined
+                 };
+
+                 setDatasets(prev => [...prev, newDataset]);
+                 setActiveDatasetIds([newId]);
+                 addMessage(AgentType.SYSTEM, `Data Manipulator successfully merged datasets into "${newDataset.name}".`);
+            } else {
+              addMessage(AgentType.SYSTEM, "Agent attempted to merge but no data was returned.");
+            }
+          } else if (manipulationResult.tool_to_call === 'error') {
+            addMessage(AgentType.SYSTEM, `Error from Data Manipulator: ${manipulationResult.explanation}`);
+          } else {
+            addMessage(AgentType.SYSTEM, `Unknown tool requested by Data Manipulator: ${manipulationResult.tool_to_call}`);
+          }
+        } catch (e: any) {
+          console.error("Data Manipulator Error:", e);
+          addMessage(AgentType.SYSTEM, `Failed to connect to Data Manipulator Agent (Port 8015): ${e.message}`);
+        }
+
+        finalizeWorkflow('done');
+        return;
+      }
 
       if (effectiveIntent === 'VISION') {
         setActiveWorkflowMode('IMAGE');
@@ -1880,6 +1958,7 @@ const App: React.FC = () => {
           activeDatasetIds={activeDatasetIds}
           onDatasetToggle={toggleDataset}
           onDatasetRemove={removeDataset}
+          onDatasetDownload={downloadDataset}
           onMultiFileUpload={handleFileUpload}
           onMergeDatasets={handleManualMerge}
           onSyncDataset={handleManualSync}

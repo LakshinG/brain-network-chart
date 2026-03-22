@@ -13,6 +13,7 @@ export const AGENT_COLORS = {
   [AgentType.EXECUTOR]: 'bg-emerald-900/50 border-emerald-700 text-emerald-200',
   [AgentType.RESEARCHER]: 'bg-purple-900/50 border-purple-700 text-purple-200',
   [AgentType.PROPOSAL_REPORTER]: 'bg-amber-900/50 border-amber-700 text-amber-200',
+  [AgentType.DATA_MANIPULATOR]: 'bg-orange-900/50 border-orange-700 text-orange-200',
   [AgentType.SYSTEM]: 'bg-gray-800 border-gray-700 text-gray-400',
 };
 
@@ -38,14 +39,15 @@ export const PROMPTS = {
   ORCHESTRATOR_CLASSIFY: (query: string) => `
     You are an Orchestrator Agent for a neuroimaging analysis system.
     
-    Classify the User Query into one of three categories:
+    Classify the User Query into one of four categories:
     1. "RESEARCH": The user wants to analyze data, inspect columns, perform statistics, find correlations, compare groups, or search for literature.
     2. "GENERAL": The user wants to modify the visualization (e.g., change color, title, size), ask a general question unconnected to the dataset, or perform simple UI tasks.
     3. "VISION": The user asks about understanding/interpreting image content (e.g., "what does this scan show", "describe this uploaded image", "is there lesion/atrophy/signs in the image").
+    4. "DATA_MANIPULATION": The user wants to merge or split their datasets (uploaded csv files) by using prompts.
 
     User Query: "${query}"
 
-    Return strictly a JSON object: { "category": "RESEARCH" } or { "category": "GENERAL" } or { "category": "VISION" }
+    Return strictly a JSON object: { "category": "RESEARCH" } or { "category": "GENERAL" } or { "category": "VISION" } or { "category": "DATA_MANIPULATION" }
   `,
 
   VISION_AGENT: (query: string) => `

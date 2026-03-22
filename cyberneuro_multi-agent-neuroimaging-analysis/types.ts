@@ -10,6 +10,7 @@ export enum AgentType {
   EXECUTOR = 'Executor',
   RESEARCHER = 'Researcher',
   PROPOSAL_REPORTER = 'Proposal Reporter',
+  DATA_MANIPULATOR = 'Data Manipulator',
   SYSTEM = 'System'
 }
 export interface CFCWaveletResult {
@@ -103,7 +104,7 @@ export interface HtmlVisualizationData {
 }
 
 export interface AgentState {
-  status: 'idle' | 'planning' | 'executing' | 'researching';
+  status: 'idle' | 'planning' | 'executing' | 'researching' | 'manipulating';
   currentTask?: string;
 }
 
@@ -112,7 +113,7 @@ export interface SuspendedState {
   stepIndex: number;
   data: any[];
   columns: string[];
-  intent: 'RESEARCH' | 'GENERAL';
+  intent: 'RESEARCH' | 'GENERAL' | 'DATA_MANIPULATION';
   originalUserQuery?: string;
 }
 
