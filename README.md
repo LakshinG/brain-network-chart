@@ -6,7 +6,20 @@ Go to https://acmlab.github.io/brain-network-chart/
 2. Type: Study on the correlation between Amyloid_lS_orbital_med and Tau_Global grouping by DX.
 3. Click on the visualization card to enter editing mode. Type: Change dot color to red.
 4. Click on download button to get SVG of the plot.
-5. Type: Clustering samples into k=3 clusters given their regional Amyloid. 
+5. Type: Clustering samples into k=3 clusters given their regional Amyloid.
+
+## Pipeline
+
+<img width="1431" height="712" alt="image" src="https://github.com/user-attachments/assets/6ed293e1-c287-4f8e-8cb4-f9fe9d012019" />
+
+## Demo
+
+[CyberNeuro](https://www.youtube.com/watch?v=rDU-kkI3ZA4)
+
+## Functions
+
+<img width="1080" height="608" alt="image" src="https://github.com/user-attachments/assets/b7774358-34bc-45ee-bcf0-3fbdd5d2e807" />
+
 
 ## Requirements
 
