@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { 
   AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool, SuspendedState, CorrelationResult, DatasetRow
 } from './types';
-import { MOCK_CSV_DATA } from './constants';
+import demoFcCsv from './data/data_example_FC.csv?raw';
+import demoBoldCsv from './data/data_example_BOLD.csv?raw';
 import { DATA_HOST_URL } from './components/DicomProcess/BidsConversionCard';
 import { 
   generateNeuroPlan,
@@ -716,8 +717,12 @@ const App: React.FC = () => {
     handleFileUpload(createFileList(file));
   }, []);
 
-  const handleLoadDemo = () => {
-    loadData(MOCK_CSV_DATA, "Amyloid_SUVR_Swapped.csv");
+  const handleLoadDemo = (kind: 'fc' | 'bold') => {
+    if (kind === 'fc') {
+      loadData(demoFcCsv, "Demo-FC");
+    } else {
+      loadData(demoBoldCsv, "Demo-BOLD");
+    }
   };
 
   const removeDataset = (id: string, e: React.MouseEvent) => {
@@ -986,15 +991,20 @@ const App: React.FC = () => {
          const args = { ...params };
          const schemaProps = mcpToolDef.inputSchema?.properties || {};
 
-         // Frontend-owned dataset context is injected here, not into the prompt.
-         if ('dataset' in schemaProps && !args.dataset) {
-            args.dataset = {
-               id: activeDataset?.id || `active-${Date.now()}`,
-               name: activeDataset?.name || activeServerFilename || 'Active Dataset',
-               columns: currentColumns,
-               data: currentData,
-               serverFilename: activeServerFilename || undefined,
-            };
+         // Frontend-owned dataset context: always override dataset_id (LLM may hallucinate a value)
+         // and register with MCP server before calling tools that need it.
+         if ('dataset_id' in schemaProps) {
+            const dsId = activeDataset?.id || `active-${Date.now()}`;
+            args.dataset_id = dsId;
+            if (newData.length > 0 && newCols.length > 0) {
+               await mcpClient.registerDataset({
+                  id: dsId,
+                  name: activeDataset?.name || activeServerFilename || 'Active Dataset',
+                  columns: newCols,
+                  data: newData,
+                  serverFilename: activeServerFilename || undefined,
+               });
+            }
          }
 
          // Prefer server-side handles when the MCP tool accepts path-like params.

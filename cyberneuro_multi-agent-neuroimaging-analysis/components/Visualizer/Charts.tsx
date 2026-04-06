@@ -1072,13 +1072,12 @@ export function HubDetectionCard({ data, timestamp }: HubProps) {
   }, [data.results, isGroup, selectedWindow])
 
   return (
-    <div  className="w-full bg-slate-900 rounded-lg p-4 border border-slate-700">
-        <div className="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
-            <span className="font-semibold text-slate-200">
-              Hub Detection
-            </span>
-        </div>
-      
+    <div className="result-card">
+      <div className="result-card-header">
+        <span className="result-card-title">Hub Detection</span>
+        <span className="result-card-time">{timestamp}</span>
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <span style={{
           padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
@@ -1089,22 +1088,19 @@ export function HubDetectionCard({ data, timestamp }: HubProps) {
         </span>
       </div>
 
-      
-      <div className="flex gap-4 mb-4 text-xs">
-          <div className="flex-1 bg-slate-800 p-2 rounded">
-              <div className="text-slate-500 mb-1">Files</div>
-              <div className="font-mono text-indigo-300">{data.num_windows}</div>
-          </div>
-          <div className="flex-1 bg-slate-800 p-2 rounded">
-              <div className="text-slate-500 mb-1">Embedding k</div>
-              <div className="font-mono text-slate-200">
-                  {data.k}
-              </div>
-          </div>
-          <div className="flex-1 bg-slate-800 p-2 rounded">
-              <div className="text-slate-500 mb-1">Hub Count</div>
-              <div className="font-mono text-rose-400">{data.hub_num}</div>
-          </div>
+      <div className="stat-grid">
+        <div className="stat-box">
+          <div className="stat-label">Files</div>
+          <div className="stat-value">{data.num_windows}</div>
+        </div>
+        <div className="stat-box">
+          <div className="stat-label">Embedding k</div>
+          <div className="stat-value">{data.k}</div>
+        </div>
+        <div className="stat-box">
+          <div className="stat-label">Hub Count</div>
+          <div className="stat-value">{data.hub_num}</div>
+        </div>
       </div>
 
       {/* Progress steps */}
@@ -1163,11 +1159,12 @@ export function HubDetectionCard({ data, timestamp }: HubProps) {
                          '#ec4899','#14b8a6','#f97316','#6366f1','#84cc16']
         const hubsWithRoi = currentWindowHubs.filter(idx => data.roi_list![idx]?.code)
         if (hubsWithRoi.length === 0) return null
-        const roiIds = hubsWithRoi.map(idx => data.roi_list![idx].code)
-        const url = `${MCP_API_URL}/roi_figs/composite?ids=${roiIds.join(',')}`
+        const imageKey = isGroup ? 'group' : String(selectedWindow)
+        const imgSrc = data.hub_roi_images?.[imageKey]
+        if (!imgSrc) return null
         return (
           <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'flex-start' }}>
-            <img src={url} style={{ width: '50%', borderRadius: 6, display: 'block', flexShrink: 0 }} alt="Hub ROIs" />
+            <img src={imgSrc} style={{ width: '50%', borderRadius: 6, display: 'block', flexShrink: 0 }} alt="Hub ROIs" />
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginBottom: 2 }}>ROI Legend</div>
               {hubsWithRoi.map((idx, i) => {

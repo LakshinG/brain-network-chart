@@ -129,7 +129,7 @@ interface ChatAreaProps {
   addCsvDisabledHint?: string;
   addImageDisabledHint?: string;
   onFileUpload?: (file: File) => void;
-  onLoadDemo?: () => void;
+  onLoadDemo?: (kind: 'fc' | 'bold') => void;
   isProcessing: boolean;
   hasData: boolean;
   highlightedMessageId: string | null;
@@ -313,7 +313,6 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
     if (input.trim() && !isProcessing && !disableSend) {
       onSendMessage(input, forcedIntent ?? undefined);
       setInput('');
-      setForcedIntent(null);
     }
   };
 
@@ -332,11 +331,11 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   const renderedWorkflows = new Set<string>();
 
   return (
-    <div>
-      
+    <div className="h-full">
+
     {/* BidsConversionForm removed — preprocessing is now handled via multi-agent chat flow */}
-    
-    <div className="min-h-screen w-full p-4 flex items-center justify-center bg-transparent relative">
+
+    <div className="w-full h-full p-4 flex items-center justify-center bg-transparent relative">
       <div className="w-full rounded-[14px] border-2 border-slate-500/90 bg-slate-900/85 shadow-2xl shadow-slate-950/40 backdrop-blur-xl overflow-hidden">
         <div className="flex-none p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur">
           <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
@@ -345,9 +344,10 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
           {/* <p className="text-xs text-slate-400">Multi-Agent System Active</p> */}
         </div>
         <div
-          ref={scrollContainerRef}
+          ref={scrollContainerRef}    
+          // className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2 custom-scrollbar scroll-smooth"
           className="overflow-y-auto p-4 space-y-2 custom-scrollbar scroll-smooth"
-          style={{ maxHeight: 'min(52vh, calc(100vh - 24rem))' }}
+          style={{ maxHeight: 'calc(100dvh - 20rem' }}
         >
         {groupedRenderItems.map((item) => {
           if (item.type === 'message' && item.message) {
@@ -485,10 +485,16 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                         </button>
                      )}
                      <button
-                        onClick={onLoadDemo}
+                        onClick={() => onLoadDemo?.('fc')}
                         className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded"
                       >
-                        <PlayCircle className="w-3 h-3" /> Demo
+                        <PlayCircle className="w-3 h-3" /> Demo: FC
+                      </button>
+                      <button
+                        onClick={() => onLoadDemo?.('bold')}
+                        className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded"
+                      >
+                        <PlayCircle className="w-3 h-3" /> Demo: BOLD
                       </button>
                       <label className={`text-xs flex items-center gap-1 px-2 py-1 rounded transition-colors shadow-sm ${disableAddCsv ? 'cursor-not-allowed bg-indigo-900 text-indigo-300' : 'cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white'}`} title={disableAddCsv ? (addCsvDisabledHint || 'Disabled during current workflow') : 'Add CSV'}>
                           <Plus className="w-3 h-3" /> Add CSV

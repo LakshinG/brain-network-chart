@@ -4,6 +4,21 @@ import { McpTool, ChatMessage, AgentType } from "../types";
 import { PROMPTS } from "../constants";
 import { validatePlanColumns } from './internalTools';
 
+// Parameters the frontend injects automatically — hide from LLM to avoid hallucinated values.
+const FRONTEND_INJECTED_PARAMS = new Set(['dataset_id']);
+
+function stripInjectedParams(properties: Record<string, any>): Record<string, any> {
+  const filtered: Record<string, any> = {};
+  for (const [k, v] of Object.entries(properties)) {
+    if (!FRONTEND_INJECTED_PARAMS.has(k)) filtered[k] = v;
+  }
+  return filtered;
+}
+
+function stripInjectedRequired(required: string[]): string[] {
+  return required.filter(r => !FRONTEND_INJECTED_PARAMS.has(r));
+}
+
 const DEFAULT_OLLAMA_HOST = 'http://localhost:11434';
 const OLLAMA_HOST_STORAGE_KEY = 'neuroagent.ollamaHost';
 
@@ -354,9 +369,9 @@ export const generateNeuroPlan = async (query: string, dataContext: string, avai
 export const validatePlan = async (plan: any, availableTools: McpTool[], existingColumns: string[]) => {
   const toolManifest = availableTools.map(t => ({
     name: t.name,
-    description: t.description,
-    parameters: t.inputSchema.properties || {},
-    required: t.inputSchema.required || []
+    description: (t.description || '').replace(/\s*\bdata(?:set)?_id\b[^.;,\n]*/gi, ''),
+    parameters: stripInjectedParams(t.inputSchema.properties || {}),
+    required: stripInjectedRequired(t.inputSchema.required || [])
   }));
   console.log('[Plan Validator Agent] Input:', PROMPTS.PLAN_VALIDATOR(JSON.stringify(toolManifest), JSON.stringify(plan, null, 2)));
 
@@ -400,11 +415,13 @@ export const runExecutorAgent = async (
   retryError: string = "",
   toolHint: string = ""
 ) => {
-  const toolDefinitions = availableTools.map(t => 
-    `Tool: ${t.name}
-     Description: ${t.description}
-     Parameters Schema: ${JSON.stringify(t.inputSchema.properties || {})}`
-  ).join('\n\n');
+  const toolDefinitions = availableTools.map(t => {
+    // Remove dataset_id references from description so the LLM doesn't try to supply it
+    const desc = (t.description || '').replace(/\s*\bdata(?:set)?_id\b[^.;,\n]*/gi, '');
+    return `Tool: ${t.name}
+     Description: ${desc}
+     Parameters Schema: ${JSON.stringify(stripInjectedParams(t.inputSchema.properties || {}))}`;
+  }).join('\n\n');
 
   console.log('[Executor Agent] Input:', PROMPTS.EXECUTOR_AGENT(instruction, columns.join(', '), toolDefinitions, clarification, previousResults, delegator, serverFilename || '', retryError, toolHint));
   

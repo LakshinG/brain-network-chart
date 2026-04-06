@@ -17,24 +17,6 @@ export const AGENT_COLORS = {
   [AgentType.SYSTEM]: 'bg-gray-800 border-gray-700 text-gray-400',
 };
 
-export const MOCK_CSV_DATA = `ID,DX,Age,Sex,Amyloid_lS_orbital_med,Amyloid_lG_and_S_occipital_inf,Tau_Global
-001,CN,72,F,1.1,1.05,0.8
-002,CN,75,M,1.05,1.02,0.82
-003,MCI,71,M,1.4,1.15,1.1
-004,AD,80,F,1.8,1.45,1.5
-005,MCI,68,F,1.35,1.12,1.05
-006,CN,74,M,1.08,1.01,0.78
-007,AD,82,M,1.9,1.50,1.6
-008,LMCI,76,F,1.5,1.25,1.3
-009,EMCI,69,M,1.25,1.10,0.95
-010,AD,79,F,1.75,1.48,1.55
-011,CN,70,F,1.02,0.99,0.75
-012,MCI,73,M,1.38,1.20,1.15
-013,LMCI,77,F,1.55,1.30,1.35
-014,CN,71,M,1.06,1.03,0.81
-015,AD,85,F,2.0,1.60,1.7
-`;
-
 export const PROMPTS = {
   ORCHESTRATOR_CLASSIFY: (query: string) => `
     You are an Orchestrator Agent for a neuroimaging analysis system.
@@ -206,7 +188,7 @@ export const PROMPTS = {
     2. Check "Previous Step Results". 
        - If the instruction requires using a value found earlier (e.g., "Filter data where Age > X" where X was found in step 1, or "Search for the gene identified in step 2"), EXTRACT and USE that value in the tool parameters.
        - **FILE HANDLING**: ${serverFilename ? `If the instruction requires to upload a CSV file then use "${serverFilename}" because this is already uploaded.` : `Check "Previous Step Results" for any server filename context.`}
-       - **DATASET HANDLING**: The frontend automatically injects the active dataset into MCP tool calls when a tool schema asks for "dataset". Do not paste large dataset contents into your response.
+       - **DATASET HANDLING**: The frontend automatically injects "dataset_id" into MCP tool calls. You must NEVER include "dataset_id" in your toolCalls parameters — it will be added automatically. Do not paste large dataset contents into your response.
        - overlay_with_aging_curve is a frontend internal tool and must use the active dataset columns directly. Do not invent or require a file path such as y_path.
     3. Decide which tool(s) to call to fulfill the instruction.
        

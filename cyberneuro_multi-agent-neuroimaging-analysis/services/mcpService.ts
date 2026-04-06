@@ -177,6 +177,31 @@ export class McpService {
     this.isConnected = false;
   }
 
+  async registerDataset(dataset: { id: string; name: string; columns: string[]; data: Record<string, any>[]; serverFilename?: string }): Promise<{ dataset_id: string } | null> {
+    if (!this.isConnected) return null;
+    try {
+      const response = await fetch(`${MCP_API_URL}/datasets/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: dataset.id,
+          name: dataset.name,
+          columns: dataset.columns,
+          data: dataset.data,
+          ...(dataset.serverFilename ? { serverFilename: dataset.serverFilename } : {}),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Dataset registration failed: ${response.statusText}`);
+      }
+      const result = await response.json();
+      return { dataset_id: result.dataset_id };
+    } catch (error) {
+      console.error("MCP: Dataset registration failed", error);
+      return null;
+    }
+  }
+
   async uploadFile(file: File): Promise<{ status: string, file_info: any } | null> {
     if (!this.isConnected) {
         return null;

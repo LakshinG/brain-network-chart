@@ -45,6 +45,7 @@ export interface HubDetectionResult {
   console_output: string;
   progress: { step: string; message: string }[];
   roi_list?: { code: string; name: string }[];
+  hub_roi_images?: Record<string, string>;
 }
 
 export interface ChatMessage {
