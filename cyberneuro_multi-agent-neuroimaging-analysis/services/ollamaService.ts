@@ -213,7 +213,7 @@ export const buildConversationContext = (messages: ChatMessage[], limit: number 
   }).join('\n\n');
 };
 
-export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERAL' | 'VISION' | 'DATA_MANIPULATION'> => {
+export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERAL' | 'VISION' | 'DATA_MANIPULATION' | 'PREPROCESSING'> => {
   console.log('[Orchestrator Agent] Input:', PROMPTS.ORCHESTRATOR_CLASSIFY(query));
   try {
     const response = await ollama.generate({
@@ -224,7 +224,8 @@ export const classifyQuery = async (query: string): Promise<'RESEARCH' | 'GENERA
       stream: false
     });
     const json = robustJsonParse(response.response);
-    return (json.category === 'RESEARCH' || json.category === 'GENERAL' || json.category === 'VISION' || json.category === 'DATA_MANIPULATION') ? json.category : 'RESEARCH';
+    const valid = ['RESEARCH', 'GENERAL', 'VISION', 'DATA_MANIPULATION', 'PREPROCESSING'] as const;
+    return valid.includes(json.category) ? json.category : 'RESEARCH';
   } catch (e) {
     console.error("Orchestrator Error:", e);
     return 'RESEARCH';
@@ -494,6 +495,23 @@ export const generateResearchInsights = async (results: string, availableTools: 
       decision: "REPORT", 
       report: "Analysis complete. (Error generating autonomous research insights)." 
     };
+  }
+};
+
+export const generatePreprocessingProposal = async (query: string) => {
+  console.log('[Proposal Agent] Input:', PROMPTS.PREPROCESSING_PROPOSAL(query));
+  try {
+    const response = await ollama.generate({
+      model: neuroModel,
+      keep_alive: 300,
+      prompt: PROMPTS.PREPROCESSING_PROPOSAL(query),
+      format: 'json',
+      stream: false
+    });
+    return robustJsonParse(response.response);
+  } catch (e) {
+    console.error("Preprocessing Proposal Error:", e);
+    return { proposals: [] };
   }
 };
 

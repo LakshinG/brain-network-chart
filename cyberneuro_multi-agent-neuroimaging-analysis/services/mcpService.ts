@@ -1,8 +1,8 @@
 
 import { McpTool, McpToolCallResult } from '../types';
 
-const DEFAULT_BACKEND_BASE_URL = 'http://localhost:8789';
-const DEFAULT_MCP_API_URL = 'http://localhost:8010';
+const DEFAULT_BACKEND_BASE_URL = 'https://ziquan-cyberneuro-mcp.hf.space';
+const DEFAULT_MCP_API_URL = 'https://ziquan-cyberneuro-mcp.hf.space';
 const BACKEND_BASE_URL_STORAGE_KEY = 'neuroagent.backendBaseUrl';
 const MCP_API_URL_STORAGE_KEY = 'neuroagent.mcpApiUrl';
 

@@ -110,13 +110,22 @@ export interface AgentState {
   currentTask?: string;
 }
 
+export interface PreprocessingContext {
+  type: 'path_collection' | 'pipeline_execution';
+  originalQuery: string;
+  pathFormMessageId?: string;
+  sessionId?: string;
+  paths?: { data_dir: string; output_dir: string; process_dir: string; sc_fc_dir: string };
+}
+
 export interface SuspendedState {
   plan: any;
   stepIndex: number;
   data: any[];
   columns: string[];
-  intent: 'RESEARCH' | 'GENERAL' | 'DATA_MANIPULATION';
+  intent: 'RESEARCH' | 'GENERAL' | 'DATA_MANIPULATION' | 'PREPROCESSING';
   originalUserQuery?: string;
+  preprocessingContext?: PreprocessingContext;
 }
 
 export interface GroupComparisonResult {

@@ -3,11 +3,15 @@ import React, { useState, useEffect } from 'react';
 import { AgentType, ChatMessage } from '../../types';
 import { AGENT_COLORS } from '../../constants';
 import { User, BrainCircuit, Bot, Microscope, Terminal, GitFork, Lightbulb, Settings, FileCog, RotateCcw, Check, X, ShieldCheck, FileText, ImageIcon } from 'lucide-react';
+import InlinePathForm from './InlinePathForm';
+import InlinePipelineSteps from './InlinePipelineSteps';
+import InlineProposal from './InlineProposal';
 
 interface MessageBubbleProps {
   message: ChatMessage;
   isHighlighted?: boolean;
   onRestart?: (messageId: string, newParams: any) => void;
+  onWidgetAction?: (messageId: string, action: string, data: any) => void;
 }
 
 const getIcon = (role: AgentType) => {
@@ -28,7 +32,7 @@ const getIcon = (role: AgentType) => {
   }
 };
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, onRestart }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, onRestart, onWidgetAction }) => {
   const isUser = message.role === AgentType.USER;
   const colorClass = AGENT_COLORS[message.role] || AGENT_COLORS[AgentType.SYSTEM];
 
@@ -102,6 +106,29 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isHighlighted, o
             ${isHighlighted ? 'shadow-indigo-500/20' : ''}
         `}>
           {message.content}
+
+          {message.metadata?.widget === 'path_form' && (
+            <InlinePathForm
+              onSubmit={(paths) => { console.log('[MessageBubble] path_form onSubmit, onWidgetAction=', !!onWidgetAction, 'messageId=', message.id); onWidgetAction?.(message.id, 'path_submit', paths); }}
+              disabled={message.metadata?.submitted}
+            />
+          )}
+          {message.metadata?.widget === 'pipeline_steps' && (
+            <InlinePipelineSteps
+              bidsDir={message.metadata.bidsDir}
+              pipelineDir={message.metadata.pipelineDir}
+              processDir={message.metadata.processDir}
+              scFcDir={message.metadata.scFcDir}
+              sessionId={message.metadata.sessionId}
+              onAllComplete={() => onWidgetAction?.(message.id, 'pipeline_complete', {})}
+            />
+          )}
+          {message.metadata?.widget === 'preprocessing_proposal' && (
+            <InlineProposal
+              proposals={message.metadata.proposals}
+              onSelect={(q) => onWidgetAction?.(message.id, 'proposal_select', { query: q })}
+            />
+          )}
 
           {canEdit && !isEditing && (
              <div className="mt-3 pt-2 border-t border-slate-700/50 flex justify-end">

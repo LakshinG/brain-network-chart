@@ -612,13 +612,6 @@ export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config, onCon
         });
     }, [data.data]);
 
-    const xAxisDomain = useMemo((): [number, number] => {
-        if (chartData.length === 0) return [0, 80];
-        const min = chartData[0].age;
-        const max = chartData[chartData.length - 1].age;
-        return [Number(min) || 0, Number(max) || 80];
-    }, [chartData]);
-    
     const overlay = data.data;
 
     // Map overlay data to {x, y, color} for Scatter, filtering invalid points
@@ -631,35 +624,58 @@ export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config, onCon
          })).filter(p => !isNaN(p.age) && !isNaN(p.value));
     }, [overlay, data.overlayDot_color]);
 
-    // Calculate Y-Axis domain based on both curve lines and overlay points
+    const sampledOverlayData = useMemo(() => {
+        if (overlayData.length <= 100) return overlayData;
+        const sampled: typeof overlayData = [];
+        const lastIndex = overlayData.length - 1;
+        for (let i = 0; i < 100; i++) {
+            const index = Math.round((i * lastIndex) / 99);
+            sampled.push(overlayData[index]);
+        }
+        return sampled;
+    }, [overlayData]);
+
+    const addDomainMargin = useCallback((min: number, max: number): [number, number] => {
+        if (!Number.isFinite(min) || !Number.isFinite(max)) return [0, 1];
+        if (min === max) {
+            const padding = Math.abs(min) * 0.1 || 0.1;
+            return [min - padding, max + padding];
+        }
+        const padding = (max - min) * 0.08;
+        return [min - padding, max + padding];
+    }, []);
+
+    const overlayMinAge = useMemo(() => {
+        if (overlayData.length === 0) return undefined;
+        return Math.min(...overlayData.map(d => d.age));
+    }, [overlayData]);
+    const overlayMaxAge = useMemo(() => {
+        if (overlayData.length === 0) return undefined;
+        return Math.max(...overlayData.map(d => d.age));
+    }, [overlayData]);
+    const xAxisDomain = useMemo((): [number, number] => {
+        if (overlayData.length > 0) {
+            const ages = overlayData.map(d => d.age);
+            return addDomainMargin(Math.min(...ages), Math.max(...ages));
+        }
+        if (chartData.length === 0) return [0, 80];
+        return addDomainMargin(chartData[0].age, chartData[chartData.length - 1].age);
+    }, [addDomainMargin, chartData, overlayData]);
+    // Calculate Y-axis domain from the normative curve only.
     const yAxisDomain = useMemo((): [number, number] => {
         let min = Infinity, max = -Infinity;
-        
-        // Check curve data
         chartData.forEach(d => {
           [d.p5, d.p25, d.p50, d.p75, d.p95].forEach(val => {
-            if (val !== undefined) { 
-                if (val < min) min = val; 
-                if (val > max) max = val; 
+            if (val !== undefined) {
+                if (val < min) min = val;
+                if (val > max) max = val;
             }
           });
         });
-        
-        // Check overlay data
-        if (overlayData.length > 0) {
-             overlayData.forEach(d => {
-                 if (d.value < min) min = d.value;
-                 if (d.value > max) max = d.value;
-             });
-        }
 
-        // Fallback if no valid data found
         if (min === Infinity || max === -Infinity) return [0, 1];
-
-        // Add padding
-        const padding = (max - min) === 0 ? (Math.abs(max) * 0.1 || 0.1) : (max - min) * 0.1;
-        return [min - padding, max + padding];
-    }, [chartData, overlayData]);
+        return addDomainMargin(min, max);
+    }, [addDomainMargin, chartData]);
 
     const saveField = useCallback((field: 'title' | 'xAxisLabel' | 'yAxisLabel', value: string) => {
       if (!onConfigChange) return;
@@ -690,7 +706,7 @@ export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config, onCon
             <div className="flex-1 bg-slate-800 p-2 rounded">
                 <div className="text-slate-500 mb-1">Age Range</div>
                 <div className="font-mono text-slate-200">
-                    {chartData.length > 0 ? `${chartData[0].age.toFixed(0)}–${chartData[chartData.length - 1].age.toFixed(0)} yr` : '—'}
+                    {overlayMinAge !== undefined ? `${overlayMinAge.toFixed(0)}–${overlayMaxAge?.toFixed(0) || chartData[chartData.length - 1].age.toFixed(0)} yr` : '—'}
                 </div>
             </div>
             {overlayData.length > 0 && (
@@ -755,12 +771,12 @@ export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config, onCon
                         
                         {overlayData.length > 0 && (
                             <Scatter
-                                data={overlayData}
+                                data={sampledOverlayData}
                                 dataKey='value'
                                 name="Your data"
                                 fill="#f43f5e"
                             >
-                               {overlayData.map((entry, index) => (
+                               {sampledOverlayData.map((entry, index) => (
                                    <Cell key={`cell-${index}`} fill={entry.color !== undefined ? DEFAULT_COLORS[entry.color % DEFAULT_COLORS.length] : "#f43f5e"} />
                                ))}
                             </Scatter>

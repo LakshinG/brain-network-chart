@@ -12,6 +12,7 @@ export interface BidsConversionResult {
   return_code: number;
   pending?: boolean;
   stream_url?: string;
+  run_mode?: 'local' | 'server';
 }
 
 export type BidsConvertResultItem = { id: string; type: 'bids_conversion'; timestamp: string; data: BidsConversionResult; onComplete?: () => void };
@@ -31,13 +32,4 @@ async function handleResponse<T>(res: Response): Promise<T> {
     throw new Error(detail);
   }
   return res.json();
-}
-
-export async function runBidsConversion(data_dir: string, output_dir: string): Promise<BidsConversionResult> {
-  const res = await fetch('http://localhost:8004/run_bids_conversion', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data_dir, output_dir }),
-  });
-  return handleResponse(res);
 }

@@ -1,8 +1,22 @@
 
 import { McpTool, DatasetRow } from '../types';
 import { calculateCorrelation, getGroupStats, performSpectralClustering, stratifyDataset, calculateLinearSVM } from '../utils/stats';
+import { AGING_CURVE_PHENOTYPES, getAgingCurveData } from './agingCurveData';
 
 export const INTERNAL_TOOLS: McpTool[] = [
+  {
+    name: 'overlay_with_aging_curve',
+    description: `Overlay the active frontend dataset on a bundled normative aging curve. No upload or file path is required. Available phenotypes: ${AGING_CURVE_PHENOTYPES.join(', ')}`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x_phenotype: { type: 'string', description: 'Phenotype name to compare against the bundled aging curve database.' },
+        age_col: { type: 'string', description: 'Column in the active dataset containing age values in months.' },
+        val_col: { type: 'string', description: 'Column in the active dataset containing the metric to overlay.' }
+      },
+      required: ['x_phenotype', 'age_col', 'val_col']
+    }
+  },
   {
     name: 'DATA_INSPECT',
     description: 'Return the actual data rows to the user interface. Use this when the user explicitly asks to "see" or "show" the data, or when you need to check the format of values (e.g. strings vs numbers) within a column.',
@@ -158,7 +172,53 @@ const resolveColumnSelection = (data: DatasetRow[], explicitCols?: string[], pat
     return Array.from(selected);
 };
 
-export const executeInternalTool = (toolName: string, args: any, data: DatasetRow[]) => {
+const toFiniteNumber = (value: string | number | undefined): number | null => {
+  if (value === undefined || value === null) return null;
+  const parsed = typeof value === 'number' ? value : parseFloat(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+export const executeInternalTool = async (toolName: string, args: any, data: DatasetRow[]) => {
+  if (toolName === 'overlay_with_aging_curve') {
+    const startedAt = performance.now();
+    const phenotype = args.x_phenotype;
+    let ageCol = args.age_col;
+    let valCol = args.val_col;
+
+    if (!phenotype) throw new Error("Missing required parameter 'x_phenotype'.");
+    if (!ageCol || !valCol) throw new Error("Parameters 'age_col' and 'val_col' are required.");
+
+    ageCol = fuzzyMatchColumn(ageCol, data);
+    valCol = fuzzyMatchColumn(valCol, data);
+    validateColumns(data, [ageCol, valCol]);
+
+    const curveData = await getAgingCurveData(phenotype);
+
+    const overlayPoints = data
+      .map(row => {
+        const age = toFiniteNumber(row[ageCol]);
+        const value = toFiniteNumber(row[valCol]);
+        if (age === null || value === null) return null;
+        return { age: age, value };
+      })
+      .filter((row): row is { age: number; value: number } => row !== null);
+
+    if (overlayPoints.length === 0) {
+      throw new Error(`No valid numeric rows found for '${ageCol}' and '${valCol}'.`);
+    }
+
+    return {
+      status: 'success',
+      phenotype,
+      elapsed_seconds: (performance.now() - startedAt) / 1000,
+      data: {
+        ...curveData,
+        age: overlayPoints.map(point => point.age),
+        values: overlayPoints.map(point => point.value)
+      }
+    };
+  }
+
   if (toolName === 'DATA_INSPECT') {
     const cols = resolveColumnSelection(data, args.columns, args.column_pattern);
     

@@ -4,7 +4,6 @@ import { WorkflowHistory, WorkflowRecord } from '../../workflowTypes';
 import MessageBubble from './MessageBubble';
 import ThinkingOverlay from '../AgentProgress/ThinkingOverlay';
 import { Send, Upload, PlayCircle, FileSpreadsheet, Plus, Trash2, CheckCircle2, Merge, RefreshCw, ImagePlus, Download, ChevronDown, ChevronUp } from 'lucide-react';
-import {runBidsConversion, BidsConvertResultItem} from '../DicomProcess/BidsConversionForm';
 /* ═══════════════════════════════════════════════════════════════════════════
    Roles that stay visible in the outer chat stream.
    Everything else is folded into the ThinkingOverlay.
@@ -16,6 +15,7 @@ const OUTER_CHAT_ROLES = new Set([
   AgentType.VISION,
   AgentType.PROPOSAL_REPORTER,
   AgentType.DATA_MANIPULATOR,
+  AgentType.PREPROCESSOR,
   AgentType.SYSTEM,
 ]);
 
@@ -27,6 +27,15 @@ interface RenderItem {
   message?: ChatMessage;
   record?: WorkflowRecord;
   workflowMessages?: ChatMessage[];
+}
+
+interface GroupedRenderItem {
+  type: 'message' | 'thinking' | 'system-group';
+  message?: ChatMessage;
+  record?: WorkflowRecord;
+  workflowMessages?: ChatMessage[];
+  messages?: ChatMessage[];
+  id: string;
 }
 
 function buildRenderItems(
@@ -63,12 +72,56 @@ function buildRenderItems(
 
   return items;
 }
+
+function groupSystemMessages(items: RenderItem[]): GroupedRenderItem[] {
+  const grouped: GroupedRenderItem[] = [];
+  let systemRun: ChatMessage[] = [];
+
+  const flushSystemRun = () => {
+    if (systemRun.length === 0) return;
+    if (systemRun.length === 1) {
+      grouped.push({
+        type: 'message',
+        message: systemRun[0],
+        id: systemRun[0].id,
+      });
+    } else {
+      grouped.push({
+        type: 'system-group',
+        messages: [...systemRun],
+        id: `system-group-${systemRun[0].id}-${systemRun[systemRun.length - 1].id}`,
+      });
+    }
+    systemRun = [];
+  };
+
+  items.forEach((item) => {
+    if (item.type === 'message' && item.message?.role === AgentType.SYSTEM) {
+      systemRun.push(item.message);
+      return;
+    }
+
+    flushSystemRun();
+
+    if (item.type === 'message' && item.message) {
+      grouped.push({ ...item, id: item.message.id });
+      return;
+    }
+
+    if (item.type === 'thinking' && item.record) {
+      grouped.push({ ...item, id: item.record.id });
+    }
+  });
+
+  flushSystemRun();
+  return grouped;
+}
 /* ═══════════════════════════════════════════════════════════════════════════
    Props — identical to gh-page original + workflow history
    ═══════════════════════════════════════════════════════════════════════════ */
 interface ChatAreaProps {
   messages: ChatMessage[];
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, forceIntent?: string) => void;
   onAbortWorkflow: () => void;
   canAbortWorkflow: boolean;
   disableAddCsv?: boolean;
@@ -99,107 +152,7 @@ interface ChatAreaProps {
   disableSendHint?: string;
   // NEW: workflow history
   history: WorkflowHistory;
-  onBidsConvertResult: (item: BidsConvertResultItem) => void;
-}
-
-function uid() { return Math.random().toString(36).slice(2) }
-function timestamp() { return new Date().toLocaleTimeString() }
-// ── BIDS Conversion ──────────────────────────────────────────
-function BidsConversionForm({ onResult }: { onResult: (item: BidsConvertResultItem) => void }) {
-  const [dataDir, setDataDir] = useState('')
-  const [outputDir, setOutputDir] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [isExpanded, setIsExpanded] = useState(false)
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setLoading(true); setError('')
-
-    const params = new URLSearchParams({ data_dir: dataDir, output_dir: outputDir })
-    onResult({
-      id: uid(), type: 'bids_conversion', timestamp: timestamp(),
-      data: {
-        status: 'pending', data_dir: dataDir, output_dir: outputDir,
-        n_nii: 0, n_errors: 0, n_warnings: 0, elapsed_seconds: 0,
-        console_output: '', progress: [], report_html: null, return_code: -1,
-        pending: true, stream_url: `/run_bids_conversion_stream?${params}`,
-      },
-      onComplete: () => setLoading(false),
-    })
-    setLoading(false)
-  }
-
-  return (
-    <div className="border-t border-slate-800">
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full p-4 bg-slate-900 hover:bg-slate-800/50 transition-colors flex items-center justify-between text-left"
-      >
-        <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-          DICOM → BIDS Conversion
-        </h3>
-        {isExpanded ? (
-          <ChevronUp className="w-4 h-4 text-slate-400" />
-        ) : (
-          <ChevronDown className="w-4 h-4 text-slate-400" />
-        )}
-      </button>
-
-      {isExpanded && (
-        <div className="p-4 bg-slate-900 border-t border-slate-800">
-          <p className="text-xs text-slate-400 mb-4">
-            Auto-classifies and converts DICOM to BIDS using dicom2bids_agent; shows validation report on completion
-          </p>
-
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                DICOM Source Directory (server path)
-              </label>
-              <input
-                type="text"
-                className="w-full bg-slate-800 text-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 placeholder-slate-500"
-                value={dataDir}
-                onChange={e => setDataDir(e.target.value)}
-                required
-                placeholder="/data/ADNI_raw"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1">
-                BIDS Output Directory (server path)
-              </label>
-              <input
-                type="text"
-                className="w-full bg-slate-800 text-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 placeholder-slate-500"
-                value={outputDir}
-                onChange={e => setOutputDir(e.target.value)}
-                required
-                placeholder="/data/bids_output"
-              />
-            </div>
-
-            {error && (
-              <div className="text-xs text-red-400 bg-red-900/20 border border-red-900/50 rounded-md px-3 py-2">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || !dataDir || !outputDir}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:hover:bg-slate-700 text-white font-medium py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Converting (may take several minutes)…' : 'Start Conversion'}
-            </button>
-          </form>
-        </div>
-      )}
-    </div>
-  )
+  onWidgetAction?: (messageId: string, action: string, data: any) => void;
 }
 
 const ChatArea: React.FC<ChatAreaProps> = React.memo(({
@@ -209,10 +162,12 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   uploadedImages, activeImageId, onImageToggle, onImageRemove, onMergeDatasets, onSyncDataset,
   disableSend = false, disableSendHint,
   history,
-  onBidsConvertResult,
+  onWidgetAction,
 }) => {
   const [input, setInput] = useState('');
+  const [forcedIntent, setForcedIntent] = useState<string | null>(null);
   const [expandedWorkflowId, setExpandedWorkflowId] = useState<string | null>(null);
+  const [expandedSystemGroupIds, setExpandedSystemGroupIds] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -252,6 +207,10 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
     () => buildRenderItems(messages, history.records),
     [messages, history.records]
   );
+  const groupedRenderItems = useMemo(
+    () => groupSystemMessages(renderItems),
+    [renderItems]
+  );
 
   const scrollToBottom = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -272,6 +231,23 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
       messageRefs.current[highlightedMessageId]?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [highlightedMessageId, expandedWorkflowId]);
+
+  useEffect(() => {
+    if (!highlightedMessageId) return;
+    const containingGroup = groupedRenderItems.find(
+      (item) =>
+        item.type === 'system-group' &&
+        item.messages?.some((message) => message.id === highlightedMessageId)
+    );
+
+    if (!containingGroup) return;
+    setExpandedSystemGroupIds(prev => {
+      if (prev.has(containingGroup.id)) return prev;
+      const next = new Set(prev);
+      next.add(containingGroup.id);
+      return next;
+    });
+  }, [groupedRenderItems, highlightedMessageId]);
 
   // Helper: find which workflow a message belongs to
   const findWorkflowForMessageId = (msgId: string): WorkflowRecord | null => {
@@ -335,8 +311,9 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !isProcessing && !disableSend) {
-      onSendMessage(input);
+      onSendMessage(input, forcedIntent ?? undefined);
       setInput('');
+      setForcedIntent(null);
     }
   };
 
@@ -355,20 +332,24 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
   const renderedWorkflows = new Set<string>();
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 border-l border-slate-800 relative">
+    <div>
+      
+    {/* BidsConversionForm removed — preprocessing is now handled via multi-agent chat flow */}
+    
+    <div className="h-full w-full p-4 flex items-center justify-center bg-transparent relative">
+      <div className="w-full max-w-4xl rounded-[28px] border-2 border-slate-500/90 bg-slate-900/85 shadow-2xl shadow-slate-950/40 backdrop-blur-xl overflow-hidden">
       <div className="flex-none p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur">
         <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-500"></span>
-          Research Assistant
+          Chat Area
         </h2>
-        <p className="text-xs text-slate-400">Multi-Agent System Active</p>
+        {/* <p className="text-xs text-slate-400">Multi-Agent System Active</p> */}
       </div>
-
-      <div
-        ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar scroll-smooth"
-      >
-        {renderItems.map((item, idx) => {
+        <div
+          ref={scrollContainerRef}
+          className="overflow-y-auto p-4 space-y-2 custom-scrollbar scroll-smooth"
+          style={{ maxHeight: 'min(52vh, calc(100vh - 24rem))' }}
+        >
+        {groupedRenderItems.map((item) => {
           if (item.type === 'message' && item.message) {
             return (
               <div key={item.message.id} ref={(el) => { messageRefs.current[item.message!.id] = el; }}>
@@ -376,7 +357,59 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                   message={item.message}
                   isHighlighted={item.message.id === highlightedMessageId}
                   onRestart={onRestartStep}
+                  onWidgetAction={onWidgetAction}
                 />
+              </div>
+            );
+          }
+
+          if (item.type === 'system-group' && item.messages) {
+            const isExpanded = expandedSystemGroupIds.has(item.id);
+            const first = item.messages[0];
+            const last = item.messages[item.messages.length - 1];
+
+            return (
+              <div key={item.id} className="mb-3">
+                <button
+                  onClick={() =>
+                    setExpandedSystemGroupIds(prev => {
+                      const next = new Set(prev);
+                      if (next.has(item.id)) next.delete(item.id);
+                      else next.add(item.id);
+                      return next;
+                    })
+                  }
+                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl border border-slate-700 bg-slate-800/70 hover:bg-slate-800 text-left transition-colors"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      System Updates
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {item.messages.length} messages, {new Date(first.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} to {new Date(last.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                  {isExpanded ? (
+                    <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                  )}
+                </button>
+
+                {isExpanded && (
+                  <div className="mt-2">
+                    {item.messages.map((message) => (
+                      <div key={message.id} ref={(el) => { messageRefs.current[message.id] = el; }}>
+                        <MessageBubble
+                          message={message}
+                          isHighlighted={message.id === highlightedMessageId}
+                          onRestart={onRestartStep}
+                          onWidgetAction={onWidgetAction}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           }
@@ -422,9 +455,9 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
            </div>
         )}
         <div ref={messagesEndRef} />
-      </div>
+        </div>
 
-      <div className="flex-none p-4 bg-slate-900 border-t border-slate-800">
+        <div className="flex-none p-4 bg-slate-900/95 border-t border-slate-800">
 
         {/* Compact File System — preserved from gh-page */}
         <div className="mb-4">
@@ -570,20 +603,33 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
             </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex items-center gap-2">
-          <input
-            type="text"
+        <form onSubmit={handleSubmit} className="flex items-end gap-2">
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
             disabled={isProcessing || disableSend}
             placeholder={disableSend ? (disableSendHint || 'No models available — connect Ollama first') : inputPlaceholder}
-            className="flex-1 bg-slate-800 text-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 disabled:opacity-50 placeholder-slate-500"
+            rows={1}
+            style={{ resize: 'none', overflow: 'hidden' }}
+            ref={(el) => {
+              if (el) {
+                el.style.height = 'auto';
+                el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+              }
+            }}
+            className="flex-1 bg-slate-800 text-slate-200 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 border border-slate-700 disabled:opacity-50 placeholder-slate-500 text-sm leading-relaxed"
           />
           <button
             type="button"
             onClick={onAbortWorkflow}
             disabled={!canAbortWorkflow}
-            className="p-2.5 bg-red-700 hover:bg-red-600 text-white rounded-md disabled:opacity-40 disabled:hover:bg-red-700 transition-colors"
+            className="p-2.5 bg-red-700 hover:bg-red-600 text-white rounded-md disabled:opacity-40 disabled:hover:bg-red-700 transition-colors flex-shrink-0"
             title="Abort current workflow and restart from beginning"
           >
             Abort
@@ -591,11 +637,34 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
           <button
             type="submit"
             disabled={!input.trim() || isProcessing || disableSend}
-            className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors"
+            className="p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors flex-shrink-0"
           >
             <Send className="w-4 h-4" />
           </button>
         </form>
+
+        {/* Intent force-select */}
+        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+          <span className="text-[10px] text-slate-500 mr-1">Intent:</span>
+          {(['Auto', 'RESEARCH', 'GENERAL', 'VISION', 'DATA_MANIPULATION', 'PREPROCESSING'] as const).map(intent => {
+            const isAuto = intent === 'Auto';
+            const isActive = isAuto ? !forcedIntent : forcedIntent === intent;
+            return (
+              <button
+                key={intent}
+                type="button"
+                onClick={() => setForcedIntent(isAuto ? null : intent)}
+                className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                  isActive
+                    ? 'bg-indigo-600 border-indigo-500 text-white'
+                    : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                {isAuto ? 'Auto' : intent.replace('_', ' ')}
+              </button>
+            );
+          })}
+        </div>
         {onFileUpload && (
           <input
             type="file"
@@ -605,10 +674,11 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
             className="hidden"
           />
         )}
+        </div>
+        
       </div>
-      <BidsConversionForm onResult={onBidsConvertResult} />
     </div>
-    
+    </div>
   );
 });
 

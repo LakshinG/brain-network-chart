@@ -39,15 +39,16 @@ export const PROMPTS = {
   ORCHESTRATOR_CLASSIFY: (query: string) => `
     You are an Orchestrator Agent for a neuroimaging analysis system.
     
-    Classify the User Query into one of four categories:
+    Classify the User Query into one of five categories:
     1. "RESEARCH": The user wants to analyze data, inspect columns, perform statistics, find correlations, compare groups, or search for literature.
     2. "GENERAL": The user wants to modify the visualization (e.g., change color, title, size), ask a general question unconnected to the dataset, or perform simple UI tasks.
     3. "VISION": The user asks about understanding/interpreting image content (e.g., "what does this scan show", "describe this uploaded image", "is there lesion/atrophy/signs in the image").
     4. "DATA_MANIPULATION": The user wants to manipulate the dataset (e.g., filter, sort, merge).
+    5. "PREPROCESSING": The user describes a study with raw neuroimaging data needing conversion (DICOM to BIDS), processing pipeline, or mentions raw scans, fMRI data, MRI scanner details.
 
     User Query: "${query}"
 
-    Return strictly a JSON object: { "category": "RESEARCH" } or { "category": "GENERAL" } or { "category": "VISION" } or { "category": "DATA_MANIPULATION" }
+    Return strictly a JSON object: { "category": "RESEARCH" } or { "category": "GENERAL" } or { "category": "VISION" } or { "category": "DATA_MANIPULATION" } or { "category": "PREPROCESSING" }
   `,
 
   VISION_AGENT: (query: string) => `
@@ -205,6 +206,8 @@ export const PROMPTS = {
     2. Check "Previous Step Results". 
        - If the instruction requires using a value found earlier (e.g., "Filter data where Age > X" where X was found in step 1, or "Search for the gene identified in step 2"), EXTRACT and USE that value in the tool parameters.
        - **FILE HANDLING**: ${serverFilename ? `If the instruction requires to upload a CSV file then use "${serverFilename}" because this is already uploaded.` : `Check "Previous Step Results" for any server filename context.`}
+       - **DATASET HANDLING**: The frontend automatically injects the active dataset into MCP tool calls when a tool schema asks for "dataset". Do not paste large dataset contents into your response.
+       - overlay_with_aging_curve is a frontend internal tool and must use the active dataset columns directly. Do not invent or require a file path such as y_path.
     3. Decide which tool(s) to call to fulfill the instruction.
        
        ${delegator === 'Researcher' ? `
@@ -309,5 +312,25 @@ export const PROMPTS = {
     6. **Conclusion**: Final takeaway.
 
     Output strictly in clean MARKDOWN.
+  `,
+
+  PREPROCESSING_PROPOSAL: (userQuery: string) => `
+    You are a Proposal Agent for a neuroimaging analysis system.
+    Based ONLY on the user's study description, suggest 1-3 concrete next analysis steps to perform on the processed data.
+
+    User Query: "${userQuery}"
+
+    Available analysis tools: overlay_with_aging_curve (overlay on normative aging curves), CORRELATION_ANALYSIS (correlation between columns), SPECTRAL_CLUSTERING (PCA + K-Means clustering), SVM_CLASSIFICATION (classify groups).
+
+    Return strictly a JSON object:
+    {
+      "proposals": [
+        {
+          "title": "Short title (under 10 words)",
+          "description": "One sentence explaining the analysis and its relevance to the study.",
+          "trigger_query": "Natural language query to send to the research agent, referencing specific analysis and expected data columns."
+        }
+      ]
+    }
   `
 };

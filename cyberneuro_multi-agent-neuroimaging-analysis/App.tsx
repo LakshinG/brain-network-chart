@@ -3,7 +3,7 @@ import {
   AgentType, ChatMessage, Dataset, ToolVisualization, VisualizationType, McpTool, SuspendedState, CorrelationResult, DatasetRow
 } from './types';
 import { MOCK_CSV_DATA } from './constants';
-import { BidsConvertResultItem } from './components/DicomProcess/BidsConversionForm';
+import { DATA_HOST_URL } from './components/DicomProcess/BidsConversionCard';
 import { 
   generateNeuroPlan,
   generateGeneralPlan,
@@ -12,6 +12,7 @@ import {
   generateResearchInsights, 
   generateProposalReport,
   generatePreprocessingMapping,
+  generatePreprocessingProposal,
   validatePlan,
   runExecutorAgent,
   interpretToolResult,
@@ -419,13 +420,104 @@ const App: React.FC = () => {
     setVisualizations(prev => [withId, ...prev]);
   };
 
-  const handleBidsConvertResult = (item: BidsConvertResultItem) => {
-    addVisualization({
-      type: VisualizationType.BIDS_CONVERSION,
-      title: `BIDS Conversion: ${item.data.output_dir}`,
-      data: item.data,
-      timestamp: item.timestamp,
+  // ── Preprocessing widget callbacks ──────────────────────────────────────
+  const handlePreprocessingProposal = async (pipelineMessageId: string) => {
+    const pipelineMsg = messages.find(m => m.id === pipelineMessageId);
+    const sessionId = pipelineMsg?.metadata?.sessionId;
+    let originalQuery = '';
+    if (sessionId) {
+      try {
+        const res = await fetch(`${DATA_HOST_URL}/sessions/${sessionId}`);
+        const session = await res.json();
+        originalQuery = session.original_query || '';
+      } catch { /* ignore */ }
+    }
+    if (!originalQuery) return;
+    addMessage(AgentType.PROPOSAL_REPORTER, "Generating analysis proposals based on your study description...");
+    const result = await generatePreprocessingProposal(originalQuery);
+    addMessage(AgentType.PROPOSAL_REPORTER, "Based on your study, here are suggested next steps:", {
+      widget: 'preprocessing_proposal', proposals: result.proposals ?? [],
     });
+  };
+
+  const handleWidgetAction = async (messageId: string, action: string, data: any) => {
+    console.log('[handleWidgetAction] action=', action, 'messageId=', messageId, 'data=', data);
+    if (action === 'path_submit') {
+      // Handle preprocessing path submission directly (don't route through handleUserQuery
+      // to avoid adding a raw JSON USER message and relying on suspendedState closure).
+      const paths = data as { data_dir: string; output_dir: string; process_dir: string; sc_fc_dir: string };
+      const ctx = suspendedState?.preprocessingContext;
+      const originalQuery = ctx?.originalQuery ?? '';
+
+      // Mark form as submitted
+      setMessages(prev => prev.map(m =>
+        m.id === messageId ? { ...m, metadata: { ...m.metadata, submitted: true } } : m
+      ));
+      setIsProcessing(true);
+      setSuspendedState(null);
+
+      try {
+        // Create session on backend
+        const sessionRes = await fetch(`${DATA_HOST_URL}/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...paths, original_query: originalQuery }),
+        });
+        const { session_id } = await sessionRes.json();
+
+        // Fetch pipeline_dir from backend
+        const infoRes = await fetch(`${DATA_HOST_URL}/info`);
+        const { pipeline_dir: pipelineDir } = await infoRes.json();
+
+        // Start BIDS conversion via SSE
+        const convMsg = addMessage(AgentType.PREPROCESSOR, "Starting BIDS conversion...\n");
+        const params = new URLSearchParams({ data_dir: paths.data_dir, output_dir: paths.output_dir, model: selectedNeuroModel });
+        const es = new EventSource(`${DATA_HOST_URL}/run_bids_conversion_stream?${params}`);
+        const convResult = await new Promise<any>((resolve) => {
+          es.onmessage = (e) => {
+            setMessages(prev => prev.map(m =>
+              m.id === convMsg.id ? { ...m, content: m.content + e.data + '\n' } : m
+            ));
+          };
+          es.addEventListener('done', (e) => {
+            let result = null;
+            try { result = JSON.parse((e as MessageEvent).data); } catch {}
+            es.close();
+            resolve(result);
+          });
+          es.onerror = () => { es.close(); resolve(null); };
+        });
+
+        // Add BIDS_CONVERSION visualization card
+        if (convResult) {
+          addVisualization({
+            type: VisualizationType.BIDS_CONVERSION,
+            title: 'BIDS Conversion Result',
+            vizId: genVizId(),
+            data: { ...convResult, timestamp: new Date().toISOString() },
+          });
+        }
+
+        // Show pipeline steps inline
+        addMessage(AgentType.PREPROCESSOR, "BIDS conversion complete. Run the pipeline steps below:", {
+          widget: 'pipeline_steps',
+          bidsDir: paths.output_dir,
+          pipelineDir,
+          processDir: paths.process_dir,
+          scFcDir: paths.sc_fc_dir,
+          sessionId: session_id,
+        });
+      } catch (error) {
+        console.error('Preprocessing error:', error);
+        addMessage(AgentType.SYSTEM, `Preprocessing error: ${String(error)}`);
+      } finally {
+        setIsProcessing(false);
+      }
+    } else if (action === 'pipeline_complete') {
+      handlePreprocessingProposal(messageId);
+    } else if (action === 'proposal_select') {
+      await handleUserQuery(data.query);
+    }
   };
 
   const escapeHtml = (value: string) => value
@@ -748,7 +840,7 @@ const App: React.FC = () => {
                       : m
                   ));
 
-                  const result = executeInternalTool(toolName, { ...params, mapping }, newData);
+                  const result = await executeInternalTool(toolName, { ...params, mapping }, newData);
                   const transformResult = result as any;
                   
                   newData = transformResult.transformedData;
@@ -768,7 +860,7 @@ const App: React.FC = () => {
               }
           }
           else if (toolName === 'AVERAGE_MULTIPLE_COLUMNS') {
-              const result = executeInternalTool(toolName, params, newData);
+              const result = await executeInternalTool(toolName, params, newData);
               const aggResult = result as any;
               
               newData = aggResult.transformedData;
@@ -790,7 +882,7 @@ const App: React.FC = () => {
               rawResult = result;
           }
           else if (toolName === 'MODIFY_VISUALIZATION') {
-              const result = executeInternalTool(toolName, params, newData);
+              const result = await executeInternalTool(toolName, params, newData);
               setVisualizations(prev => {
                   if (prev.length === 0) return prev;
                   const targetIndex = prev.findIndex(v => v.messageId === highlightedMessageId);
@@ -806,13 +898,13 @@ const App: React.FC = () => {
               rawResult = result;
           }
           else if (toolName === 'DATA_INSPECT') {
-              const result = executeInternalTool(toolName, params, newData) as any;
+              const result = await executeInternalTool(toolName, params, newData) as any;
               viz = { type: VisualizationType.DATA_TABLE, title: 'Data Inspection', data: result.data };
               stepResult = `Inspected data. Loaded ${result.data.length} rows.`;
               rawResult = result;
           }
           else {
-              const result = executeInternalTool(toolName, params, newData);
+              const result = await executeInternalTool(toolName, params, newData);
               rawResult = result;
               
               // Generic handler for tools returning data mutation
@@ -884,11 +976,34 @@ const App: React.FC = () => {
                    const svmResult = result as any;
                    viz = { type: VisualizationType.SVM_BOUNDARY, title: `SVM Classification (${(svmResult.accuracy*100).toFixed(1)}% Acc)`, data: svmResult };
                    stepResult = `SVM Classification complete. Accuracy: ${(svmResult.accuracy * 100).toFixed(2)}%.`;
+              } else if (toolName === 'overlay_with_aging_curve') {
+                   viz = parseMcpResultToVisualization(toolName, JSON.stringify(result), newData);
+                   stepResult = 'Aging curve successfully loaded';
               }
           }
       }
       else if (mcpToolDef) {
          const args = { ...params };
+         const schemaProps = mcpToolDef.inputSchema?.properties || {};
+
+         // Frontend-owned dataset context is injected here, not into the prompt.
+         if ('dataset' in schemaProps && !args.dataset) {
+            args.dataset = {
+               id: activeDataset?.id || `active-${Date.now()}`,
+               name: activeDataset?.name || activeServerFilename || 'Active Dataset',
+               columns: currentColumns,
+               data: currentData,
+               serverFilename: activeServerFilename || undefined,
+            };
+         }
+
+         // Prefer server-side handles when the MCP tool accepts path-like params.
+         if (activeServerFilename) {
+            if ('data_path' in schemaProps && !args.data_path) args.data_path = activeServerFilename;
+            if ('y_path' in schemaProps && !args.y_path) args.y_path = activeServerFilename;
+            if ('filename' in schemaProps && !args.filename) args.filename = activeServerFilename;
+         }
+
          if (mcpToolDef.inputSchema.properties && 'data' in mcpToolDef.inputSchema.properties) {
             args.data = newData;
          }
@@ -1404,7 +1519,7 @@ const App: React.FC = () => {
   };
 
   // Original query handler
-  const handleUserQuery = async (query: string) => {
+  const handleUserQuery = async (query: string, forceIntent?: string) => {
     // If a visualization is selected, route ALL queries to viz editor
     if (selectedVisualizationId) {
       setIsProcessing(true);
@@ -1426,6 +1541,15 @@ const App: React.FC = () => {
     workflowStartRef.current = Date.now();
 
     if (suspendedState) {
+       // PREPROCESSING path_submit is now handled directly in handleWidgetAction.
+       // If we still have a PREPROCESSING suspended state here (shouldn't happen), just clear it.
+       if (suspendedState.intent === 'PREPROCESSING') {
+         setSuspendedState(null);
+         setIsProcessing(false);
+         return;
+       }
+
+       // ── Normal clarification resume ──
        if (!activeDataset) {
          addMessage(AgentType.SYSTEM, "No active dataset available to resume this workflow.");
          setIsProcessing(false);
@@ -1461,8 +1585,10 @@ const App: React.FC = () => {
       }
 
       wf.startNewQuery(query, messagesRef.current.length);
-      addMessage(AgentType.ORCHESTRATOR, "Evaluating query intent...");
-      const intent = await classifyQuery(query);
+      addMessage(AgentType.ORCHESTRATOR, forceIntent ? `Intent forced: ${forceIntent}` : "Evaluating query intent...");
+      const intent = forceIntent
+        ? (forceIntent as Awaited<ReturnType<typeof classifyQuery>>)
+        : await classifyQuery(query);
       throwIfWorkflowAborted(runId);
       const hasImageContext = uploadedImages.length > 0;
       const effectiveIntent = (!activeDataset && hasImageContext && intent !== 'VISION') ? 'VISION' : intent;
@@ -1609,6 +1735,23 @@ const App: React.FC = () => {
           }
         );
         finalizeWorkflow('done');
+        return;
+      }
+
+      // ── PREPROCESSING intent ──
+      if (effectiveIntent === 'PREPROCESSING') {
+        addMessage(AgentType.PREPROCESSOR, "I'll help you preprocess your neuroimaging data. Please provide the required directory paths below.");
+        const pathFormMsg = addMessage(AgentType.PREPROCESSOR, "", {
+          widget: 'path_form', submitted: false,
+        });
+        setSuspendedState({
+          plan: null, stepIndex: 0, data: [], columns: [],
+          intent: 'PREPROCESSING', originalUserQuery: query,
+          preprocessingContext: {
+            type: 'path_collection', originalQuery: query, pathFormMessageId: pathFormMsg.id,
+          },
+        });
+        setIsProcessing(false);
         return;
       }
 
@@ -1972,7 +2115,7 @@ const App: React.FC = () => {
           disableSend={availableModels.length === 0}
           disableSendHint="No models available — connect Ollama first"
           history={history}
-          onBidsConvertResult={handleBidsConvertResult}
+          onWidgetAction={handleWidgetAction}
         />
       </div>
     </div>
