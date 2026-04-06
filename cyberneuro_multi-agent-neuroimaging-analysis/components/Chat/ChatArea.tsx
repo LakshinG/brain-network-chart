@@ -336,14 +336,14 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
       
     {/* BidsConversionForm removed — preprocessing is now handled via multi-agent chat flow */}
     
-    <div className="h-full w-full p-4 flex items-center justify-center bg-transparent relative">
-      <div className="w-full max-w-4xl rounded-[28px] border-2 border-slate-500/90 bg-slate-900/85 shadow-2xl shadow-slate-950/40 backdrop-blur-xl overflow-hidden">
-      <div className="flex-none p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur">
-        <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-          Chat Area
-        </h2>
-        {/* <p className="text-xs text-slate-400">Multi-Agent System Active</p> */}
-      </div>
+    <div className="min-h-screen w-full p-4 flex items-center justify-center bg-transparent relative">
+      <div className="w-full rounded-[14px] border-2 border-slate-500/90 bg-slate-900/85 shadow-2xl shadow-slate-950/40 backdrop-blur-xl overflow-hidden">
+        <div className="flex-none p-4 border-b border-slate-800 bg-slate-900/50 backdrop-blur">
+          <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+            Chat Area
+          </h2>
+          {/* <p className="text-xs text-slate-400">Multi-Agent System Active</p> */}
+        </div>
         <div
           ref={scrollContainerRef}
           className="overflow-y-auto p-4 space-y-2 custom-scrollbar scroll-smooth"
