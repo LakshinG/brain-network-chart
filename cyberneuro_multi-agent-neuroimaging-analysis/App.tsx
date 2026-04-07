@@ -354,10 +354,8 @@ const App: React.FC = () => {
           setGeneralModel(preferred);
           setNeuroModel(preferred);
           
-          const coderModel = models.find(m => m.includes('coder'));
-          if (coderModel) {
-            setVisualizerModel(coderModel);
-          }
+          const coderModel = models.find(m => m.includes('coder')) || preferred;
+          setVisualizerModel(coderModel);
         }
       } else {
         addMessage(AgentType.SYSTEM, "CRITICAL WARNING: Could not connect to Ollama (http://127.0.0.1:11434). Ensure it is running with OLLAMA_ORIGINS=\"*\".");
