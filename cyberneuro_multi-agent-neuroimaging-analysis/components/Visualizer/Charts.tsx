@@ -653,14 +653,19 @@ export const AgingCurveChart: React.FC<AgingCurveProps> = ({ data, config, onCon
         if (overlayData.length === 0) return undefined;
         return Math.max(...overlayData.map(d => d.age));
     }, [overlayData]);
+    // X axis min, max equal to overlay points
+    // const xAxisDomain = useMemo((): [number, number] => {
+    //     if (overlayData.length > 0) {
+    //         const ages = overlayData.map(d => d.age);
+    //         return addDomainMargin(Math.min(...ages), Math.max(...ages));
+    //     }
+    //     if (chartData.length === 0) return [0, 80];
+    //     return addDomainMargin(chartData[0].age, chartData[chartData.length - 1].age);
+    // }, [addDomainMargin, chartData, overlayData]);
+    // X axis uses fixed min, max
     const xAxisDomain = useMemo((): [number, number] => {
-        if (overlayData.length > 0) {
-            const ages = overlayData.map(d => d.age);
-            return addDomainMargin(Math.min(...ages), Math.max(...ages));
-        }
-        if (chartData.length === 0) return [0, 80];
-        return addDomainMargin(chartData[0].age, chartData[chartData.length - 1].age);
-    }, [addDomainMargin, chartData, overlayData]);
+        return [0, 80];
+    }, []);
     // Calculate Y-axis domain from the normative curve only.
     const yAxisDomain = useMemo((): [number, number] => {
         let min = Infinity, max = -Infinity;
