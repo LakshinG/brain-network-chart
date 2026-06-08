@@ -3,3 +3,6 @@ __pycache__/
 *.log
 .vscode/
 medsam_outputs/
+uploaded_files/ctx_*.csv
+uploaded_files/*.nii
+uploaded_files/*.nii.gz
