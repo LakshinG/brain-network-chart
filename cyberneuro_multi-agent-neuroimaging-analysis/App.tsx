@@ -77,7 +77,59 @@ interface UploadedImage {
   vizId: string;
 }
 
+interface UploadedNiftiScan {
+  fileName: string;
+  serverFilename: string;
+  uploadedAt: number;
+}
+
 type WorkflowMode = 'DATASET' | 'IMAGE' | null;
+
+type CyberNeuroBridgePayload = {
+  type: string;
+  text?: string;
+  forceIntent?: string;
+  kind?: 'fc' | 'bold';
+  name?: string;
+  mime?: string;
+  dataUrl?: string;
+};
+
+type CyberNeuroBridgeHandlers = {
+  sendMessage: (text: string, forceIntent?: string) => void;
+  abort: () => void;
+  loadDemo: (kind: 'fc' | 'bold') => void;
+  sync: () => void;
+  uploadCsv: (file: File) => void;
+  uploadImage: (file: File) => void;
+};
+
+const cyberNeuroEmbedMode = () =>
+  typeof window === 'undefined'
+    ? ''
+    : new URLSearchParams(window.location.search).get('embed') || '';
+
+const isCyberNeuroBridgePayload = (value: unknown): value is CyberNeuroBridgePayload =>
+  typeof value === 'object' &&
+  value !== null &&
+  'type' in value &&
+  typeof (value as { type?: unknown }).type === 'string' &&
+  (value as { type: string }).type.startsWith('cyberneuro:');
+
+const postCyberNeuroBridgeMessage = (payload: Record<string, unknown>) => {
+  if (typeof window === 'undefined' || window.parent === window) return;
+  window.parent.postMessage(payload, '*');
+};
+
+const looksLikeSegmentationQuery = (query: string) =>
+  /\b(segment|segmentation|outline|delineate)\b/i.test(query) &&
+  /\.nii(?:\.gz)?\b/i.test(query);
+
+const hasSegmentationVerb = (query: string) =>
+  /\b(segment|segmentation|outline|delineate)\b/i.test(query);
+
+const isNiftiFileName = (fileName: string) =>
+  /\.nii(?:\.gz)?$/i.test(fileName);
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -101,6 +153,7 @@ const App: React.FC = () => {
   const [selectedVisualizationId, setSelectedVisualizationId] = useState<string | null>(null);
   const [visualizerModel, setVisualizerModel] = useState<string>('qwen2.5-coder:32b');
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [uploadedNiftiScans, setUploadedNiftiScans] = useState<UploadedNiftiScan[]>([]);
   const [activeImageId, setActiveImageId] = useState<number | null>(null);
   const [activeWorkflowMode, setActiveWorkflowMode] = useState<WorkflowMode>(null);
   const [showOllamaSetupToast, setShowOllamaSetupToast] = useState(false);
@@ -108,6 +161,8 @@ const App: React.FC = () => {
   const [mcpUrlLabel, setMcpUrlLabel] = useState(getBackendBaseUrl());
 
   const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://acmlab.github.io';
+  const visualizerOnly = useMemo(() => cyberNeuroEmbedMode() === 'visualizer', []);
+  const bridgeHandlersRef = useRef<CyberNeuroBridgeHandlers | null>(null);
 
 
 
@@ -683,6 +738,7 @@ const App: React.FC = () => {
     const fileList = Array.from(files);
 
     for (const file of fileList) {
+        const isNifti = isNiftiFileName(file.name);
         let serverFilename: string | undefined = undefined;
         
         // 1. Upload to MCP Server if connected
@@ -697,7 +753,21 @@ const App: React.FC = () => {
              } catch (error) {
                  console.error("Upload error", error);
                  addMessage(AgentType.SYSTEM, `Upload failed for "${file.name}". Local analysis only.`);
+             }
+        }
+
+        if (isNifti) {
+            if (serverFilename) {
+                const uploadedAt = Date.now();
+                setUploadedNiftiScans(prev => [{ fileName: file.name, serverFilename, uploadedAt }, ...prev]);
+                addMessage(
+                  AgentType.SYSTEM,
+                  `NIfTI scan ready for MedSAM: ${serverFilename}. You can now ask: segment the right kidney.`
+                );
+            } else {
+                addMessage(AgentType.SYSTEM, `NIfTI scan "${file.name}" was not uploaded to MCP. Connect MCP before running MedSAM.`);
             }
+            continue;
         }
 
         // 2. Load locally
@@ -786,6 +856,34 @@ const App: React.FC = () => {
       }
       if (json.cfcs !== undefined) {
         return { type: VisualizationType.CFC_DASHBOARD, title: `CFC Wavelet Analysis`, data: json };
+      }
+      if (json.status === 'success' && json.overlay_url && json.mask_path) {
+        const overlayUrl = `${getMcpApiUrl()}${json.overlay_url}`;
+        const safeOverlayUrl = escapeHtml(overlayUrl);
+        const safeOrgan = escapeHtml(json.organ || json.organ_key || 'MedSAM segmentation');
+        const safeMaskPath = escapeHtml(json.mask_path || '');
+        const safeOverlayPath = escapeHtml(json.overlay_path || '');
+        const safeSummary = escapeHtml(`voxels=${json.voxel_count ?? 'n/a'} seeds=${Array.isArray(json.seeds_used) ? json.seeds_used.join(',') : 'n/a'} box=${Array.isArray(json.box_used) ? json.box_used.join(',') : 'n/a'}`);
+        return {
+          type: VisualizationType.VIS_HTML,
+          title: `MedSAM Segmentation: ${json.organ || json.organ_key || 'Result'}`,
+          data: {
+            html: `<div class="visualizationCard bg-slate-900 rounded-xl border border-slate-700 p-3">
+  <div class="vc-header mb-3">
+    <h3 class="vc-title text-slate-100 font-semibold text-sm">${safeOrgan}</h3>
+    <p class="text-xs text-slate-500 font-mono">${safeSummary}</p>
+  </div>
+  <div class="vc-body space-y-3">
+    <img src="${safeOverlayUrl}" alt="${safeOrgan} overlay" style="width:100%;height:auto;max-height:560px;object-fit:contain;border-radius:0.5rem;display:block;" />
+    <div class="text-[11px] text-slate-400 font-mono break-all">
+      <div>Mask: ${safeMaskPath}</div>
+      <div>Overlay: ${safeOverlayPath}</div>
+    </div>
+  </div>
+</div>`,
+            heightPx: 660
+          }
+        };
       }
       if (json.hub_num !== undefined) {
         return { type: VisualizationType.HUB_DETECTION, title: `Hub Detection`, data: json };
@@ -1581,7 +1679,12 @@ const App: React.FC = () => {
     }
 
     try {
-      if (!ollamaConnected) {
+      const segmentationIntentFallback =
+        forceIntent === 'SEGMENTATION' ||
+        looksLikeSegmentationQuery(query) ||
+        (uploadedNiftiScans.length > 0 && hasSegmentationVerb(query));
+
+      if (!ollamaConnected && !segmentationIntentFallback) {
          const recheck = await checkOllamaConnection();
         throwIfWorkflowAborted(runId);
          if (!recheck) {
@@ -1596,6 +1699,8 @@ const App: React.FC = () => {
       addMessage(AgentType.ORCHESTRATOR, forceIntent ? `Intent forced: ${forceIntent}` : "Evaluating query intent...");
       const intent = forceIntent
         ? (forceIntent as Awaited<ReturnType<typeof classifyQuery>>)
+        : segmentationIntentFallback
+          ? 'SEGMENTATION'
         : await classifyQuery(query);
       throwIfWorkflowAborted(runId);
       const hasImageContext = uploadedImages.length > 0;
@@ -1746,6 +1851,66 @@ const App: React.FC = () => {
         return;
       }
 
+      if (effectiveIntent === 'SEGMENTATION') {
+        setActiveWorkflowMode('IMAGE');
+        wf.setPhase('executing');
+        addMessage(AgentType.ORCHESTRATOR, "Detected MedSAM segmentation request. Calling MCP tool run_medsam_segmentation...");
+
+        const pathMatch = query.match(/(?:\/[^\s"'`]+|[A-Za-z0-9_.-]+)\.nii(?:\.gz)?/i);
+        const uploadedScan = uploadedNiftiScans.find(scan => query.toLowerCase().includes(scan.fileName.toLowerCase())) || uploadedNiftiScans[0];
+        const scanPath = pathMatch ? pathMatch[0] : (uploadedScan?.serverFilename || '');
+        const organKeywords = ['right kidney', 'left kidney', 'liver', 'heart', 'spleen', 'myocardium', 'tumor'];
+        const detectedOrgan = organKeywords.find(organ => query.toLowerCase().includes(organ)) || 'custom';
+
+        if (!scanPath) {
+          addMessage(AgentType.SYSTEM, "Please upload a .nii/.nii.gz scan first, or include a NIfTI path/filename in the request.");
+          finalizeWorkflow('error');
+          return;
+        }
+
+        if (!mcpClient.isConnected) {
+          addMessage(AgentType.SYSTEM, "MCP is not connected. Start/connect the MCP server before running MedSAM segmentation.");
+          finalizeWorkflow('error');
+          return;
+        }
+
+        const result = await mcpClient.callTool('run_medsam_segmentation', {
+          scan_path: scanPath,
+          organ: detectedOrgan
+        });
+        throwIfWorkflowAborted(runId);
+
+        const textContent = result.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(textContent);
+        } catch {
+          parsed = { status: result.isError ? 'error' : 'unknown', error: textContent };
+        }
+
+        if (result.isError || parsed?.status === 'error') {
+          addMessage(AgentType.SYSTEM, `MedSAM segmentation failed: ${parsed?.error || textContent}`);
+          finalizeWorkflow('error');
+          return;
+        }
+
+        const viz = parseMcpResultToVisualization('run_medsam_segmentation', JSON.stringify(parsed), []);
+        if (viz) addVisualization(viz);
+
+        addMessage(
+          AgentType.EXECUTOR,
+          `MedSAM segmentation complete.\n\n` +
+          `Organ: ${parsed.organ || detectedOrgan}\n` +
+          `Seed slices: ${Array.isArray(parsed.seeds_used) ? parsed.seeds_used.join(', ') : 'n/a'}\n` +
+          `Bounding box: ${Array.isArray(parsed.box_used) ? `[${parsed.box_used.join(', ')}]` : 'n/a'}\n` +
+          `Voxels segmented: ${Number(parsed.voxel_count || 0).toLocaleString()}\n` +
+          `Mask: ${parsed.mask_path || ''}\n` +
+          `Overlay: ${parsed.overlay_path || ''}`
+        );
+        finalizeWorkflow('done');
+        return;
+      }
+
       // ── PREPROCESSING intent ──
       if (effectiveIntent === 'PREPROCESSING') {
         addMessage(AgentType.PREPROCESSOR, "I'll help you preprocess your neuroimaging data. Please provide the required directory paths below.");
@@ -1880,6 +2045,91 @@ const App: React.FC = () => {
   const selectedVisualization = selectedVisualizationId 
     ? visualizations.find(v => v.vizId === selectedVisualizationId) 
     : null;
+
+  bridgeHandlersRef.current = {
+    sendMessage: handleUserQuery,
+    abort: handleAbortWorkflow,
+    loadDemo: handleLoadDemo,
+    sync: handleManualSync,
+    uploadCsv: (file) => handleFileUpload(createFileList(file)),
+    uploadImage: (file) => handleImageUpload(createFileList(file)),
+  };
+
+  useEffect(() => {
+    postCyberNeuroBridgeMessage({ type: 'cyberneuro:ready' });
+    const handleBridgeMessage = async (event: MessageEvent) => {
+      if (!isCyberNeuroBridgePayload(event.data)) return;
+      const handlers = bridgeHandlersRef.current;
+      if (!handlers) return;
+
+      if (event.data.type === 'cyberneuro:send-message' && typeof event.data.text === 'string') {
+        handlers.sendMessage(event.data.text, typeof event.data.forceIntent === 'string' ? event.data.forceIntent : undefined);
+        return;
+      }
+
+      if (event.data.type === 'cyberneuro:abort') {
+        handlers.abort();
+        return;
+      }
+
+      if (event.data.type === 'cyberneuro:load-demo' && (event.data.kind === 'fc' || event.data.kind === 'bold')) {
+        handlers.loadDemo(event.data.kind);
+        return;
+      }
+
+      if (event.data.type === 'cyberneuro:sync') {
+        handlers.sync();
+        return;
+      }
+
+      if (event.data.type === 'cyberneuro:upload-csv' && typeof event.data.text === 'string') {
+        handlers.uploadCsv(new File(
+          [event.data.text],
+          typeof event.data.name === 'string' ? event.data.name : 'opencode.csv',
+          { type: typeof event.data.mime === 'string' ? event.data.mime : 'text/csv' }
+        ));
+        return;
+      }
+
+      if (event.data.type === 'cyberneuro:upload-image' && typeof event.data.dataUrl === 'string') {
+        const blob = await fetch(event.data.dataUrl).then(response => response.blob());
+        handlers.uploadImage(new File(
+          [blob],
+          typeof event.data.name === 'string' ? event.data.name : 'opencode-image.png',
+          { type: typeof event.data.mime === 'string' ? event.data.mime : blob.type || 'image/png' }
+        ));
+      }
+    };
+
+    window.addEventListener('message', handleBridgeMessage);
+    return () => window.removeEventListener('message', handleBridgeMessage);
+  }, []);
+
+  useEffect(() => {
+    postCyberNeuroBridgeMessage({
+      type: 'cyberneuro:state',
+      state: {
+        isProcessing,
+        hasData: !!activeDataset,
+        activeDatasetName: activeDataset?.name,
+        uploadedImageCount: uploadedImages.length,
+        availableModels,
+        mcpConnected,
+        ollamaConnected,
+      },
+    });
+  }, [isProcessing, activeDataset?.name, uploadedImages.length, availableModels, mcpConnected, ollamaConnected]);
+
+  useEffect(() => {
+    postCyberNeuroBridgeMessage({
+      type: 'cyberneuro:messages',
+      messages: messages.slice(-12).map(message => ({
+        role: message.role,
+        content: message.content,
+        timestamp: message.timestamp,
+      })),
+    });
+  }, [messages]);
 
 
   // Header – plain JSX, NOT a component function (avoids remount flashing)
@@ -2165,6 +2415,17 @@ const App: React.FC = () => {
       </div>
     </div>
   ) : null;
+
+  if (visualizerOnly) {
+    return (
+      <div className="h-screen w-full overflow-auto bg-slate-950 text-slate-200">
+        {ollamaSetupToast}
+        <div className="min-h-full">
+          {leftPanel}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-full overflow-hidden bg-slate-950 text-slate-200">

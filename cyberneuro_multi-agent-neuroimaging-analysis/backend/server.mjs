@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { Readable } from 'node:stream';
 import express from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
@@ -7,6 +8,7 @@ import { MCPClient } from 'mcp-client';
 const PORT = Number(process.env.PORT || 8789);
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'http://localhost:8010/mcp';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || '*';
+const MCP_HTTP_BASE_URL = process.env.MCP_HTTP_BASE_URL || new URL('..', MCP_SERVER_URL.endsWith('/') ? MCP_SERVER_URL : `${MCP_SERVER_URL}/`).toString().replace(/\/$/, '');
 
 const app = express();
 app.use(cors({ origin: FRONTEND_ORIGIN === '*' ? true : FRONTEND_ORIGIN }));
@@ -79,6 +81,51 @@ app.get('/health', (_req, res) => {
     mcpServerUrl: MCP_SERVER_URL,
   });
 });
+
+async function proxyToMcpHttp(req, res) {
+  const targetUrl = `${MCP_HTTP_BASE_URL}${req.originalUrl}`;
+  const headers = { ...req.headers };
+  delete headers.host;
+  delete headers.connection;
+  delete headers['content-length'];
+
+  const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+  const isJson = typeof req.is === 'function' && req.is('application/json');
+
+  try {
+    const upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: hasBody ? (isJson ? JSON.stringify(req.body || {}) : req) : undefined,
+      duplex: hasBody && !isJson ? 'half' : undefined,
+    });
+
+    res.status(upstream.status);
+    upstream.headers.forEach((value, key) => {
+      if (!['content-encoding', 'transfer-encoding', 'connection'].includes(key.toLowerCase())) {
+        res.setHeader(key, value);
+      }
+    });
+
+    if (!upstream.body) {
+      res.end();
+      return;
+    }
+    Readable.fromWeb(upstream.body).pipe(res);
+  } catch (error) {
+    res.status(502).json({
+      error: error instanceof Error ? error.message : 'MCP HTTP proxy failed',
+      target: targetUrl,
+    });
+  }
+}
+
+app.post('/upload', proxyToMcpHttp);
+app.get('/list_files', proxyToMcpHttp);
+app.delete('/delete_file', proxyToMcpHttp);
+app.post('/delete_file', proxyToMcpHttp);
+app.post('/datasets/register', proxyToMcpHttp);
+app.get('/medsam_outputs/*', proxyToMcpHttp);
 
 app.post('/api/mcp/connect', async (_req, res) => {
   try {
@@ -156,4 +203,5 @@ process.on('SIGTERM', shutdown);
 server.listen(PORT, () => {
   console.log(`[backend] listening on http://localhost:${PORT}`);
   console.log(`[backend] MCP target: ${MCP_SERVER_URL}`);
+  console.log(`[backend] MCP HTTP proxy target: ${MCP_HTTP_BASE_URL}`);
 });

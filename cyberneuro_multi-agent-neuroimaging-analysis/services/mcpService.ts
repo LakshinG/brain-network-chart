@@ -1,8 +1,9 @@
 
 import { McpTool, McpToolCallResult } from '../types';
 
-const DEFAULT_BACKEND_BASE_URL = 'https://ziquan-cyberneuro-mcp.hf.space';
-const DEFAULT_MCP_API_URL = 'https://ziquan-cyberneuro-mcp.hf.space';
+const LEGACY_DEFAULT_MCP_URL = 'https://ziquan-cyberneuro-mcp.hf.space';
+const DEFAULT_BACKEND_BASE_URL = 'https://xiyunhu-cyberneuro-mcp.hf.space';
+const DEFAULT_MCP_API_URL = 'https://xiyunhu-cyberneuro-mcp.hf.space';
 const BACKEND_BASE_URL_STORAGE_KEY = 'neuroagent.backendBaseUrl';
 const MCP_API_URL_STORAGE_KEY = 'neuroagent.mcpApiUrl';
 
@@ -12,7 +13,14 @@ const isValidHttpUrl = (value: string) => /^https?:\/\//i.test(value);
 const getStoredUrl = (key: string, fallback: string) => {
   if (typeof window === 'undefined') return fallback;
   const stored = window.localStorage.getItem(key);
-  return stored ? normalizeHttpUrl(stored) : fallback;
+  if (!stored) return fallback;
+
+  const normalized = normalizeHttpUrl(stored);
+  if (normalized === LEGACY_DEFAULT_MCP_URL) {
+    window.localStorage.setItem(key, fallback);
+    return fallback;
+  }
+  return normalized;
 };
 
 export let BACKEND_BASE_URL = getStoredUrl(BACKEND_BASE_URL_STORAGE_KEY, DEFAULT_BACKEND_BASE_URL);

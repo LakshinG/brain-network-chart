@@ -496,15 +496,18 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                       >
                         <PlayCircle className="w-3 h-3" /> Demo: BOLD
                       </button>
-                      <label className={`text-xs flex items-center gap-1 px-2 py-1 rounded transition-colors shadow-sm ${disableAddCsv ? 'cursor-not-allowed bg-indigo-900 text-indigo-300' : 'cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white'}`} title={disableAddCsv ? (addCsvDisabledHint || 'Disabled during current workflow') : 'Add CSV'}>
-                          <Plus className="w-3 h-3" /> Add CSV
+                      <label className={`text-xs flex items-center gap-1 px-2 py-1 rounded transition-colors shadow-sm ${disableAddCsv ? 'cursor-not-allowed bg-indigo-900 text-indigo-300' : 'cursor-pointer bg-indigo-600 hover:bg-indigo-500 text-white'}`} title={disableAddCsv ? (addCsvDisabledHint || 'Disabled during current workflow') : 'Add CSV or NIfTI'}>
+                          <Plus className="w-3 h-3" /> Add File
                           <input
                             type="file"
                             multiple
-                            accept=".csv"
+                            accept=".csv,.nii,.nii.gz"
                             className="hidden"
                             disabled={disableAddCsv}
-                            onChange={(e) => onMultiFileUpload(e.target.files)}
+                            onChange={(e) => {
+                              onMultiFileUpload(e.target.files);
+                              e.currentTarget.value = '';
+                            }}
                           />
                       </label>
                       <label className={`text-xs flex items-center gap-1 px-2 py-1 rounded transition-colors shadow-sm ${disableAddImage ? 'cursor-not-allowed bg-cyan-900 text-cyan-300' : 'cursor-pointer bg-cyan-600 hover:bg-cyan-500 text-white'}`} title={disableAddImage ? (addImageDisabledHint || 'Disabled during current workflow') : 'Add Image'}>
@@ -676,7 +679,7 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
             type="file"
             ref={fileInputRef}
             onChange={handleFileChange}
-            accept=".csv"
+            accept=".csv,.nii,.nii.gz"
             className="hidden"
           />
         )}
