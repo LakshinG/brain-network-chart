@@ -335,11 +335,19 @@ const App: React.FC = () => {
 
           const response = await mcpClient.uploadFile(file);
           if (response && response.file_info && response.file_info.saved_filename) {
-              setActiveServerFilename(response.file_info.saved_filename);
+              const savedFilename = response.file_info.saved_filename;
+              setActiveServerFilename(savedFilename);
+              // Persist the server filename onto the dataset so the dedup guard
+              // above short-circuits subsequent effect runs. Without this, demo
+              // datasets (which start with no serverFilename) re-upload on every
+              // state change and saturate the MCP rate limit (HTTP 429).
+              setDatasets(prev => prev.map(d =>
+                  d.id === activeDataset.id ? { ...d, serverFilename: savedFilename } : d
+              ));
               if (manual) {
-                  addMessage(AgentType.SYSTEM, `Sync complete. Active context: ${response.file_info.saved_filename}`);
+                  addMessage(AgentType.SYSTEM, `Sync complete. Active context: ${savedFilename}`);
               } else {
-                  console.log("Context synced:", response.file_info.saved_filename);
+                  console.log("Context synced:", savedFilename);
               }
           }
       } catch (e) {
