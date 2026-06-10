@@ -2016,15 +2016,28 @@ const App: React.FC = () => {
             .filter(h => h.startsWith('male_') && h.endsWith('_0.5_centile'))
             .map(h => h.replace('male_', '').replace('_0.5_centile', ''));
 
+          // If a dataset is already loaded, overlay it directly so the chart
+          // opens with the patient data shown (no separate "Add CSV" step).
+          let externalPatientCsv: string | undefined;
+          if (activeDataset) {
+            try {
+              // convertWMTractCsv passes wide-format CSVs through unchanged and
+              // converts JHU long-format (tract_name) files to the wide format.
+              externalPatientCsv = convertWMTractCsv(datasetToCSV(activeDataset));
+            } catch {
+              externalPatientCsv = undefined;
+            }
+          }
+
           addVisualization({
             type: VisualizationType.WM_BRAIN_CHART,
             title: 'White Matter Brain Chart',
-            data: { csv, tractMetrics },
+            data: { csv, tractMetrics, externalPatientCsv },
             timestamp: new Date().toISOString(),
           });
 
           addMessage(AgentType.EXECUTOR,
-            `White matter brain chart loaded. ${tractMetrics.length} tract-metric combinations available. Use the selectors to explore different tracts and metrics. You can also enter a patient age and value to overlay them on the normative trajectory.`
+            `White matter brain chart loaded${externalPatientCsv ? ` with "${activeDataset?.name}" overlaid` : ''}. ${tractMetrics.length} tract-metric combinations available. Use the selectors to explore different tracts and metrics. You can also enter a patient age and value to overlay them on the normative trajectory.`
           );
 
         } catch (error) {
