@@ -4,6 +4,7 @@ import {
 } from './types';
 import demoFcCsv from './data/data_example_FC.csv?raw';
 import demoBoldCsv from './data/data_example_BOLD.csv?raw';
+import demoWmCsv from './data/data_example_WM.csv?raw';
 import { DATA_HOST_URL } from './components/DicomProcess/BidsConversionCard';
 import { 
   generateNeuroPlan,
@@ -135,7 +136,7 @@ type CyberNeuroBridgePayload = {
   type: string;
   text?: string;
   forceIntent?: string;
-  kind?: 'fc' | 'bold';
+  kind?: 'fc' | 'bold' | 'wm';
   name?: string;
   mime?: string;
   dataUrl?: string;
@@ -144,7 +145,7 @@ type CyberNeuroBridgePayload = {
 type CyberNeuroBridgeHandlers = {
   sendMessage: (text: string, forceIntent?: string) => void;
   abort: () => void;
-  loadDemo: (kind: 'fc' | 'bold') => void;
+  loadDemo: (kind: 'fc' | 'bold' | 'wm') => void;
   sync: () => void;
   uploadCsv: (file: File) => void;
   uploadImage: (file: File) => void;
@@ -849,9 +850,11 @@ const App: React.FC = () => {
     handleFileUpload(createFileList(file));
   }, []);
 
-  const handleLoadDemo = (kind: 'fc' | 'bold') => {
+  const handleLoadDemo = (kind: 'fc' | 'bold' | 'wm') => {
     if (kind === 'fc') {
       loadData(demoFcCsv, "Demo-FC");
+    } else if (kind === 'wm') {
+      loadData(demoWmCsv, "Demo-WM");
     } else {
       loadData(demoBoldCsv, "Demo-BOLD");
     }
@@ -2195,7 +2198,7 @@ const App: React.FC = () => {
         return;
       }
 
-      if (event.data.type === 'cyberneuro:load-demo' && (event.data.kind === 'fc' || event.data.kind === 'bold')) {
+      if (event.data.type === 'cyberneuro:load-demo' && (event.data.kind === 'fc' || event.data.kind === 'bold' || event.data.kind === 'wm')) {
         handlers.loadDemo(event.data.kind);
         return;
       }

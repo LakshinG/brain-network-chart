@@ -129,7 +129,7 @@ interface ChatAreaProps {
   addCsvDisabledHint?: string;
   addImageDisabledHint?: string;
   onFileUpload?: (file: File) => void;
-  onLoadDemo?: (kind: 'fc' | 'bold') => void;
+  onLoadDemo?: (kind: 'fc' | 'bold' | 'wm') => void;
   isProcessing: boolean;
   hasData: boolean;
   highlightedMessageId: string | null;
@@ -489,6 +489,12 @@ const ChatArea: React.FC<ChatAreaProps> = React.memo(({
                         className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded"
                       >
                         <PlayCircle className="w-3 h-3" /> Demo: FC
+                      </button>
+                      <button
+                        onClick={() => onLoadDemo?.('wm')}
+                        className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1 hover:bg-slate-800 px-2 py-1 rounded"
+                      >
+                        <PlayCircle className="w-3 h-3" /> Demo: WM
                       </button>
                       <button
                         onClick={() => onLoadDemo?.('bold')}
