@@ -7,6 +7,7 @@ import BidsConversionCard from '../DicomProcess/BidsConversionCard';
 import { HtmlVisualizationRenderer } from './HtmlVisualizationRenderer';
 import DynamicChartRenderer from './DynamicChartRenderer';
 import CodeEditorModal from './CodeEditorModal';
+import WMBrainChart from './WMBrainChart';
 import { prepareDataScope, chartDataToCode } from '../../utils/chartToCode';
 import { FileText, Database, BookOpen, Link, FileCheck2, CheckCircle2, TrendingUp, Grid2X2, Layers, Download, Binary, Pencil, Code } from 'lucide-react';
 
@@ -325,6 +326,7 @@ const VisualizationCard: React.FC<{
           {visualization.type === VisualizationType.DATA_TABLE && <FileText className="w-4 h-4 text-emerald-400" />}
           {visualization.type === VisualizationType.RESEARCH_REPORT && <FileCheck2 className="w-4 h-4 text-indigo-400" />}
           {visualization.type === VisualizationType.BIDS_CONVERSION && <FileCheck2 className="w-4 h-4 text-orange-400" />}
+          {visualization.type === VisualizationType.WM_BRAIN_CHART && <TrendingUp className="w-4 h-4 text-violet-400" />}
           <span className="font-semibold text-slate-200">{visualization.title}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -550,6 +552,13 @@ const VisualizationCard: React.FC<{
             <BidsConversionCard data={visualization.data} timestamp={visualization.data.timestamp} onComplete={visualization.data.onComplete} />
           </div>
         )}
+
+        {visualization.type === VisualizationType.WM_BRAIN_CHART && (
+          <div className="pointer-events-auto" onClick={e => e.stopPropagation()}>
+            <WMBrainChart data={visualization.data} externalPatientCsv={visualization.data.externalPatientCsv} />
+          </div>
+        )}
+
         </>)}
       </div>
 
