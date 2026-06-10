@@ -1983,7 +1983,9 @@ const App: React.FC = () => {
         addMessage(AgentType.ORCHESTRATOR, "Loading white matter brain chart...");
 
         try {
-          const response = await fetch('/data/example_centiles.csv');
+          // BASE_URL is '/brain-network-chart/' on GitHub Pages, '/' in dev —
+          // use it so the fetch resolves under the deployed base path.
+          const response = await fetch(`${import.meta.env.BASE_URL}data/example_centiles.csv`);
 
           if (!response.ok) {
             addMessage(AgentType.SYSTEM,
