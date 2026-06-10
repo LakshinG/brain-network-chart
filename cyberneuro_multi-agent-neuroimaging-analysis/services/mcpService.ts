@@ -9,6 +9,18 @@ const MCP_API_URL_STORAGE_KEY = 'neuroagent.mcpApiUrl';
 
 const normalizeHttpUrl = (value: string) => value.trim().replace(/\/$/, '');
 const isValidHttpUrl = (value: string) => /^https?:\/\//i.test(value);
+const shouldResetStoredUrl = (value: string) => {
+  if (value === LEGACY_DEFAULT_MCP_URL) return true;
+  if (typeof window === 'undefined') return false;
+  if (!window.location.hostname.endsWith('github.io')) return false;
+
+  try {
+    const url = new URL(value);
+    return ['localhost', '127.0.0.1', '0.0.0.0', 'tesla.acm.unc.edu'].includes(url.hostname);
+  } catch {
+    return true;
+  }
+};
 
 const getStoredUrl = (key: string, fallback: string) => {
   if (typeof window === 'undefined') return fallback;
@@ -16,7 +28,7 @@ const getStoredUrl = (key: string, fallback: string) => {
   if (!stored) return fallback;
 
   const normalized = normalizeHttpUrl(stored);
-  if (normalized === LEGACY_DEFAULT_MCP_URL) {
+  if (shouldResetStoredUrl(normalized)) {
     window.localStorage.setItem(key, fallback);
     return fallback;
   }
