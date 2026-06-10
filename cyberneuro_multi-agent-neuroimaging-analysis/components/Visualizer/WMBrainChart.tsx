@@ -391,13 +391,26 @@ export const WMBrainChart: React.FC<WMBrainChartProps> = ({ data, externalPatien
     if (!rawCsvText) return;
     setIsScoring(true);
     setScoringError('');
+    const alignUrl = getAlignUrl();
+    const postScoring = () => fetch(alignUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csv_text: rawCsvText, tract: selectedTract, metric: selectedMetric }),
+    });
     try {
-      const alignUrl = getAlignUrl();
-      const response = await fetch(alignUrl, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv_text: rawCsvText, tract: selectedTract, metric: selectedMetric }),
-      });
-      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+      let response = await postScoring();
+      // The free-tier MCP space rate-limits bursts (429). Retry once after a
+      // short backoff so a transient throttle doesn't surface as an error.
+      if (response.status === 429) {
+        await new Promise(r => setTimeout(r, 1500));
+        response = await postScoring();
+      }
+      if (!response.ok) {
+        const detail = response.status === 429
+          ? `Normative scoring backend is rate-limited (HTTP 429). Wait a few seconds and click "Run Normative Scoring" again.`
+          : `Normative scoring backend returned HTTP ${response.status} at ${alignUrl}. The backend is reachable but failed to score — check the tract/metric and backend logs.`;
+        setScoringError(detail);
+        return;
+      }
       const result = await response.json();
       if (result.scores) {
         setPatients(prev => prev.map((p, idx) => ({ ...p, centileScore: result.scores[idx]?.centile_score ?? undefined })));
@@ -405,7 +418,7 @@ export const WMBrainChart: React.FC<WMBrainChartProps> = ({ data, externalPatien
         setScoringError(result.error);
       }
     } catch {
-      setScoringError('Normative scoring backend not reachable at ' + getAlignUrl() + '. Ensure the MCP backend is running and the backend URL is configured.');
+      setScoringError('Normative scoring backend not reachable at ' + alignUrl + '. Ensure the MCP backend is running and the backend URL is configured.');
     } finally {
       setIsScoring(false);
     }
