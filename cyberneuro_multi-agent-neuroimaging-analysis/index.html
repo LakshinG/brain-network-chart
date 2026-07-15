@@ -90,10 +90,12 @@
       }
       /* When collapsed, slide the panel down so only the tab remains visible */
       #visitor-map-banner.collapsed { transform: translateY(100%); }
+      /* Tab docks bottom-left to stay clear of the chat composer's Send button
+         (bottom-right of the app's right panel). */
       #visitor-map-toggle {
         position: absolute;
         top: -28px;
-        right: 16px;
+        left: 16px;
         height: 28px;
         padding: 0 12px;
         display: inline-flex;
@@ -121,9 +123,9 @@
         overflow: hidden;
       }
     </style>
-    <div id="visitor-map-banner">
+    <div id="visitor-map-banner" class="collapsed">
       <button id="visitor-map-toggle" type="button"
-              aria-controls="visitor-map-panel" aria-expanded="true"
+              aria-controls="visitor-map-panel" aria-expanded="false"
               onclick="(function(b){var c=b.classList.toggle('collapsed');this.setAttribute('aria-expanded', String(!c));}).call(this, document.getElementById('visitor-map-banner'))">
         <span>Visitor map</span>
         <span class="chev" aria-hidden="true">▾</span>
