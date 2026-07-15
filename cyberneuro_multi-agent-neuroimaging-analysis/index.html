@@ -120,6 +120,23 @@
         max-height: 220px;
         overflow: hidden;
       }
+      /* The map.js widget sizes itself to its parent's width (w=a means
+         adaptive), so it must live in a fixed-width box — otherwise it
+         renders a viewport-wide map. Also hard-cap anything it injects. */
+      #visitor-map-widget-box {
+        width: 320px;
+        max-width: 90vw;
+        max-height: 200px;
+        overflow: hidden;
+      }
+      #visitor-map-widget-box div,
+      #visitor-map-widget-box a,
+      #visitor-map-widget-box img,
+      #visitor-map-widget-box canvas,
+      #visitor-map-widget-box iframe {
+        max-width: 100% !important;
+        max-height: 200px !important;
+      }
     </style>
     <div id="visitor-map-banner" class="collapsed">
       <button id="visitor-map-toggle" type="button"
@@ -129,9 +146,12 @@
         <span class="chev" aria-hidden="true">▾</span>
       </button>
       <div id="visitor-map-panel">
-        <script type="text/javascript" id="mapmyvisitors"
-                src="//mapmyvisitors.com/map.js?d=GZumtsJdo4jDnnw7HH45fJf67frmEtgjtHEhoAexSds&cl=ffffff&w=a"
-                async="async"></script>
+        <!-- Official snippet verbatim (no async: map.js relies on finding
+             its own script tag at parse time to place the widget). -->
+        <div id="visitor-map-widget-box">
+          <script type="text/javascript" id="mapmyvisitors"
+                  src="//mapmyvisitors.com/map.js?d=GZumtsJdo4jDnnw7HH45fJf67frmEtgjtHEhoAexSds&cl=ffffff&w=a"></script>
+        </div>
       </div>
     </div>
   </body>
