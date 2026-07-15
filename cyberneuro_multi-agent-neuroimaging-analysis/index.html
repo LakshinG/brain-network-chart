@@ -64,5 +64,22 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
+
+    <!--
+      Visitor tracking widget (mapmyvisitors.com)
+      -----------------------------------------------------------------
+      1. Sign in at https://mapmyvisitors.com and add this site's URL.
+      2. Copy the generated widget snippet from your dashboard.
+      3. Replace YOUR_MAPMYVISITORS_ID below with the "d=" value from
+         that snippet (it is unique to your site).
+      The badge renders fixed in the bottom-right corner.
+    -->
+    <div id="visitor-map-badge"
+         style="position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+                opacity: 0.85; max-width: 120px;">
+      <script type="text/javascript" id="mapmyvisitors"
+              src="//mapmyvisitors.com/map.js?d=YOUR_MAPMYVISITORS_ID&cl=ffffff&w=a"
+              async="async"></script>
+    </div>
   </body>
 </html>
